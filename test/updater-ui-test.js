@@ -20,13 +20,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const vis = (id) => page.evaluate((i) => !document.getElementById(i).classList.contains('hidden'), id);
   const txt = (id) => page.evaluate((i) => document.getElementById(i).textContent, id);
 
-  // ---- 0. as shipped (placeholder repository): nothing is asked, nothing is contacted ----
+  // ---- 0. as shipped: the project's repository is set, but nothing is contacted until you say yes ----
   await sleep(800);
-  check('placeholder repository: no question and no bar', !(await vis('updateBanner')));
   const st0 = await page.evaluate(() => window.updaterApi.status());
-  check('status says "not set up"', st0.ok && st0.configured === false);
-  const man0 = await page.evaluate(() => window.updaterApi.check(true));
-  check('a manual check says "not set up" without contacting anyone', man0.notConfigured === true);
+  check('as shipped: the repository is set and checking is not switched on yet', st0.ok && st0.configured === true && st0.enabled !== true, JSON.stringify(st0));
 
   // ---- pretend GitHub is configured and has 9.9.9 ----
   await app.evaluate(({ ipcMain, app }) => {

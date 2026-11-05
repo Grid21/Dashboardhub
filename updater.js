@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 
 // The GitHub repository to look at, as "owner/name". Until you set it, update checks stay switched off.
-const UPDATE_REPO = 'OWNER/REPO';
+const UPDATE_REPO = 'Grid21/Dashboardhub';
 
 const MAX_JSON = 1024 * 1024;
 const MAX_DOWNLOAD = 40 * 1024 * 1024;

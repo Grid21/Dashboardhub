@@ -1,6 +1,6 @@
 node_modules/
 dist/
 update-files/
-*.hubupdate
+.hubupdate
 *.log
 .DS_Store

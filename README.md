@@ -90,6 +90,7 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 ### Network map extras
 - **Link speed** on every device pane (wired and Wi-Fi, in both directions), with a manual setting for cables that no router can report, and an uplink speed for switches.
 - **File-sharing detection**: marks machines that offer SMB, NFS, Apple file sharing, FTP, WebDAV, rsync or iSCSI. A "List shares" button shows what a machine shares (when it allows it without a login), and the network path can be copied in one click.
+- **DNS server detection**: finds which machines answer DNS (your router, a Pi-hole, a Windows or Linux DNS server) and says what software they run. It shows this in the device pane, along with a list of the DNS servers on the network. Which server a phone or smart device is set to use can't be seen from outside, and the app says so instead of guessing.
 - **Network printers** are detected and shown as their own type.
 - **Game console detection** (PlayStation, Xbox, Nintendo, Steam Deck).
 - **Services list** per machine: see detected web services and VPNs, rename or hide them, and open them in your browser.

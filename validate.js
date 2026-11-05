@@ -151,6 +151,8 @@ function cleanNetDevice(key, d) {
     uplinkSpeed: Number.isFinite(o.uplinkSpeed) && o.uplinkSpeed >= 1 && o.uplinkSpeed <= 200000 ? o.uplinkSpeed : null,
     shares: Array.isArray(o.shares) ? o.shares.slice(0, 60).filter((s) => s && typeof s === 'object' && typeof s.name === 'string' && s.name).map((s) => ({ name: cleanText(s.name, 120), type: cleanText(s.type || 'Disk', 10), comment: cleanText(s.comment || '', 120), proto: s.proto === 'NFS' ? 'NFS' : 'SMB' })) : [],
     sharesAt: Number.isFinite(o.sharesAt) ? o.sharesAt : null,
+    dns: o.dns && typeof o.dns === 'object' && o.dns.server === true ? { server: true, recursive: o.dns.recursive === true, refused: o.dns.refused === true, software: cleanText(o.dns.software || '', 60) } : null,
+    dnsAt: Number.isFinite(o.dnsAt) ? o.dnsAt : null,
     speedSet: Number.isFinite(o.speedSet) && o.speedSet >= 1 && o.speedSet <= 200000 ? o.speedSet : null,
     linkSpeed: o.linkSpeed && typeof o.linkSpeed === 'object' && Number.isFinite(o.linkSpeed.mbps) && o.linkSpeed.mbps >= 1 && o.linkSpeed.mbps <= 200000 ? { mbps: o.linkSpeed.mbps, wireless: o.linkSpeed.wireless === true } : null,
     manual: manual,

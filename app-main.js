@@ -757,6 +757,15 @@ ipcMain.handle('net:shares', async (event, ip) => {
   try { return await scanner.listShares(String(ip || '')); } catch (e) { return { ok: false, error: 'The share list could not be read.' }; }
 });
 
+ipcMain.handle('net:dns', async (event, ips) => {
+  checkSender(event);
+  try {
+    const list = (Array.isArray(ips) ? ips : []).filter((x) => typeof x === 'string' && /^\d{1,3}(\.\d{1,3}){3}$/.test(x) && connectors.isPrivateIp(x)).slice(0, 512);
+    if (!list.length) return { ok: true, results: {} };
+    return { ok: true, results: await require('./dns-probe').probeMany(list, 24) };
+  } catch (e) { return { ok: false, error: 'DNS could not be checked.' }; }
+});
+
 ipcMain.handle('net:cancel', (event) => {
   checkSender(event);
   if (activeScan) activeScan.cancel();

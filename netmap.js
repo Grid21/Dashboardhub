@@ -92,6 +92,8 @@
       speedSet: speedNum(d.speedSet),
       shares: Array.isArray(d.shares) ? d.shares.slice(0, 60).filter((s) => s && typeof s === 'object' && s.name).map((s) => ({ name: text(s.name, 120), type: text(s.type || 'Disk', 10), comment: text(s.comment || '', 120), proto: ['SMB', 'NFS'].includes(s.proto) ? s.proto : 'SMB' })) : [],
       sharesAt: Number.isFinite(d.sharesAt) ? d.sharesAt : null,
+      dns: d.dns && typeof d.dns === 'object' && d.dns.server === true ? { server: true, recursive: d.dns.recursive === true, refused: d.dns.refused === true, software: text(d.dns.software || '', 60) } : null,
+      dnsAt: Number.isFinite(d.dnsAt) ? d.dnsAt : null,
       uplinkSpeed: speedNum(d.uplinkSpeed),
       uplinkPort: d.uplinkPort ? text(d.uplinkPort, 30) : null,
       osOverride: OS_NAMES[d.osOverride] && d.osOverride !== 'router' ? d.osOverride : null,
@@ -1348,6 +1350,28 @@
         side.appendChild(table);
       }
 
+      // DNS: is this machine a DNS server? (What each device USES cannot be seen from outside, so say so honestly.)
+      if (d.ip) {
+        if (d.dns && d.dns.server) {
+          const sw = d.dns.software ? ' (' + d.dns.software + ')' : '';
+          side.appendChild(el('p', 'small-note', 'DNS server: yes' + sw + '. ' + (d.dns.recursive ? 'It looks names up for other devices (a resolver or forwarder).' : d.dns.refused ? 'It answers on the DNS port but refuses ordinary lookups from here.' : 'It answers on the DNS port.')));
+        }
+        const others = dnsServers();
+        if (others.length) side.appendChild(el('p', 'small-note', 'DNS servers found on this network: ' + others.map((x) => (x.isRouter ? 'router' : (x.label || x.name || x.ip)) + ' ' + x.ip + (x.dns.software ? ' (' + x.dns.software + ')' : '')).join(', ') + '. Which one a device uses is set on the device, or handed out by your router; it cannot be seen from outside.'));
+        else if (d.dnsAt) side.appendChild(el('p', 'small-note', 'No DNS server was found among the machines checked so far.'));
+        const rowD = el('div', 'btnrow');
+        rowD.appendChild(btn(d.dnsAt ? 'Check DNS again' : 'Check DNS', async () => {
+          setStatus('Asking ' + title(d) + ' whether it is a DNS server...');
+          let r; try { r = await window.netApi.dns([d.ip]); } catch (e) { r = { ok: false }; }
+          if (!r || !r.ok) { setStatus('DNS could not be checked.', true); return; }
+          const x = r.results[d.ip] || { server: false };
+          d.dns = x.server ? { server: true, recursive: x.recursive === true, refused: x.refused === true, software: text(x.software || '', 60) } : null;
+          d.dnsAt = Date.now(); save(); renderSide();
+          setStatus(x.server ? title(d) + ' is a DNS server.' : title(d) + ' is not a DNS server.');
+        }));
+        side.appendChild(rowD);
+      }
+
       const kinds = shareKinds(d);
       if (kinds.length || (d.shares && d.shares.length)) {
         side.appendChild(el('h4', null, '\uD83D\uDCC1 File sharing'));
@@ -1884,6 +1908,32 @@
   document.addEventListener('mouseup', () => { sideMouseDown = false; }, true);
   function sideIsBusy() { return els.side.contains(document.activeElement) && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName); }
 
+  // ---------- DNS servers ----------
+  // After a scan, every online machine is asked (once an hour at most) whether it is a DNS server.
+  let dnsBusy = false;
+  async function dnsSweep(force) {
+    if (dnsBusy || !window.netApi || !window.netApi.dns) return;
+    const now = Date.now();
+    const todo = devices().filter((d) => d.ip && d.online !== false && (force || !d.dnsAt || now - d.dnsAt > 3600 * 1000));
+    if (!todo.length) return;
+    dnsBusy = true;
+    try {
+      const r = await window.netApi.dns(todo.map((d) => d.ip));
+      if (r && r.ok && r.results) {
+        todo.forEach((d) => {
+          const x = r.results[d.ip];
+          if (!x) return;
+          d.dns = x.server ? { server: true, recursive: x.recursive === true, refused: x.refused === true, software: text(x.software || '', 60) } : null;
+          d.dnsAt = now;
+        });
+        save();
+        if (!sideIsBusy()) renderSide();
+      }
+    } catch (e) { /* DNS is a bonus: a failure changes nothing */ }
+    dnsBusy = false;
+  }
+  function dnsServers() { return devices().filter((d) => d.dns && d.dns.server && d.online !== false); }
+
   function onScanEvent(m) {
     if (!m || typeof m !== 'object' || !scanKind) return;
     const bg = scanKind === 'background';
@@ -2382,6 +2432,7 @@
 
   // ---------- what routers and switches told us (see connections-ui.js) ----------
   const scanDoneHooks = [];
+  scanDoneHooks.push(() => { dnsSweep(false); });
   function applyConnector(res) {
     if (!res || !res.ok || !net) return { clients: 0, created: 0 };
     if (guardStopped()) return { clients: 0, created: 0 };
@@ -2910,6 +2961,7 @@
     svcIds: function () { return Array.from(svcObjs.keys()); },
     svcScreen: function (id) { const o = svcObjs.get(id); if (!o || !canvas) return null; const v = o.mesh.position.clone().project(camera); const r = canvas.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
     typeFilterSize: function () { return typeFilter.size; },
+    dnsSweep: function (force) { return dnsSweep(force); },
     isShown: function (key) { const n = nodes.get(key); return !!(n && n.group.visible && n.shown); },
     scaleOf: function (key) { const n = nodes.get(key); return n ? n.scale : null; },
     isDotted: function (id) { const o = linkObjs.get(id); return !!(o && o.vis.material.alphaMap); },

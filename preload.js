@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('netApi', {
   wake: (macs) => ipcRenderer.invoke('net:wake', macs),
   bandwidth: () => ipcRenderer.invoke('bw:sample'),
   shares: (ip) => ipcRenderer.invoke('net:shares', ip),
+  dns: (ips) => ipcRenderer.invoke('net:dns', Array.isArray(ips) ? ips.slice(0, 512).map(String) : []),
   onEvent: (callback) => {
     ipcRenderer.removeAllListeners('net:event');
     ipcRenderer.on('net:event', (event, message) => callback(message));

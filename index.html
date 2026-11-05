@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Dashboard Hub</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="toolbar">
+    <div class="brand">Dashboard Hub</div>
+    <div class="tabs" role="tablist">
+      <button id="tabPanels" class="tab active" type="button" role="tab">Panels</button>
+      <button id="tabMap" class="tab" type="button" role="tab">Network Map</button>
+      <button id="profilesBtn" class="tab" type="button" title="The network profile in use. Click to open Settings, where you can switch profiles." aria-haspopup="true" aria-expanded="false">Profile</button>
+    </div>
+    <nav id="jump" class="jump panels-only" aria-label="Jump to panel"></nav>
+    <div class="spacer map-only"></div>
+    <div class="controls">
+      <label class="panels-only">Columns
+        <select id="columns">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+        </select>
+      </label>
+      <label class="panels-only">Panel height
+        <select id="height">
+          <option value="400">Small</option>
+          <option value="600">Medium</option>
+          <option value="800">Large</option>
+          <option value="full">Full screen</option>
+        </select>
+      </label>
+      <button id="serversBtn" title="Log in to your Linux servers over SSH">&gt;_ Servers</button>
+      <div class="profile-control settings-control">
+        <button id="settingsBtn" type="button" aria-haspopup="true" title="Network profiles, backup and background running">&#9881; Settings &#9662;</button>
+        <div id="profilesMenu" class="profile-menu hidden" role="menu" aria-label="Settings">
+          <div class="menu-head">Network profile</div>
+          <div id="profileChoices"></div>
+          <div class="profile-menu-sep"></div>
+          <button type="button" id="profileNew" role="menuitem">New profile...</button>
+          <button type="button" id="profileDuplicate" role="menuitem">Duplicate profile...</button>
+          <button type="button" id="profileRename" role="menuitem">Rename profile...</button>
+          <button type="button" id="profileLock" role="menuitem" title="A locked profile's map is never changed by scans or router checks">Lock map</button>
+          <button type="button" id="profileRemove" role="menuitem">Remove profile</button>
+          <div class="profile-menu-sep"></div>
+          <button type="button" id="bmcMenuBtn" role="menuitem" title="Status and power control for servers with iLO, iDRAC or another BMC">Server management (iLO / iDRAC)...</button>
+          <button type="button" id="toolsMenuBtn" role="menuitem" title="Unpack a .hubupdate file into its source files, or pack a folder back into a .hubupdate file">Update file tools (unpack / pack)...</button>
+          <button type="button" id="backupBtn" role="menuitem" title="Export or import your panels, servers, notes and network profiles">Backup...</button>
+          <div class="profile-menu-sep"></div>
+          <label class="menu-check" title="Closing the window (X) hides Dashboard Hub in the system tray instead of quitting"><input type="checkbox" id="trayCheck"> Keep running in the background when I close the window (X)</label>
+          <div class="menu-note" id="trayHint"></div>
+          <label class="menu-check" title="Use the graphics card (GPU) to draw the 3D map and panels. Switch off only if the app looks broken or flickers."><input type="checkbox" id="gpuCheck"> Use the graphics card (GPU) for smoother drawing</label>
+          <div class="menu-note" id="gpuHint"></div>
+          <button type="button" id="gpuRestart" role="menuitem" hidden>Restart now to apply</button>
+          <label class="menu-check" title="The green lines on the network map fade gently in and out, like link lights on a switch. Untick for steady lines."><input type="checkbox" id="pulseCheck" checked> Gently blink the network lines on the map</label>
+          <label class="menu-check" title="Once in a while, ask GitHub whether a newer Dashboard Hub exists. Nothing is installed unless you click Install."><input type="checkbox" id="updAuto"> Check for new versions automatically (contacts GitHub)</label>
+          <button type="button" id="updCheckNow" role="menuitem">Check for updates now</button>
+          <div class="menu-note" id="updHint"></div>
+          <div class="menu-note" id="settingsMsg"></div>
+        </div>
+      </div>
+      <button id="updatesBtn" title="Install an update from a file">Updates</button>
+      <button id="reloadApp" title="Reload Dashboard Hub (Ctrl+R or F5)">&#8635; Reload</button>
+      <button id="reloadAll" class="panels-only" title="Reload every panel">&#8635; Reload all</button>
+      <button id="addBtn" class="primary panels-only">+ Add panel</button>
+    </div>
+  </header>
+  <div id="updateBanner" class="update-banner hidden" role="status" aria-live="polite">
+    <div class="ub-text"><strong id="ubTitle"></strong> <span id="ubSub"></span></div>
+    <details id="ubNotes" class="ub-notes hidden"><summary>What's new</summary><pre id="ubNotesText"></pre></details>
+    <div class="ub-actions">
+      <button type="button" id="ubInstall" class="primary hidden">Install now</button>
+      <button type="button" id="ubOpenPage" class="hidden">Where to get it</button>
+      <button type="button" id="ubLater" class="hidden">Remind me later</button>
+      <button type="button" id="ubSkip" class="hidden">Skip this version</button>
+      <button type="button" id="ubYes" class="primary hidden">Yes, check for updates</button>
+      <button type="button" id="ubNo" class="hidden">No thanks</button>
+      <button type="button" id="ubRestart" class="primary hidden">Restart now</button>
+      <button type="button" id="ubClose" class="hidden">Close</button>
+    </div>
+  </div>
+
+  <main id="grid" class="grid"></main>
+
+  <div id="empty" class="empty hidden">
+    <h2>No panels yet</h2>
+    <p>Click <b>+ Add panel</b> and enter a name and the address of one of your web interfaces,<br>
+       for example <code>192.168.1.50:3001</code></p>
+  </div>
+
+  <section id="mapView" class="map-view">
+    <div id="netGuard" class="net-guard hidden" role="alert"></div>
+    <div class="map-bar">
+      <button id="mapBwBtn" type="button" aria-expanded="false" title="Show or hide live upload and download speeds for your network">&#9201; Bandwidth</button>
+      <button id="mapListBtn" type="button" title="Show a list of all machines, to select several and set their type, connection and group at once">&#9776; Devices</button>
+      <label>Network
+        <select id="mapIface"></select>
+      </label>
+      <input id="mapCidr" type="text" class="hidden" placeholder="192.168.0.0/24" spellcheck="false" autocomplete="off" title="Network to scan, like 192.168.0.0/24">
+      <label>Router
+        <input id="mapRouter" type="text" value="192.168.0.1" spellcheck="false" autocomplete="off" size="14" title="The machine in the center of the map">
+      </label>
+      <label>Scan
+        <select id="mapMode">
+          <option value="quick">Quick (common ports, about 15 seconds)</option>
+          <option value="thorough">Thorough (ports 1-1024, a few minutes)</option>
+        </select>
+      </label>
+      <button id="mapScan" class="primary" type="button">Scan network</button>
+      <button id="mapStop" class="hidden" type="button">Stop</button>
+      <span id="mapStatus" class="map-status"></span>
+      <label>Live update
+        <select id="mapLive" title="Quietly checks for machines joining and leaving, without interrupting you">
+          <option value="0">Off</option>
+          <option value="15">Every 15 seconds</option>
+          <option value="30">Every 30 seconds</option>
+          <option value="60">Every minute</option>
+          <option value="120">Every 2 minutes</option>
+          <option value="300">Every 5 minutes</option>
+          <option value="600">Every 10 minutes</option>
+          <option value="1800">Every 30 minutes</option>
+        </select>
+      </label>
+      <label>Alerts
+        <select id="mapAlerts" title="Get told when a machine joins or leaves your network">
+          <option value="off">Off</option>
+          <option value="app">In the app</option>
+          <option value="desktop">App + desktop notice</option>
+        </select>
+      </label>
+      <span id="mapLiveDot" class="live-dot" title=""></span><span id="mapLiveText" class="map-status"></span>
+      <span class="spacer"></span>
+      <button id="mapConnBtn" type="button" title="Connect to your router, switch or controller to see exactly which devices it knows, and whether each is on Wi-Fi or cable">Router &amp; switch links</button>
+      <button id="mapAddSwitch" type="button" title="Put a switch on the map (switches usually cannot be found by scanning)">Add switch</button>
+      <button id="mapCable" type="button" title="For a switch that cannot be found by scanning (an unmanaged switch): click one machine, then the other, to draw the real cable between them. The map never changes or removes a cable you draw.">Draw physical cable</button>
+      <button id="mapConnect" type="button" title="Click one machine, then another, to draw a line between them. Click the same pair again to remove the line.">Draw lines</button>
+      <button id="mapTop" type="button" title="Look straight down on the map">Top view</button>
+      <button id="mapReset" type="button" title="Back to the starting camera angle">Reset view</button>
+      <button id="mapTidy" type="button" title="Put every machine back in a neat spiral around the router">Tidy up</button>
+      <label class="check-inline"><input type="checkbox" id="mapOffline" checked> Show offline</label>
+      <label class="check-inline" title="Show the services (web apps, Docker containers, VPNs...) found on each machine as small boxes around it"><input type="checkbox" id="mapServices"> Show services</label>
+    </div>
+    <div class="map-progress hidden" id="mapProgress"><div id="mapProgressBar"></div></div>
+    <div class="map-main">
+      <div id="mapWrap" class="map-wrap">
+        <div id="mapHint" class="map-hint"></div>
+        <div id="mapLegend" class="map-legend"></div>
+        <div id="mapTip" class="map-tip hidden"></div>
+        <div id="mapEmpty" class="map-empty hidden"></div>
+        <div id="mapToasts" class="map-toasts"></div>
+        <div id="mapList" class="map-list closed" aria-hidden="true"></div>
+        <div id="bwPanel" class="bw-panel closed" aria-hidden="true" role="region" aria-label="Bandwidth Monitor"></div>
+      </div>
+      <aside id="mapSide" class="map-side"></aside>
+    </div>
+  </section>
+
+  <dialog id="dialog">
+    <form method="dialog" id="form">
+      <h3 id="dialogTitle">Add panel</h3>
+      <label>Name
+        <input id="nameInput" type="text" placeholder="Uptime Kuma" required autocomplete="off">
+      </label>
+      <label>Address
+        <input id="urlInput" type="text" placeholder="192.168.1.50:3001" required autocomplete="off">
+      </label>
+      <p class="hint">If you leave off http:// it is added for you. Use https:// for secure ones like TrueNAS.</p>
+      <div class="dialog-buttons">
+        <button type="button" id="cancelBtn">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="profileDialog" class="profile-dialog">
+    <form id="profileForm" method="dialog">
+      <h3 id="profileDialogTitle">Network profile</h3>
+      <p id="profileDialogMessage" class="hint"></p>
+      <label id="profileNameLabel">Profile name
+        <input id="profileNameInput" type="text" maxlength="50" autocomplete="off" required>
+      </label>
+      <div class="dialog-buttons">
+        <button type="button" id="profileCancel">Cancel</button>
+        <button type="submit" id="profileConfirm" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="notesDialog">
+    <h3 id="notesTitle">Notes</h3>
+    <textarea id="notesText" class="masked" rows="8" spellcheck="false" autocomplete="off"
+              placeholder="Username, password, anything you want to remember for this panel"></textarea>
+    <p class="hint">Saved encrypted using your computer login (your Windows account, or the Linux keyring).
+       The file cannot be read on another computer or account, but anyone using this app while signed in as you can read it.</p>
+    <p id="notesMsg" class="notes-msg"></p>
+    <div class="dialog-buttons">
+      <button type="button" id="revealBtn">Reveal</button>
+      <span class="spacer"></span>
+      <button type="button" id="notesCancel">Cancel</button>
+      <button type="button" id="notesSave" class="primary">Save</button>
+    </div>
+  </dialog>
+
+  <dialog id="bmcDialog" class="wide">
+    <h3>Server management (iLO, iDRAC, BMC)</h3>
+    <p class="hint">Servers have a small separate computer inside, the BMC (HPE iLO, Dell iDRAC, Supermicro, Lenovo XCC...). It stays on when the server is off,
+       so Dashboard Hub can read the server's power state, health and temperatures, and switch it on. The login is stored encrypted and is never put in a backup.</p>
+    <div id="bmcList"></div>
+    <h4 id="bmcFormTitle">Add a server</h4>
+    <div class="bmc-form">
+      <label>Name <input type="text" id="bmcName" maxlength="60" placeholder="Dad's server"></label>
+      <label>BMC address <input type="text" id="bmcHost" maxlength="40" placeholder="192.168.1.50"></label>
+      <label>Port <input type="text" id="bmcPort" maxlength="5" value="443"></label>
+      <label class="check"><input type="checkbox" id="bmcHttps" checked> Secure connection (https)</label>
+      <label>User name <input type="text" id="bmcUser" maxlength="80" autocomplete="off"></label>
+      <label>Password <input type="password" id="bmcPass" maxlength="200" autocomplete="new-password" placeholder=""></label>
+      <label>The server it manages (optional, shows its status in that machine's pane)
+        <select id="bmcMac"></select></label>
+    </div>
+    <p id="bmcMsg" class="notes-msg"></p>
+    <div class="dialog-buttons"><button type="button" id="bmcSave" class="primary">Test and save</button><button type="button" id="bmcCancelEdit" class="hidden">Cancel edit</button><button type="button" id="bmcClose">Close</button></div>
+  </dialog>
+
+  <dialog id="backupDialog" class="wide">
+    <h3>Backup and sharing</h3>
+
+    <h4>Export</h4>
+    <p class="hint">Saves your panels, servers, layout and network map to a file you can keep as a backup or send to a friend.
+       The file contains your local addresses and server usernames.</p>
+    <label class="check"><input type="checkbox" id="exportNotes">
+      Also include my notes and passwords (saved as plain text in the file. Only for your own private backup.)</label>
+    <div class="dialog-buttons left"><button type="button" id="exportBtn" class="primary">Export to file...</button></div>
+
+    <h4>Import</h4>
+    <p class="hint">Loads panels, servers and the network map from a backup file. Only normal web addresses are accepted,
+       and anything unusual in the file is skipped.</p>
+    <label class="check"><input type="checkbox" id="importReplace">
+      Replace my current panels, servers and network map instead of adding to them</label>
+    <div class="dialog-buttons left"><button type="button" id="importBtn">Import from file...</button></div>
+
+    <p id="backupMsg" class="notes-msg"></p>
+    <div class="dialog-buttons"><button type="button" id="backupClose">Close</button></div>
+  </dialog>
+
+  <dialog id="updateDialog">
+    <h3>Updates</h3>
+    <p id="updateVersion" class="hint"></p>
+    <p id="updateNote" class="hint"></p>
+    <p class="hint">To update, choose the update file you were given (it ends in .hubupdate). The app checks it,
+       installs it, and then needs to be closed and opened again. Your panels, notes, map and settings are kept.</p>
+    <div id="updateProblem" class="problem hidden">
+      <h4 id="updateProblemTitle"></h4>
+      <p id="updateProblemWhat"></p>
+      <p class="problem-sub">What you can do:</p>
+      <ul id="updateProblemTips"></ul>
+      <p class="problem-sub">Technical details (send these if you ask for help):</p>
+      <pre id="updateProblemDetail"></pre>
+      <div class="dialog-buttons left">
+        <button type="button" id="updateProblemCopy">Copy details</button>
+        <button type="button" id="updateProblemOk" class="primary">Got it</button>
+      </div>
+    </div>
+    <p id="updateMsg" class="notes-msg"></p>
+    <div class="dialog-buttons left">
+      <button type="button" id="updateInstall" class="primary">Install update from file...</button>
+      <button type="button" id="updateRevertPrev" class="hidden">Go back to last working version</button>
+      <button type="button" id="updateRevert" class="hidden">Go back to built-in version</button>
+    </div>
+    <div class="dialog-buttons">
+      <button type="button" id="updateRestart" class="primary hidden">Restart now</button>
+      <button type="button" id="updateQuit" class="hidden">Close the app</button>
+      <span class="spacer"></span>
+      <button type="button" id="updateClose">Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="toolsDialog" class="wide">
+    <h3>Update file tools</h3>
+    <p class="hint">For people who want to look inside an update, change it, or make their own. Unpack turns a <code>.hubupdate</code> file into a folder of
+       ordinary source files. Pack turns such a folder back into a <code>.hubupdate</code> file you can install from the Updates window.</p>
+    <h4>Unpack (decompile) a .hubupdate</h4>
+    <div class="dialog-buttons left"><button type="button" id="toolsUnpack" class="primary">Open file...</button></div>
+    <h4>Pack (compile) a folder into a .hubupdate</h4>
+    <div class="dialog-buttons left"><button type="button" id="toolsPackPick" class="primary">Open folder...</button></div>
+    <div id="toolsPackForm" class="hidden">
+      <p class="hint" id="toolsPackInfo"></p>
+      <label>Version <input id="toolsVersion" type="text" placeholder="1.10.3" maxlength="14" spellcheck="false"></label>
+      <label>What changed (shown to people who install it) <textarea id="toolsNotes" rows="3" maxlength="2000"></textarea></label>
+      <div class="dialog-buttons left"><button type="button" id="toolsPackGo" class="primary">Create update file...</button></div>
+    </div>
+    <p id="toolsMsg" class="notes-msg"></p>
+    <div class="dialog-buttons">
+      <button type="button" id="toolsReveal" class="hidden">Show it in its folder</button>
+      <span class="spacer"></span>
+      <button type="button" id="toolsClose">Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="connDialog" class="wide">
+    <h3>Router &amp; switch links</h3>
+    <p class="hint">Dashboard Hub can ask your router, switches, access points or controller which devices they can see: names, which are on Wi-Fi
+       or cable, and which switch port each one uses. It only ever <b>reads</b> lists; it never changes any setting.
+       Logins are stored encrypted on this computer and are never put in a backup.</p>
+    <div id="connList" class="conn-list"></div>
+    <details id="snmpFind" class="snmp-find">
+      <summary>Find devices that speak SNMP</summary>
+      <p class="hint">Asks each machine on your map whether it answers SNMP (the standard way switches and routers share their ports and traffic), then lets you add the ones that do with one click. Read-only. A device that has SNMP switched off, or uses a different community name, stays silent.</p>
+      <label>Community names to try (separated by commas)<input id="snmpFindNames" type="text" maxlength="200" value="public" spellcheck="false" autocomplete="off"></label>
+      <div class="dialog-buttons left"><button type="button" id="snmpFindGo">Search my network</button><button type="button" id="snmpFindStop" class="hidden">Stop</button></div>
+      <p id="snmpFindMsg" class="notes-msg" aria-live="polite"></p>
+      <div id="snmpFindList" class="conn-list"></div>
+    </details>
+    <h4 id="connFormTitle">Add a connection</h4>
+    <div class="conn-form">
+      <label>What is it?<select id="connType"></select></label>
+      <p id="connHelp" class="hint"></p>
+      <label>Name (your own label, optional)<input id="connName" type="text" maxlength="40" placeholder="for example: Office switch"></label>
+      <label id="connHostRow">Address on your network<input id="connHost" type="text" maxlength="15" placeholder="192.168.0.1" spellcheck="false" autocomplete="off"></label>
+      <label id="connPortRow">Port<input id="connPort" type="text" maxlength="5" spellcheck="false" autocomplete="off"></label>
+      <label id="connHttpsRow" class="check"><input id="connHttps" type="checkbox"> Use a secure (https) connection</label>
+      <label id="connSnmpRow">SNMP version<select id="connSnmpVer">
+        <option value="2">2c (a community name, the usual choice)</option>
+        <option value="3">3 (a user name and passwords, more secure)</option>
+        <option value="1">1 (very old devices)</option>
+      </select></label>
+      <label id="connUserRow"><span id="connUserLabel">User name</span><input id="connUser" type="text" maxlength="120" spellcheck="false" autocomplete="off"></label>
+      <label><span id="connSecretLabel">Password</span><input id="connSecret" type="password" maxlength="200" autocomplete="new-password" placeholder=""></label>
+      <label id="connV3Auth">Authentication type<select id="connAuthProto">
+        <option value="sha">SHA</option><option value="sha256">SHA-256</option><option value="md5">MD5</option><option value="none">None (no password at all)</option>
+      </select></label>
+      <label id="connV3Priv">Encryption (privacy) type<select id="connPrivProto">
+        <option value="aes">AES</option><option value="des">DES</option><option value="none">None</option>
+      </select></label>
+      <label id="connSecret2Row">Encryption (privacy) password<input id="connSecret2" type="password" maxlength="200" autocomplete="new-password"></label>
+      <label id="connSiteRow"><span id="connSiteLabel">UniFi site name</span><input id="connSite" type="text" maxlength="40" placeholder="default"></label>
+    </div>
+    <p id="connMsg" class="notes-msg"></p>
+    <div class="dialog-buttons left">
+      <button type="button" id="connTest">Test</button>
+      <button type="button" id="connSave" class="primary">Save</button>
+      <button type="button" id="connNew" class="hidden">New connection</button>
+      <button type="button" id="connSync">Ask them now</button>
+    </div>
+    <div class="dialog-buttons"><span class="spacer"></span><button type="button" id="connClose">Close</button></div>
+  </dialog>
+
+  <dialog id="serversDialog" class="wide">
+    <h3>Linux servers (SSH)</h3>
+    <div id="serverList" class="server-list"></div>
+    <p id="srvMsg" class="notes-msg"></p>
+
+    <form id="serverForm" class="server-form" autocomplete="off">
+      <h4 id="serverFormTitle">Add a server</h4>
+      <div class="row">
+        <label>Name
+          <input id="srvName" type="text" placeholder="Plex box" required>
+        </label>
+        <label>Address
+          <input id="srvHost" type="text" placeholder="192.168.1.60" required>
+        </label>
+      </div>
+      <div class="row">
+        <label>Username
+          <input id="srvUser" type="text" placeholder="root" required>
+        </label>
+        <label>Port
+          <input id="srvPort" type="text" placeholder="22" inputmode="numeric">
+        </label>
+      </div>
+      <div class="dialog-buttons">
+        <button type="button" id="srvCancelEdit" class="hidden">Cancel edit</button>
+        <button type="submit" class="primary" id="srvSave">Save server</button>
+      </div>
+    </form>
+
+    <p class="hint">Connect opens a normal terminal window and logs in with SSH. Type your password there when it
+       asks. It is not stored or typed for you. For password-free login, set up an SSH key.</p>
+    <div class="dialog-buttons">
+      <button type="button" id="srvClose">Close</button>
+    </div>
+  </dialog>
+
+  <script src="vendor/three-bundle.js"></script>
+  <script src="renderer.js"></script>
+  <script src="netmap.js"></script>
+  <script src="connections-ui.js"></script>
+  <script src="bmc-ui.js"></script>
+  <script src="bandwidth-ui.js"></script>
+  <script src="updates.js"></script>
+  <script src="tools-ui.js"></script>
+  <script src="updater-ui.js"></script>
+</body>
+</html>

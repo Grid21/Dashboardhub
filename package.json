@@ -1,0 +1,49 @@
+{
+  "name": "dashboard-hub",
+  "version": "1.10.57",
+  "description": "All my local web panels in one window",
+  "main": "main.js",
+  "author": "Me",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable --publish never",
+    "dist:linux": "electron-builder --linux AppImage --publish never"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "local.dashboard.hub",
+    "productName": "Dashboard Hub",
+    "publish": null,
+    "files": [
+      "*.js",
+      "*.html",
+      "*.css",
+      "package.json",
+      "vendor/**/*",
+      "!test/**",
+      "!tools/**",
+      "!node_modules/**",
+      "!*.md",
+      "!*.hubupdate"
+    ],
+    "win": {
+      "target": "portable",
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "Dashboard-Hub.exe"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Network",
+      "executableName": "dashboard-hub"
+    },
+    "appImage": {
+      "artifactName": "Dashboard-Hub.AppImage"
+    }
+  }
+}

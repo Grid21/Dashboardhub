@@ -41,6 +41,18 @@ function fakeDns(ip, mode) {
   check('Pi-hole is recognised from its banner', b.server && /Pi-hole/.test(b.software), JSON.stringify(b));
   check('a server that refuses lookups is found and said to refuse', c.server && c.refused && !c.recursive, JSON.stringify(c));
   check('a machine with no DNS service is not a DNS server (and fast)', z.server === false);
+  // a server that only answers over TCP (UDP filtered)
+  const tcp = require('net').createServer((c) => { c.on('data', (d) => {
+    const q = d.slice(2); const id = q.slice(0, 2); let pos = 12; while (q[pos] !== 0) pos += q[pos] + 1; pos += 5;
+    const rr = Buffer.from([0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 127, 0, 0, 1]);
+    const body = Buffer.concat([id, Buffer.from([0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0]), q.slice(12, pos), rr]);
+    c.end(Buffer.concat([Buffer.from([body.length >> 8, body.length & 255]), body]));
+  }); });
+  await new Promise((r) => tcp.listen(53, '127.0.0.14', r));
+  const tt = await dnsProbe.probe('127.0.0.14');
+  check('a server that only answers over TCP is still found', tt.server === true && tt.via === 'tcp' && tt.recursive === true, JSON.stringify(tt));
+  check('when nothing answers, the reason is explained in plain words', /No answer on the DNS port \(53\)/.test(z.tried || ''), JSON.stringify(z));
+  tcp.close();
   const many = await dnsProbe.probeMany(['127.0.0.10', '127.0.0.13', '127.0.0.10'], 8);
   check('many at once works and repeats are asked once', Object.keys(many).length === 2 && many['127.0.0.10'].server && !many['127.0.0.13'].server);
   check('the reply parser ignores a wrong answer id', dnsProbe.parseReply(Buffer.from([0, 1, 0x81, 0x80, 0, 1, 0, 0, 0, 0, 0, 0]), 2) === null);
@@ -59,7 +71,7 @@ function fakeDns(ip, mode) {
   const sel = async (k) => { const p = await page.evaluate((k) => window.__hubMap.screenOf(k), k); await page.mouse.click(p.x, p.y); await sleep(500); };
   await sel(B);
   check('a device that was not checked yet offers "Check DNS"', await page.locator('#mapSide button', { hasText: /^Check DNS$/ }).count() === 1);
-  await page.click('#mapSide button:has-text("Check DNS")'); await sleep(1500);
+  await page.click('#mapSide button:has-text("Check DNS")'); await sleep(4000);
   let side = await page.textContent('#mapSide');
   check('a laptop is not a DNS server, and the pane says what cannot be known', !/DNS server: yes/.test(side) && /cannot be seen from outside|No DNS server was found/.test(side), side.slice(0, 400));
   await sel(A); await page.click('#mapSide button:has-text("Check DNS")'); await sleep(1500);
@@ -78,6 +90,15 @@ function fakeDns(ip, mode) {
   check('after a scan every machine is checked automatically (and quiet ones left as non-servers)', sw2.router === 'dnsmasq 2.89' && /Pi-hole/.test(sw2.pi || '') && sw2.lapAt && sw2.lap === null, JSON.stringify(sw2));
   const again = await page.evaluate(() => { const before = window.hubNetmap.exportData().devices.router.dnsAt; return window.__hubMap.dnsSweep(false).then(() => before === window.hubNetmap.exportData().devices.router.dnsAt); });
   check('machines checked in the last hour are not asked again', again === true);
+  // the REAL flow: a scan finishes -> machines are checked by themselves
+  await app.evaluate(({ ipcMain, BrowserWindow }) => {
+    ipcMain.removeHandler('net:scan');
+    ipcMain.handle('net:scan', (e, o) => { setTimeout(() => { const w = BrowserWindow.getAllWindows()[0]; w.webContents.send('net:event', { type: 'host', host: { ip: '127.0.0.11', mac: 'aa:bb:cc:00:00:01', hostname: 'pihole box', ports: [], os: { id: 'linux', label: 'Linux', confidence: 'low', reasons: [] } } }); w.webContents.send('net:event', { type: 'done' }); }, 150); return { ok: true, cidr: o.cidr }; });
+  });
+  await page.evaluate(() => { const x = window.hubNetmap.exportData(); Object.values(x.devices).forEach((d) => { d.dns = null; d.dnsAt = null; }); window.hubNetmap.importData(x, true); });
+  await page.click('#mapScan'); await sleep(3000);
+  const afterScan = await page.evaluate((k) => { const x = window.hubNetmap.exportData().devices; return { router: x.router.dns && x.router.dns.software, pi: x[k].dns && x[k].dns.software, lapAt: !!x['aa:bb:cc:00:00:02'].dnsAt }; }, A);
+  check('after a real scan finishes, DNS servers are found by themselves', afterScan.router === 'dnsmasq 2.89' && /Pi-hole/.test(afterScan.pi || ''), JSON.stringify(afterScan));
   check('the info is only in the device pane, not drawn on the map', await page.evaluate(() => !document.querySelector('#mapLegend').textContent.includes('DNS')));
   check('no page errors', errors.length === 0, errors.join(' | '));
   await app.close(); servers.forEach((s) => s.close());

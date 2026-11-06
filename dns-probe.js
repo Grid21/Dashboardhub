@@ -2,6 +2,7 @@
 // Finds out whether a machine on your own network is a DNS server, by asking it a harmless question over the normal DNS port (53).
 // The questions are about names the machine answers by itself ("localhost", its software version), so nothing is sent out to the internet.
 const dgram = require('dgram');
+const net = require('net');
 const crypto = require('crypto');
 
 function buildQuery(id, name, qtype, qclass) {
@@ -48,10 +49,29 @@ function ask(ip, name, qtype, qclass, timeoutMs) {
     const sock = dgram.createSocket('udp4');
     let done = false;
     const finish = (v) => { if (done) return; done = true; clearTimeout(timer); try { sock.close(); } catch (e) { /* ignore */ } resolve(v); };
-    const timer = setTimeout(() => finish(null), timeoutMs || 700);
+    const timer = setTimeout(() => finish(null), timeoutMs || 1000);
     sock.on('error', () => finish(null));
-    sock.on('message', (m, r) => { if (r.address === ip) { const p = parseReply(m, id); if (p) finish(p); } });
+    // the answer must come from the DNS port and carry our random id (some routers answer from a different address of their own)
+    sock.on('message', (m, r) => { if (r.port === 53) { const p = parseReply(m, id); if (p) finish(p); } });
     try { sock.send(buildQuery(id, name, qtype, qclass), 53, ip, (err) => { if (err) finish(null); }); } catch (e) { finish(null); }
+  });
+}
+
+// the same question over TCP (some networks or firewalls let TCP through when UDP is filtered)
+function askTcp(ip, name, qtype, qclass, timeoutMs) {
+  return new Promise((resolve) => {
+    const id = crypto.randomBytes(2).readUInt16BE(0);
+    const sock = new net.Socket();
+    let done = false, buf = Buffer.alloc(0), state = 'timeout';
+    const finish = (v) => { if (done) return; done = true; clearTimeout(timer); try { sock.destroy(); } catch (e) { /* ignore */ } resolve(v || { none: state }); };
+    const timer = setTimeout(() => finish(null), timeoutMs || 1000);
+    sock.on('error', (e) => { state = e && e.code === 'ECONNREFUSED' ? 'closed' : 'error'; finish(null); });
+    sock.on('connect', () => { state = 'no-answer'; const q = buildQuery(id, name, qtype, qclass); const len = Buffer.from([q.length >> 8, q.length & 255]); sock.write(Buffer.concat([len, q])); });
+    sock.on('data', (d) => {
+      buf = Buffer.concat([buf, d]);
+      if (buf.length >= 2 && buf.length >= 2 + ((buf[0] << 8) | buf[1])) { const p = parseReply(buf.slice(2, 2 + ((buf[0] << 8) | buf[1])), id); if (p) finish(p); }
+    });
+    sock.connect(53, ip);
   });
 }
 
@@ -67,15 +87,25 @@ function cleanBanner(t) {
 }
 
 // Is this machine a DNS server? What kind? (Never throws.)
+// Tries UDP (the normal way), once more if nothing came back, then TCP.
 async function probe(ip) {
-  const r = await ask(ip, 'localhost', 1, 1, 700);
-  if (!r) return { server: false };
-  const out = { server: true, recursive: r.ra && r.rcode !== 5, refused: r.rcode === 5, software: '' };
-  const v = await ask(ip, 'version.bind', 16, 3, 500);                 // CHAOS TXT: many servers say what software they are
-  if (v && v.rcode === 0 && v.text) out.software = cleanBanner(v.text);
-  if (!out.software) {                                                // Pi-hole answers its own name locally
-    const p = await ask(ip, 'pi.hole', 1, 1, 500);
-    if (p && p.rcode === 0 && p.addr === ip) out.software = 'Pi-hole';
+  let via = 'udp';
+  let r = await ask(ip, 'localhost', 1, 1, 700);
+  if (!r) r = await ask(ip, 'localhost', 1, 1, 900);
+  let tcpState = '';
+  if (!r) {
+    const t = await askTcp(ip, 'localhost', 1, 1, 800);
+    if (t && t.rcode !== undefined) { r = t; via = 'tcp'; } else tcpState = (t && t.none) || 'timeout';
+  }
+  if (!r) return { server: false, tried: 'No answer on the DNS port (53): UDP got no reply and TCP was ' + (tcpState === 'closed' ? 'closed' : tcpState === 'no-answer' ? 'open but silent' : 'not answering') + '.' };
+  const out = { server: true, recursive: r.ra && r.rcode !== 5, refused: r.rcode === 5, software: '', via: via };
+  if (via === 'udp') {
+    const v = await ask(ip, 'version.bind', 16, 3, 700);                 // CHAOS TXT: many servers say what software they are
+    if (v && v.rcode === 0 && v.text) out.software = cleanBanner(v.text);
+    if (!out.software) {                                                // Pi-hole answers its own name locally
+      const p = await ask(ip, 'pi.hole', 1, 1, 700);
+      if (p && p.rcode === 0 && p.addr === ip) out.software = 'Pi-hole';
+    }
   }
   return out;
 }
@@ -89,4 +119,4 @@ async function probeMany(ips, concurrency) {
   return results;
 }
 
-module.exports = { probe, probeMany, buildQuery, parseReply, cleanBanner };
+module.exports = { probe, askTcp, probeMany, buildQuery, parseReply, cleanBanner };

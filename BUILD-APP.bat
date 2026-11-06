@@ -12,7 +12,7 @@ where node >nul 2>nul
 if errorlevel 1 (
   echo Node.js is not installed on this computer.
   echo.
-  echo 1. Go to https://nodejs.org and download the "LTS" version.
+  echo 1. Go to https://nodejs.org and download the "LTS" version (version 24 or newer).
   echo 2. Install it with the default choices.
   echo 3. Close this window and double-click BUILD-APP.bat again.
   echo.

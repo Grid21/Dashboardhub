@@ -80,6 +80,11 @@ function coord(v) {
 }
 
 // the extra things you can fill in for a machine: VLAN, brand / model / notes, services, VPN
+// what a device itself reported about how long it has been up / connected: { sec, at, kind }
+function cleanUpInfo(u) {
+  if (!u || typeof u !== 'object' || !Number.isFinite(u.sec) || u.sec < 0 || u.sec > 3153600000 || !Number.isFinite(u.at) || u.at <= 0) return null;
+  return { sec: Math.floor(u.sec), at: u.at, kind: u.kind === 'connected' ? 'connected' : 'device' };
+}
 function cleanNetExtras(o) {
   const info = o.info && typeof o.info === 'object' ? o.info : {};
   const names = {};
@@ -158,6 +163,9 @@ function cleanNetDevice(key, d) {
     manual: manual,
     online: o.online !== false,
     lastSeen: typeof o.lastSeen === 'number' && isFinite(o.lastSeen) ? o.lastSeen : null,
+    firstSeen: Number.isFinite(o.firstSeen) && o.firstSeen > 0 ? o.firstSeen : null,
+    onlineSince: Number.isFinite(o.onlineSince) && o.onlineSince > 0 ? o.onlineSince : null,
+    upInfo: cleanUpInfo(o.upInfo),
     misses: 0,
     isRouter: isRouter,
     pos: isRouter ? { x: 0, y: 0, z: 0 } : pos
@@ -208,6 +216,7 @@ function cleanNetwork(raw) {
     showOffline: raw.showOffline === true,
     autoSeconds: [0, 15, 30, 60, 120, 300, 600, 1800].includes(live) ? live : 60,
     scannedOnce: raw.scannedOnce === true,
+    presenceAt: Number.isFinite(raw.presenceAt) && raw.presenceAt > 0 ? raw.presenceAt : 0,
     devices: devices,
     links: links,
     ignored: ignored

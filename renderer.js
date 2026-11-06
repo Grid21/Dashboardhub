@@ -32,6 +32,7 @@ let chipEls = {};              // panel id -> its top-bar jump button
 let findBars = {};             // panel id -> { open(), close(), isOpen() } for its find box (Ctrl+F)
 let findGuests = {};           // web page id -> panel id
 let activePanelId = null;      // the panel you last pointed at, clicked or typed in (Ctrl+F searches this one)
+let maximizedId = null;        // the panel that fills the whole window right now (not saved)
 let dragId = null;             // panel being dragged right now
 let dragStartOrder = null;     // order before the drag began (used if the drag is cancelled)
 let dropSeen = false;          // true once the dragged panel has actually been dropped
@@ -148,6 +149,8 @@ function render() {
     const spacer = document.createElement('span');
     spacer.className = 'spacer';
 
+    const maxBtn = makeButton('\u26F6 Maximize', 'Make this panel fill the whole window so you can work in it');
+    const exitMaxBtn = makeButton('Exit full screen', 'Go back to the dashboard (Esc)', 'primary hidden');
     const findBtn = makeButton('Find', 'Find words in this panel (Ctrl+F)');
     const notesBtn = makeButton('Notes', 'Notes and logins for this panel (stored encrypted)');
     const reloadBtn = makeButton('↻', 'Reload this panel');
@@ -163,7 +166,7 @@ function render() {
 
     head.title = 'Drag this bar to move the panel';
     head.draggable = true;
-    head.append(grip, info, status, spacer, findBtn, notesBtn, reloadBtn, editBtn, delBtn);
+    head.append(grip, info, status, spacer, exitMaxBtn, maxBtn, findBtn, notesBtn, reloadBtn, editBtn, delBtn);
 
     const body = document.createElement('div');
     body.className = 'panel-body';
@@ -232,6 +235,20 @@ function render() {
     el.style.order = index;
     panelEls[panel.id] = el;
 
+    // full screen: the panel fills the whole window (the web page inside is not reloaded or moved)
+    const applyMax = (on) => {
+      el.classList.toggle('maximized', on);
+      maxBtn.classList.toggle('hidden', on);
+      exitMaxBtn.classList.toggle('hidden', !on);
+      head.draggable = !on;
+      head.title = on ? '' : 'Drag this bar to move the panel';
+      document.body.classList.toggle('has-maximized', on);
+    };
+    maxBtn.addEventListener('click', () => { if (maximizedId && panelEls[maximizedId] && maximizedId !== panel.id) exitMaximized(); maximizedId = panel.id; applyMax(true); });
+    exitMaxBtn.addEventListener('click', exitMaximized);
+    el._applyMax = applyMax;
+    if (maximizedId === panel.id) applyMax(true);          // the panel list was redrawn (an edit, say) while it was full screen
+
     // quick-jump button in the top bar (also draggable)
     const chip = makeButton(panel.name, 'Click to jump to ' + panel.name + ', or drag to rearrange', 'chip');
     chip.draggable = true;
@@ -274,6 +291,15 @@ function render() {
       }
     });
   });
+}
+
+// Leaves full screen and shows the dashboard again.
+function exitMaximized() {
+  const id = maximizedId;
+  maximizedId = null;
+  document.body.classList.remove('has-maximized');
+  if (id && panelEls[id] && panelEls[id]._applyMax) panelEls[id]._applyMax(false);
+  document.body.classList.remove('has-maximized');
 }
 
 // ---------- drag and drop to rearrange ----------
@@ -1116,7 +1142,7 @@ importBtn.addEventListener('click', doImport);
   };
   btn.addEventListener('click', toggleMenu);              // the profile name next to the tabs opens the same menu
   if (settingsBtn) settingsBtn.addEventListener('click', toggleMenu);
-  menu.addEventListener('click', e => { e.stopPropagation(); if (e.target && (e.target.id === 'backupBtn' || e.target.id === 'bmcMenuBtn' || e.target.id === 'toolsMenuBtn')) close(); });
+  menu.addEventListener('click', e => { e.stopPropagation(); if (e.target && (e.target.id === 'backupBtn' || e.target.id === 'bmcMenuBtn' || e.target.id === 'toolsMenuBtn' || e.target.id === 'securityMenuBtn')) close(); });
   document.addEventListener('click', e => { if (!menu.contains(e.target) && e.target !== btn && e.target !== settingsBtn) close(); });
   window.hubProfilesRefresh = refresh;
   window.addEventListener('beforeunload', capture);
@@ -1175,6 +1201,8 @@ function jumpToPanelIfHidden(id) {
   if (r.bottom < toolbar.offsetHeight || r.top > window.innerHeight - 80) jumpToPanel(el);
 }
 document.addEventListener('keydown', (e) => {
+  // Esc leaves full screen (unless a box is open, or the find box is using Esc)
+  if (e.key === 'Escape' && maximizedId && !document.querySelector('dialog[open]') && !(findBars[maximizedId] && findBars[maximizedId].isOpen())) { e.preventDefault(); exitMaximized(); return; }
   if (document.body.classList.contains('view-map')) return;
   if ((e.ctrlKey || e.metaKey) && !e.altKey && String(e.key).toLowerCase() === 'f') {
     if (document.querySelector('dialog[open]')) return;

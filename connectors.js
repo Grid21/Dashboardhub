@@ -464,12 +464,14 @@ const BRAND_WORDS = [
     [/huawei/i, 'Huawei'], [/engenius/i, 'EnGenius'], [/trendnet/i, 'TRENDnet'], [/allied telesis/i, 'Allied Telesis'], [/synology/i, 'Synology'], [/qnap/i, 'QNAP'], [/arista/i, 'Arista']
 ];
 const OID = {
-  sysDescr: '1.3.6.1.2.1.1.1.0', sysObjectID: '1.3.6.1.2.1.1.2.0', sysName: '1.3.6.1.2.1.1.5.0',
+  sysDescr: '1.3.6.1.2.1.1.1.0', sysObjectID: '1.3.6.1.2.1.1.2.0', sysName: '1.3.6.1.2.1.1.5.0', sysUpTime: '1.3.6.1.2.1.1.3.0',
   ifType: '1.3.6.1.2.1.2.2.1.3', ifDescr: '1.3.6.1.2.1.2.2.1.2', ifName: '1.3.6.1.2.1.31.1.1.1.1',
   ifHighSpeed: '1.3.6.1.2.1.31.1.1.1.15', ifSpeed: '1.3.6.1.2.1.2.2.1.5',
   arp: '1.3.6.1.2.1.4.22.1.2', fdbPort: '1.3.6.1.2.1.17.4.3.1.2', basePortIf: '1.3.6.1.2.1.17.1.4.1.2', qFdbPort: '1.3.6.1.2.1.17.7.1.2.2.1.2'
 };
 const ETHERNET_IF_TYPES = new Set([6, 62, 69, 117]);          // ethernetCsmacd, fastEther, fastEtherFX, gigabitEthernet
+// sysUpTime is in hundredths of a second
+const upSec = (v) => (v && v.type === 'uint' && Number.isFinite(Number(v.value)) && Number(v.value) >= 0 ? Math.floor(Number(v.value) / 100) : null);
 const hexMac = (bytes) => normMac(Array.from(bytes).map((b) => Number(b).toString(16).padStart(2, '0')).join(':'));
 
 const PRINTER_WORDS = /epson|canon|brother|xerox|lexmark|ricoh|kyocera|konica|minolta|oki data|okidata|laserjet|officejet|deskjet|designjet|ecotank|workforce|pixma|imageclass|bizhub|\bmfp\b|printer|jetdirect|zebra tech/i;
@@ -479,7 +481,7 @@ async function pollSnmp(c) {
     user: c.username, authProto: c.authProto === 'none' ? '' : c.authProto, authPass: c.authProto === 'none' ? '' : c.password, privProto: c.privProto === 'none' ? '' : c.privProto, privPass: c.privProto === 'none' ? '' : c.secret2 });
   try {
     if (v3) await s.discover();
-    const sys = await s.get([OID.sysDescr, OID.sysObjectID, OID.sysName]);
+    const sys = await s.get([OID.sysDescr, OID.sysObjectID, OID.sysName, OID.sysUpTime]);
     const by = {};
     sys.forEach((v) => { by[v.oid] = v; });
     const str = (o) => (by[o] && by[o].type === 'str' ? cleanText(by[o].value.toString('utf8'), 200) : '');
@@ -568,7 +570,7 @@ async function pollSnmp(c) {
     } catch (e) { /* this device does not list port states */ }
     return {
       host: c.host,
-      self: { portTable: portTable, name: name, brand: brand, model: cleanText(descr.split(/[\r\n,]/)[0], 60), ports: ports || null, descr: descr, kind: kind },
+      self: { uptimeSec: upSec(by[OID.sysUpTime]), portTable: portTable, name: name, brand: brand, model: cleanText(descr.split(/[\r\n,]/)[0], 60), ports: ports || null, descr: descr, kind: kind },
       clients: list.slice(0, 2000), gear: [],
       note: seenOn.size ? 'Its forwarding table lists ' + seenOn.size + ' machine' + (seenOn.size === 1 ? '' : 's') + ' on ' + Object.keys(perPort).length + ' port' + (Object.keys(perPort).length === 1 ? '' : 's') + (Object.keys(perPort).some((p) => perPort[p] >= 4) ? ' (a port with several machines usually leads to another switch, often an unmanaged one: draw it with "Draw physical cable")' : '') + '. A machine that has been quiet for about 5 minutes drops out of this table.'
         : (clients.size ? 'It listed machines but has no forwarding table, so it cannot say which port each one is on.' : '')
@@ -616,6 +618,7 @@ async function pollUnifi(c) {
     const cl = newClient(mac);
     cl.ip = cleanIp(x.ip) || cleanIp(x.last_ip);
     cl.name = cleanText(x.name || x.hostname || '', 60);
+    if (Number.isFinite(x.uptime) && x.uptime >= 0 && x.uptime < 3153600000) cl.connSec = Math.floor(x.uptime);
     if (x.is_wired === false) {
       cl.wireless = true;
       cl.signal = sig(x.signal);
@@ -643,7 +646,7 @@ async function pollUnifi(c) {
   const gear = dev.slice(0, 500).map((d) => {
     const mac = normMac(d.mac);
     if (!mac) return null;
-    return { mac: mac, ip: cleanIp(d.ip), name: cleanText(d.name || '', 60), brand: 'Ubiquiti UniFi', model: cleanText(d.model || '', 60), kind: kinds[d.type] || 'other', ports: Array.isArray(d.port_table) && d.port_table.length ? d.port_table.length : null,
+    return { mac: mac, ip: cleanIp(d.ip), name: cleanText(d.name || '', 60), brand: 'Ubiquiti UniFi', uptimeSec: Number.isFinite(d.uptime) && d.uptime >= 0 && d.uptime < 3153600000 ? Math.floor(d.uptime) : null, model: cleanText(d.model || '', 60), kind: kinds[d.type] || 'other', ports: Array.isArray(d.port_table) && d.port_table.length ? d.port_table.length : null,
       // every port with its link state and speed (the port number is what each client's "switch port" refers to)
       portTable: Array.isArray(d.port_table) ? d.port_table.slice(0, 128).filter((p) => p && p.port_idx !== undefined && !p.is_uplink_lag).map((p) => ({ name: String(p.port_idx), up: p.up === true, speed: p.up === true ? mbps(p.speed) : null, label: cleanText(p.name || '', 30), uplink: p.is_uplink === true })) : [] };
   }).filter(Boolean);
@@ -1421,9 +1424,14 @@ async function snmpProbe(host, communities, port) {
 }
 
 // ---------- ask one device ----------
+// Switches from the Security settings window
+const POLICY = { snmpV3Only: false, meraki: true };
+function setPolicy(p) { POLICY.snmpV3Only = !!(p && p.snmpV3Only); POLICY.meraki = !(p && p.meraki === false); }
 async function poll(config) {
   let c;
   try { c = cleanConfig(config); const bad = checkLogin(c); if (bad) throw new Error(bad); } catch (e) { return { ok: false, code: 'config', error: e.message }; }
+  if (c.type === 'meraki' && !POLICY.meraki) return { ok: false, code: 'blocked', error: 'Cisco Meraki is turned off in the Security settings (it needs an internet connection).' };
+  if ((c.type === 'snmp' || c.type === 'hpe') && POLICY.snmpV3Only && c.snmpVersion !== 3) return { ok: false, code: 'blocked', error: 'This connection uses SNMP version 1 or 2c, which the Security settings do not allow. Change it to version 3, or turn "SNMP version 3 only" off.' };
   const run = { snmp: pollSnmp, hpe: pollSnmp, unifi: pollUnifi, openwrt: pollOpenwrt, mikrotik: pollMikrotik, opnsense: pollOpnsense, asus: pollAsus, netgear: pollNetgear, fritz: pollFritz, omada: pollOmada, meraki: pollMeraki, cisco: pollCisco, arubacx: pollArubaCx }[c.type];
   try {
     const data = await run(c);
@@ -1436,4 +1444,4 @@ async function poll(config) {
   }
 }
 
-module.exports = { snmpProbe, counters, hexNum, httpRequest, ConnError, bandName, freqBand, parseRate, mbps, TEST_HOOKS, poll, cleanConfig, checkLogin, TYPES, SNMP, isPrivateIp, normMac };
+module.exports = { setPolicy, snmpProbe, counters, hexNum, httpRequest, ConnError, bandName, freqBand, parseRate, mbps, TEST_HOOKS, poll, cleanConfig, checkLogin, TYPES, SNMP, isPrivateIp, normMac };

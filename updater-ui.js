@@ -45,6 +45,25 @@
     return r;
   }
 
+  // the Updates window (file installer) can check online too, whatever you answered before, and shows the result right there
+  const dlgCheck = $('updDlgCheck'), dlgMsg = $('updDlgMsg');
+  if (dlgCheck) dlgCheck.addEventListener('click', async () => {
+    dlgMsg.textContent = 'Checking...'; dlgCheck.disabled = true;
+    const r = await check(true);
+    dlgCheck.disabled = false;
+    if (!r.ok) dlgMsg.textContent = r.notConfigured ? 'Update checks are not set up for this copy yet.' : (r.error || 'Could not check for updates.');
+    else if (r.available) {
+      dlgMsg.textContent = 'Version ' + r.latest + ' is available. Showing it now...';
+      setTimeout(() => { const d = $('updateDialog'); if (d && d.open) d.close(); }, 700);          // so the "new version" bar is in view
+    } else dlgMsg.textContent = 'You are up to date (' + (r.current || st.current) + ').';
+  });
+  const dlgFolder = $('updDlgFolder');
+  if (dlgFolder) dlgFolder.addEventListener('click', async () => {
+    let r; try { r = await api.openFolder(); } catch (e) { r = { ok: false, error: 'Could not open the folder.' }; }
+    dlgMsg.textContent = r && r.ok ? 'Opened the updates folder.' : ((r && r.error) || 'Could not open the folder.');
+  });
+  document.addEventListener('click', (e) => { if (e.target && e.target.id === 'updatesBtn' && dlgMsg) dlgMsg.textContent = ''; }, true);
+
   btn.later.addEventListener('click', async () => { try { await api.snooze(); } catch (e) { /* ignore */ } hide(); });
   btn.skip.addEventListener('click', async () => { if (offered) { try { await api.skip(offered.latest); } catch (e) { /* ignore */ } } hide(); });
   btn.close.addEventListener('click', hide);
@@ -60,17 +79,21 @@
     if (!d.ok) { busy(false); show({ title: 'Could not download the update.', sub: d.error || '', buttons: offered && offered.assetName ? ['install', 'later'] : ['close'] }); return; }
     // hand it to the starter program, which checks it again and asks you to confirm
     let info = null; try { info = await window.updateApi.info(); } catch (e) { /* ignore */ }
-    if (!info || !info.stubApi || info.stubApi < 3) {
-      busy(false);
-      show({ title: 'The update was downloaded.', sub: 'This older copy installs updates from a file: open Updates, choose "Install update from file", and the file box will already be in the right folder.', buttons: ['close'] });
-      return;
-    }
     let r;
-    try { r = await window.updateApi.installFile(d.name); } catch (e) { r = { ok: false, error: 'Could not install the update.' }; }
+    try {
+      if (info && info.stubApi >= 3) r = await window.updateApi.installFile(d.name);
+      else {
+        // an older starter program installs from its file box: the downloaded file is handed to it, so there is nothing to look for
+        const armed = await api.armInstall(d.name);
+        if (!armed || !armed.ok) throw new Error('arm');
+        r = await window.updateApi.install();
+        if (r && r.ok) { try { await api.tidy(); } catch (e) { /* tidy-up only */ } }
+      }
+    } catch (e) { r = { ok: false, error: 'Could not install the update.' }; }
     busy(false);
-    if (r.ok) show({ title: 'Version ' + r.version + ' is installed.', sub: 'Restart Dashboard Hub to start using it.', buttons: ['restart', 'close'] });
-    else if (r.canceled) { show({ title: 'Update not installed.', sub: 'The downloaded file is kept until you check again.', buttons: ['install', 'later', 'skip'] }); }
-    else show({ title: 'Could not install the update.', sub: r.error || '', buttons: ['close'] });
+    if (r && r.ok) show({ title: 'Version ' + (r.version || (offered && offered.latest) || '') + ' is installed. Restart needed.', sub: 'Dashboard Hub has to restart before the new version runs. Click "Restart now", or close the app and open it again. Your panels, notes and settings are kept.', buttons: ['restart', 'close'] });
+    else if (r && r.canceled) { show({ title: 'Update not installed.', sub: 'The downloaded file is kept until you check again.', buttons: ['install', 'later', 'skip'] }); }
+    else show({ title: 'Could not install the update.', sub: (r && r.error) || 'Open Updates and choose "Install update from file" instead.', buttons: ['close'] });
   });
   btn.restart.addEventListener('click', async () => { btn.restart.disabled = true; try { await window.updateApi.restart(); } catch (e) { sub.textContent = 'Could not restart automatically. Close the app and open it again.'; btn.restart.disabled = false; } });
 

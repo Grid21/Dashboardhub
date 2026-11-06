@@ -75,17 +75,54 @@ async function checkLatest({ repo = UPDATE_REPO, current, apiBase = 'https://api
   if (!repoReady(repo)) return { ok: false, notConfigured: true, error: 'Update checks are not set up for this copy yet.' };
   if (!isVersion(current)) return { ok: false, error: 'Could not read the running version.' };
   try {
-    const r = await get(apiBase + '/repos/' + repo + '/releases/latest', { maxBytes: MAX_JSON, accept: 'application/vnd.github+json' });
+    let r;
+    try { r = await get(apiBase + '/repos/' + repo + '/releases/latest', { maxBytes: MAX_JSON, accept: 'application/vnd.github+json' }); }
+    catch (e) {
+      // no release published: look for update files placed in the repository's "updates" folder instead
+      if (!(e && e.code === 404)) throw e;
+      const f = await folderLatest({ repo, current, apiBase });
+      if (f) return f;
+      return { ok: false, error: 'No update was found. Put the update file in a GitHub Release, or in the "updates" folder of a public repository.' };
+    }
     let j; try { j = JSON.parse(r.body.toString('utf8')); } catch (e) { return { ok: false, error: 'GitHub sent something unexpected.' }; }
     const tag = String(j && j.tag_name || '').replace(/^v/i, '');
     if (!isVersion(tag)) return { ok: false, error: 'The latest release has no usable version number.' };
     if (j.draft === true || j.prerelease === true) return { ok: true, available: false, current, latest: tag };
     if (compare(tag, current) <= 0) return { ok: true, available: false, current, latest: tag };
-    const asset = (Array.isArray(j.assets) ? j.assets : []).find((a) => a && ASSET_RE.test(String(a.name)) && ASSET_RE.exec(a.name)[1] === tag && typeof a.browser_download_url === 'string' && allowedUrl(a.browser_download_url));
+    const assets = (Array.isArray(j.assets) ? j.assets : []).filter((a) => a && typeof a.browser_download_url === 'string' && allowedUrl(a.browser_download_url));
+    let asset = assets.find((a) => ASSET_RE.test(String(a.name)) && ASSET_RE.exec(a.name)[1] === tag);
+    // GitHub sometimes renames uploads (spaces, brackets) or people add a suffix: accept any single ".hubupdate" file on the release, saved under the proper name
+    if (!asset) {
+      const loose = assets.filter((a) => /\.hubupdate$/i.test(String(a.name)) && !ASSET_RE.test(String(a.name)));
+      if (loose.length === 1) asset = Object.assign({}, loose[0], { name: 'Dashboard-Hub-update-' + tag + '.hubupdate' });
+    }
+    // still nothing: maybe the file was put in the repository's "updates" folder instead
+    if (!asset) {
+      try { const f = await folderLatest({ repo, current, apiBase }); if (f && f.available && compare(f.latest, tag) >= 0) return f; } catch (e) { /* keep going with the release page */ }
+    }
     // a newer release exists, but with no update file attached: tell the person where to get it
     const page = typeof j.html_url === 'string' && allowedUrl(j.html_url) ? j.html_url : 'https://github.com/' + repo + '/releases';
     return { ok: true, available: true, current, latest: tag, notes: String(j.body || '').slice(0, 1500), assetName: asset ? asset.name : null, assetUrl: asset ? asset.browser_download_url : null, page };
   } catch (e) { return { ok: false, error: plainError(e) }; }
+}
+
+// Fallback: update files uploaded straight into the repository's "updates" folder (no Release needed).
+async function folderLatest({ repo, current, apiBase }) {
+  let list;
+  try {
+    const r = await get(apiBase + '/repos/' + repo + '/contents/updates', { maxBytes: MAX_JSON, accept: 'application/vnd.github+json' });
+    list = JSON.parse(r.body.toString('utf8'));
+  } catch (e) { if (e && e.code === 404) return null; throw e; }
+  if (!Array.isArray(list)) return null;
+  let best = null;
+  for (const f of list) {
+    const m = f && f.type === 'file' && typeof f.name === 'string' && ASSET_RE.exec(f.name);
+    if (!m || typeof f.download_url !== 'string' || !allowedUrl(f.download_url)) continue;
+    if (!best || compare(m[1], best.v) > 0) best = { v: m[1], name: f.name, url: f.download_url };
+  }
+  if (!best) return null;
+  if (compare(best.v, current) <= 0) return { ok: true, available: false, current, latest: best.v };
+  return { ok: true, available: true, current, latest: best.v, notes: '', assetName: best.name, assetUrl: best.url, page: 'https://github.com/' + repo + '/tree/main/updates' };
 }
 
 // Downloads the update file into dir (the app's own downloads folder). Returns just the file name.
@@ -128,4 +165,7 @@ function shouldOffer(result, prefs, now) {
   return true;
 }
 
-module.exports = { UPDATE_REPO, repoReady, checkLatest, download, loadPrefs, savePrefs, shouldOffer, compare, allowedUrl, ASSET_RE };
+// What the web page may see: the result without the download address.
+function publicResult(r) { const o = Object.assign({}, r || {}); delete o.assetUrl; return o; }
+
+module.exports = { publicResult, UPDATE_REPO, repoReady, checkLatest, download, loadPrefs, savePrefs, shouldOffer, compare, allowedUrl, ASSET_RE };

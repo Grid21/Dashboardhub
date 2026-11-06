@@ -49,12 +49,47 @@
       noteEl.textContent = i.note || '';
       noteEl.classList.toggle('hidden', !i.note);
       revertBtn.classList.toggle('hidden', i.source !== 'update');
-      if (i.previous) { prevBtn.textContent = 'Go back to last working version (' + i.previous.version + ')'; prevBtn.classList.remove('hidden'); }
+      if (i.previous) { prevBtn.textContent = 'Go back to last working version (' + i.previous.version + ')'; prevBtn.disabled = false; prevBtn.title = 'Switch back to the update you used before this one'; prevBtn.classList.remove('hidden'); }
+      else if (i.source === 'update') {
+        // always show where the way back is, even when there is nothing to go back to yet
+        prevBtn.textContent = 'Go back to last working version (none stored yet)'; prevBtn.disabled = true;
+        prevBtn.title = 'When you install your next update, this version is kept so you can come back to it.'; prevBtn.classList.remove('hidden');
+        noteEl.textContent = (i.note ? i.note + ' ' : '') + 'No earlier update is stored on this computer yet. After you install your next update, the version you are leaving is kept so you can go back to it.';
+        noteEl.classList.remove('hidden');
+      }
       showProblem(i.problem);
+      loadVersions();
       return i;
     } catch (e) {
       versionEl.textContent = 'Could not read the version.';
     }
+  }
+
+  // the last few versions kept on this computer, each with a button to go back to it
+  async function loadVersions() {
+    const box = $('updVersionsBox'), ul = $('updVersions');
+    if (!box || !ul || !window.updaterApi || !window.updaterApi.versions) return;
+    let r; try { r = await window.updaterApi.versions(); } catch (e) { r = null; }
+    ul.textContent = '';
+    const list = r && r.ok && Array.isArray(r.list) ? r.list : [];
+    box.classList.toggle('hidden', list.length === 0);
+    list.forEach((v) => {
+      const li = document.createElement('li');
+      const label = document.createElement('span');
+      const when = v.installedAt ? new Date(v.installedAt) : null;
+      label.textContent = 'Version ' + v.version + (when && !isNaN(when) ? ' (installed ' + when.toLocaleDateString() + ')' : '');
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = 'Go back to this version'; b.title = 'Switch to version ' + v.version;
+      b.addEventListener('click', async () => {
+        if (!confirm('Go back to version ' + v.version + '? Close and reopen the app afterwards. Your panels, notes and settings are kept.')) return;
+        b.disabled = true;
+        let res; try { res = await window.updaterApi.switchTo(v.version); } catch (e) { res = null; }
+        if (res && res.ok) { say('Done. Restart Dashboard Hub now to use version ' + res.version + '?', true); offerRestart(); }
+        else { say((res && res.error) || 'Could not switch back.'); b.disabled = false; }
+      });
+      li.append(label, b);
+      ul.appendChild(li);
+    });
   }
 
   $('updatesBtn').addEventListener('click', () => {

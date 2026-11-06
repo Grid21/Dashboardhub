@@ -110,6 +110,9 @@
       manual: key.startsWith('manual:'),
       misses: 0,
       lastSeen: typeof d.lastSeen === 'number' ? d.lastSeen : null,
+      firstSeen: Number.isFinite(d.firstSeen) && d.firstSeen > 0 ? d.firstSeen : null,
+      onlineSince: Number.isFinite(d.onlineSince) && d.onlineSince > 0 ? d.onlineSince : null,
+      upInfo: d.upInfo && typeof d.upInfo === 'object' && Number.isFinite(d.upInfo.sec) && d.upInfo.sec >= 0 && d.upInfo.sec <= 3153600000 && Number.isFinite(d.upInfo.at) && d.upInfo.at > 0 ? { sec: Math.floor(d.upInfo.sec), at: d.upInfo.at, kind: d.upInfo.kind === 'connected' ? 'connected' : 'device' } : null,
       isRouter: key === 'router',
       pos: { x: 0, y: 0, z: 0 }
     };
@@ -199,6 +202,7 @@
       showOffline: src.showOffline === true,
       autoSeconds: LIVE_CHOICES.includes(Number(src.autoSeconds)) ? Number(src.autoSeconds) : 60,
       scannedOnce: !!src.scannedOnce,
+      presenceAt: Number.isFinite(src.presenceAt) && src.presenceAt > 0 ? src.presenceAt : 0,
       alerts: ['off', 'app', 'desktop'].includes(src.alerts) ? src.alerts : 'app',
       showServices: src.showServices === true,
       removedReturn: true,
@@ -216,6 +220,11 @@
     }
     n.devices.router.ip = n.router;
     n.devices.router.pos = { x: 0, y: 0, z: 0 };
+    // "online for X days" only counts time the app was watching: if it was closed for a while, the count starts again
+    Object.values(n.devices).forEach((d) => {
+      const ref = d.lastSeen || n.presenceAt || 0;
+      if (d.onlineSince && ref && Date.now() - ref > PRESENCE_GAP_MS) d.onlineSince = null;
+    });
     if (Array.isArray(src.links)) {
       const seen = new Set();
       src.links.slice(0, 5000).forEach((l) => {
@@ -230,7 +239,33 @@
     net = n;
   }
 
-  function save() { try { saveState(); if (window.hubProfilesCapture) window.hubProfilesCapture(); } catch (e) { /* ignore */ } }
+  const PRESENCE_GAP_MS = 2 * 3600 * 1000;
+  // Keeps "first seen" and "online since" up to date. Runs on every save, so the count follows scans and router checks.
+  function trackPresence() {
+    if (!net) return;
+    const now = Date.now();
+    Object.values(net.devices).forEach((d) => {
+      if (d.manual && !d.ip && !d.lastSeen) return;
+      if (d.online === false) { d.onlineSince = null; d.upInfo = null; return; }
+      if (!d.onlineSince) d.onlineSince = now;
+      if (!d.firstSeen) d.firstSeen = d.lastSeen || now;
+    });
+    net.presenceAt = now;
+  }
+  // The device's own report (seconds), moved forward by the time since we heard it. Null once it is offline.
+  function reportedUp(d) {
+    if (!d.upInfo || d.online === false) return null;
+    return d.upInfo.sec + Math.max(0, Math.round((Date.now() - d.upInfo.at) / 1000));
+  }
+  function fmtDuration(sec) {
+    sec = Math.max(0, Math.floor(sec));
+    const days = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+    if (days >= 1) return days + (days === 1 ? ' day' : ' days') + (h ? ' ' + h + ' h' : '');
+    if (h >= 1) return h + ' h' + (m ? ' ' + m + ' min' : '');
+    if (m >= 1) return m + ' min';
+    return 'under a minute';
+  }
+  function save() { try { trackPresence(); saveState(); if (window.hubProfilesCapture) window.hubProfilesCapture(); } catch (e) { /* ignore */ } }
   const linkId = (a, b) => (a < b ? a + '~' + b : b + '~' + a);
   const devices = () => Object.values(net.devices);
   const effectiveOs = (d) => (d.isRouter ? 'router' : (d.osOverride || (d.os && d.os.id) || 'unknown'));
@@ -353,7 +388,11 @@
       if (!wasSwitch && !dev.osOverride && dev.os.id === 'switch' && !dev.info.brand) dev.info.brand = brandHint(dev);   // first time a scan recognises a switch: fill in the maker if it is known
       dev.ttl = Number.isInteger(h.ttl) ? h.ttl : dev.ttl;
     }
-    if (!created && dev.online === false) alertEvent('back', dev);
+    if (!created && dev.online === false) {
+      alertEvent('back', dev);
+      // detected again: a machine whose line was deleted while it was offline gets its line back now (a router check may then place it better)
+      if (!dev.isRouter && !net.links.some((l) => l.a === dev.key || l.b === dev.key)) net.links.push({ a: 'router', b: dev.key, auto: true });
+    }
     if (scanVlan && !dev.vlan) dev.vlan = scanVlan;
     if (full && h.self && Array.isArray(h.vpn)) dev.autoVpn = h.vpn.slice(0, 6).map((v) => text(v, 40));
     dev.self = !!h.self;
@@ -1249,6 +1288,19 @@
       side.appendChild(el('h3', null, title(d)));
       side.appendChild(el('p', 'sub', (d.isRouter ? 'Router (center of the map)' : d.manual && !d.ip ? 'Added by you' : d.self ? 'This computer' : d.online === false ? 'Offline (not found in the last scan)' : 'Online') + (d.lastSeen ? ' · last seen ' + new Date(d.lastSeen).toLocaleString() : '')));
 
+      {
+        const up = reportedUp(d);
+        const lines = [];
+        if (d.online !== false && d.onlineSince && !(d.manual && !d.ip)) lines.push('Seen online for ' + fmtDuration((Date.now() - d.onlineSince) / 1000) + ' (since ' + new Date(d.onlineSince).toLocaleString() + ')');
+        if (up !== null) lines.push((d.upInfo.kind === 'connected' ? 'Connected to the network for ' : 'The device says it has been running for ') + fmtDuration(up));
+        if (d.firstSeen) lines.push('First seen ' + new Date(d.firstSeen).toLocaleDateString());
+        if (lines.length) {
+          const box = el('div', 'uptime-box');
+          lines.forEach((t) => box.appendChild(el('p', 'small-note', t)));
+          if (d.online !== false && d.onlineSince) box.appendChild(el('p', 'small-note', 'Counted only while Dashboard Hub is running and scanning, so a pause in watching starts the count again.' + (up === null && !d.isRouter ? ' This device does not report its own uptime.' : '')));
+          side.appendChild(box);
+        }
+      }
       if (!d.isRouter) {
         const hasRouterLine = net.links.some((l) => linkId(l.a, l.b) === linkId('router', d.key));
         const rowL = el('div', 'btnrow');
@@ -1367,7 +1419,7 @@
           const x = r.results[d.ip] || { server: false };
           d.dns = x.server ? { server: true, recursive: x.recursive === true, refused: x.refused === true, software: text(x.software || '', 60) } : null;
           d.dnsAt = Date.now(); save(); renderSide();
-          setStatus(x.server ? title(d) + ' is a DNS server.' : title(d) + ' is not a DNS server.');
+          setStatus(x.server ? title(d) + ' is a DNS server' + (x.via === 'tcp' ? ' (it answered over TCP only).' : '.') : title(d) + ' is not a DNS server. ' + text(x.tried || '', 160));
         }));
         side.appendChild(rowD);
       }
@@ -2442,6 +2494,7 @@
 
     const fillGear = (d, g) => {
       if (!d || d.isRouter) return;
+      if (Number.isFinite(g.uptimeSec) && g.uptimeSec >= 0) d.upInfo = { sec: Math.floor(g.uptimeSec), at: Date.now(), kind: 'device' };
       if (g.name && !d.label && g.kind !== undefined && ['switch', 'ap', 'router'].includes(g.kind)) d.label = text(g.name, 60);
       if (g.brand && !d.info.brand) d.info.brand = text(g.brand, 60);
       if (g.model && !d.info.model) d.info.model = text(g.model, 60);
@@ -2508,6 +2561,7 @@
       }
     }
 
+    if (hostDev && res.self && Number.isFinite(res.self.uptimeSec) && res.self.uptimeSec >= 0) hostDev.upInfo = { sec: Math.floor(res.self.uptimeSec), at: Date.now(), kind: 'device' };
     if (hostDev && res.self && Array.isArray(res.self.portTable) && res.self.portTable.length) {
       hostDev.portTable = res.self.portTable.slice(0, 128).filter((p) => p && p.name).map((p) => ({ name: text(p.name, 30), up: p.up === true, speed: speedNum(p.speed) }));
       hostDev.portTableAt = Date.now();
@@ -2631,6 +2685,11 @@
         d.lastSeen = Date.now();
       }
       if (c.name && !d.hostname) d.hostname = text(c.name, 80);
+      if (Number.isFinite(c.connSec) && c.connSec >= 0 && d.online !== false && !d.upInfo) d.upInfo = { sec: Math.floor(c.connSec), at: Date.now(), kind: 'connected' };
+      else if (Number.isFinite(c.connSec) && c.connSec >= 0 && d.online !== false && d.upInfo && d.upInfo.kind === 'connected') d.upInfo = { sec: Math.floor(c.connSec), at: Date.now(), kind: 'connected' };
+      // A machine that is offline stays unlinked: a router's list keeps old entries for machines that are gone, and
+      // those must not draw (or redraw) lines you deleted. Its lines come back when it is detected again, or when you connect it by hand.
+      if (d.online === false) return;
 
       // a machine you cabled by hand keeps your cable: what the router says about it is remembered, but the lines stay
       const pinned = hasManual(d);

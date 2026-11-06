@@ -10,7 +10,7 @@ echo
 if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
   echo "Node.js is not installed on this computer."
   echo
-  echo "Install the LTS version from https://nodejs.org (or with your"
+  echo "Install the LTS version (24 or newer) from https://nodejs.org (or with your"
   echo "package manager, for example: sudo apt install nodejs npm),"
   echo "then run ./RUN-APP.sh again."
   exit 1

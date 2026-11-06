@@ -11,15 +11,27 @@ const srv = http.createServer((q, r) => {
   const send = (code, body, headers) => { r.writeHead(code, Object.assign({ 'Content-Type': 'application/json' }, headers || {})); r.end(typeof body === 'string' ? body : JSON.stringify(body)); };
   const base = 'http://127.0.0.1:' + srv.address().port;
   if (q.url === '/repos/me/hub/releases/latest') {
-    if (mode === '404') return send(404, { message: 'Not Found' });
+    if (mode === '404' || mode === 'folder' || mode === 'folderold') return send(404, { message: 'Not Found' });
     if (mode === 'limit') return send(403, {});
     if (mode === 'garbage') return send(200, 'not json at all');
     if (mode === 'same') return send(200, { tag_name: 'v1.10.54', assets: [] });
     if (mode === 'pre') return send(200, { tag_name: 'v3.0.0', prerelease: true, assets: [] });
     if (mode === 'noasset') return send(200, { tag_name: 'v2.0.0', body: 'notes', html_url: base + '/releases/2.0.0', assets: [{ name: 'Dashboard-Hub.exe', browser_download_url: base + '/dl/x.exe' }] });
+    if (mode === 'loose') return send(200, { tag_name: 'v2.0.0', assets: [{ name: 'Dashboard-Hub-update-2.0.0 (1).hubupdate', browser_download_url: base + '/redir' }] });
+    if (mode === 'releasefolder') return send(200, { tag_name: 'v2.0.0', html_url: base + '/releases/2.0.0', assets: [] });
     if (mode === 'evil') return send(200, { tag_name: 'v2.0.0', assets: [{ name: 'Dashboard-Hub-update-2.0.0.hubupdate', browser_download_url: 'https://evil.example.com/Dashboard-Hub-update-2.0.0.hubupdate' }] });
     if (mode === 'wrongname') return send(200, { tag_name: 'v2.0.0', assets: [{ name: 'Dashboard-Hub-update-9.9.9.hubupdate', browser_download_url: base + '/dl/a' }] });
     return send(200, { tag_name: 'v2.0.0', body: 'Fixes and things', assets: [{ name: 'Dashboard-Hub-update-2.0.0.hubupdate', browser_download_url: base + '/redir' }] });
+  }
+  if (q.url === '/repos/me/hub/contents/updates') {
+    if (mode === '404' || mode === 'limit' || mode === 'garbage') return send(404, { message: 'Not Found' });
+    if (mode === 'releasefolder') return send(200, [{ name: 'Dashboard-Hub-update-2.0.0.hubupdate', type: 'file', download_url: base + '/dl/file' }]);
+    if (mode === 'folder' || mode === 'folderold') return send(200, [
+      { name: 'README.md', type: 'file', download_url: base + '/dl/file' },
+      { name: 'Dashboard-Hub-update-1.10.60.hubupdate', type: 'file', download_url: base + '/dl/file' },
+      { name: 'Dashboard-Hub-update-' + (mode === 'folder' ? '1.10.62' : '1.10.50') + '.hubupdate', type: 'file', download_url: base + '/dl/file' },
+      { name: 'Dashboard-Hub-update-9.9.9.hubupdate', type: 'file', download_url: 'https://evil.example.com/x' }]);
+    return send(404, {});
   }
   if (q.url === '/redir') return send(302, '', { Location: '/dl/file' });
   if (q.url === '/dl/file') return send(200, mode === 'badfile' ? 'MZ not an update' : goodFile);
@@ -44,7 +56,22 @@ srv.listen(0, '127.0.0.1', async () => {
   mode = 'wrongname'; r = await U.checkLatest({ repo, current: '1.10.54', apiBase: api });
   check('an update file whose version does not match the release is ignored', r.ok && r.available && !r.assetUrl);
   mode = '404'; r = await U.checkLatest({ repo, current: '1.10.54', apiBase: api });
-  check('no releases yet: plain message', !r.ok && /No releases/.test(r.error), r.error);
+  check('no releases yet: plain message', !r.ok && /No update was found/.test(r.error), r.error);
+  mode = 'folder'; r = await U.checkLatest({ repo, current: '1.10.61', apiBase: api });
+  check('no release, but update file in the updates folder: found (newest, ignores other hosts)', r.ok && r.available && r.latest === '1.10.62' && r.assetName === 'Dashboard-Hub-update-1.10.62.hubupdate', JSON.stringify(r));
+  const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'hubdl-'));
+  const dl = await U.download({ url: r.assetUrl, name: r.assetName, dir: dd });
+  check('and it downloads', dl.ok && fs.existsSync(dl.file), JSON.stringify(dl));
+  mode = 'folderold'; r = await U.checkLatest({ repo, current: '1.10.61', apiBase: api });
+  check('folder file not newer: up to date', r.ok && !r.available, JSON.stringify(r));
+  mode = 'loose'; r = await U.checkLatest({ repo, current: '1.10.54', apiBase: api });
+  check('a renamed upload ("... (1).hubupdate") is still accepted, saved under the proper name', r.ok && r.available && r.assetName === 'Dashboard-Hub-update-2.0.0.hubupdate' && !!r.assetUrl, JSON.stringify(r));
+  const d2 = await U.download({ url: r.assetUrl, name: r.assetName, dir: dd });
+  check('...and downloads', d2.ok && /Dashboard-Hub-update-2\.0\.0\.hubupdate$/.test(d2.file), JSON.stringify(d2));
+  mode = 'releasefolder'; r = await U.checkLatest({ repo, current: '1.10.54', apiBase: api });
+  check('a release with no file attached falls back to the updates folder', r.ok && r.available && r.latest === '2.0.0' && !!r.assetUrl, JSON.stringify(r));
+  const pub = U.publicResult(r);
+  check('the page-facing result has no download address, and the original keeps it (the Install button needs it)', pub.assetUrl === undefined && !!r.assetUrl && pub.assetName === r.assetName);
   mode = 'limit'; r = await U.checkLatest({ repo, current: '1.10.54', apiBase: api });
   check('GitHub rate limit: plain message', !r.ok && /limiting/.test(r.error), r.error);
   mode = 'garbage'; r = await U.checkLatest({ repo, current: '1.10.54', apiBase: api });

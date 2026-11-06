@@ -47,6 +47,7 @@
           <div class="profile-menu-sep"></div>
           <button type="button" id="bmcMenuBtn" role="menuitem" title="Status and power control for servers with iLO, iDRAC or another BMC">Server management (iLO / iDRAC)...</button>
           <button type="button" id="toolsMenuBtn" role="menuitem" title="Unpack a .hubupdate file into its source files, or pack a folder back into a .hubupdate file">Update file tools (unpack / pack)...</button>
+          <button type="button" id="securityMenuBtn" role="menuitem" title="Choose what panels may do, and limit scanning, router connections and SNMP">Security settings...</button>
           <button type="button" id="backupBtn" role="menuitem" title="Export or import your panels, servers, notes and network profiles">Backup...</button>
           <div class="profile-menu-sep"></div>
           <label class="menu-check" title="Closing the window (X) hides Dashboard Hub in the system tray instead of quitting"><input type="checkbox" id="trayCheck"> Keep running in the background when I close the window (X)</label>
@@ -62,6 +63,7 @@
         </div>
       </div>
       <button id="updatesBtn" title="Install an update from a file">Updates</button>
+      <button id="aboutBtn" title="About Dashboard Hub: version, license and the network ports it uses">About</button>
       <button id="reloadApp" title="Reload Dashboard Hub (Ctrl+R or F5)">&#8635; Reload</button>
       <button id="reloadAll" class="panels-only" title="Reload every panel">&#8635; Reload all</button>
       <button id="addBtn" class="primary panels-only">+ Add panel</button>
@@ -248,8 +250,18 @@
     <h3>Updates</h3>
     <p id="updateVersion" class="hint"></p>
     <p id="updateNote" class="hint"></p>
-    <p class="hint">To update, choose the update file you were given (it ends in .hubupdate). The app checks it,
+    <div class="dialog-buttons left">
+      <button type="button" id="updDlgCheck" class="primary">Check online for a new version</button>
+      <button type="button" id="updDlgFolder" title="Shows the folder where Dashboard Hub keeps its installed updates">Open updates folder</button>
+    </div>
+    <p id="updDlgMsg" class="hint" aria-live="polite"></p>
+    <p class="hint">Or install from a file: choose the update file you were given (it ends in .hubupdate). The app checks it,
        installs it, and then needs to be closed and opened again. Your panels, notes, map and settings are kept.</p>
+    <div id="updVersionsBox" class="hidden">
+      <h4>Earlier versions kept on this computer</h4>
+      <p class="hint">Dashboard Hub keeps the last 4 versions it ran. If something stops working, you can go back to any of them. Your panels, notes and settings are kept.</p>
+      <ul id="updVersions" class="ver-list"></ul>
+    </div>
     <div id="updateProblem" class="problem hidden">
       <h4 id="updateProblemTitle"></h4>
       <p id="updateProblemWhat"></p>
@@ -274,6 +286,50 @@
       <span class="spacer"></span>
       <button type="button" id="updateClose">Close</button>
     </div>
+  </dialog>
+
+  <dialog id="securityDialog" class="wide">
+    <h3>Security settings</h3>
+    <p class="hint">The standard settings suit most home and office networks. Protections that must never be switched off (pages kept apart from the app, every update file checked, scans and connections only to addresses inside your own network) are not listed here on purpose.</p>
+    <div class="sec-group">
+      <h4>Websites in your panels</h4>
+      <label class="sec-row"><span>Certificates</span>
+        <select id="secCerts"><option value="local">Accept self-signed certificates for my panels and local network</option><option value="strict">Only valid certificates (panels using self-signed ones will not load)</option></select></label>
+      <label class="sec-row"><input type="checkbox" id="secPopups"> <span>Let panels open new windows (for example "sign in with..." pages)</span></label>
+      <label class="sec-row"><input type="checkbox" id="secMedia"> <span>Let panels use the camera, microphone and speakers</span></label>
+      <label class="sec-row"><input type="checkbox" id="secNotif"> <span>Let panels show desktop notifications</span></label>
+      <label class="sec-row"><input type="checkbox" id="secClip"> <span>Let panels read the clipboard</span></label>
+      <p class="hint">Only the websites you added and addresses inside your own network are ever allowed. Reload a panel after changing certificates.</p>
+    </div>
+    <div class="sec-group">
+      <h4>Scanning and connections</h4>
+      <label class="sec-row"><input type="checkbox" id="secThorough"> <span>Allow the thorough scan (checks ports 1 to 1024 on every machine, which security tools may flag)</span></label>
+      <label class="sec-row"><input type="checkbox" id="secConn"> <span>Allow router, switch and controller connections (read-only)</span></label>
+      <label class="sec-row"><input type="checkbox" id="secMeraki"> <span>Allow Cisco Meraki (contacts the internet)</span></label>
+      <label class="sec-row"><input type="checkbox" id="secV3"> <span>SNMP version 3 only (versions 1 and 2c send the community name as plain text; the SNMP finder needs 2c)</span></label>
+    </div>
+    <p id="secMsg" class="hint"></p>
+    <div class="dialog-buttons">
+      <button type="button" id="secDefault" title="Back to the standard settings">Standard settings</button>
+      <button type="button" id="secStrict" title="Turns on every restriction">Strictest settings</button>
+      <button type="button" id="secClose" class="primary">Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="aboutDialog" class="wide">
+    <h3>About Dashboard Hub</h3>
+    <p id="aboutVersion" class="hint"></p>
+    <p class="hint">Your whole network and every tool you use to run it, in one desktop app. Free software under the GNU General Public License v3 or later: you can use it, study it, change it and share it, and if you share a changed version you share its source under the same license.</p>
+    <h4>Network ports it uses</h4>
+    <p class="hint">Everything starts from this computer, and it never opens a port for others to connect to. Only the update check and Cisco Meraki leave your own network. Routers and switches are only read, never changed. Useful if your network has a firewall.</p>
+    <div class="about-table-wrap">
+      <table class="about-table">
+        <thead><tr><th>What it is for</th><th>Ports</th></tr></thead>
+        <tbody id="aboutPorts"></tbody>
+      </table>
+    </div>
+    <p class="hint">Tip for SNMP: use version 3 or a read-only community with a name of your own (not "public"), and never expose it to the internet. Only scan networks you own or have permission to scan.</p>
+    <div class="dialog-buttons"><button type="button" id="aboutClose" class="primary">Close</button></div>
   </dialog>
 
   <dialog id="toolsDialog" class="wide">
@@ -389,6 +445,8 @@
   <script src="bmc-ui.js"></script>
   <script src="bandwidth-ui.js"></script>
   <script src="updates.js"></script>
+  <script src="about-ui.js"></script>
+  <script src="security-ui.js"></script>
   <script src="tools-ui.js"></script>
   <script src="updater-ui.js"></script>
 </body>

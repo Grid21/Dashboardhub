@@ -55,6 +55,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('after answering, it is not asked again', !(await vis('updateBanner')));
   check('and with checking off, nothing is checked by itself', !(await calls()).some((c) => c.startsWith('updater:check')));
 
+  // ---- 1b. the Updates window can check online too (checking is OFF after "No thanks") ----
+  await page.evaluate(() => { document.getElementById('updatesBtn').click(); }); await sleep(400);
+  check('the Updates window has a "Check online" button', await page.evaluate(() => document.getElementById('updateDialog').open && !!document.getElementById('updDlgCheck')));
+  await page.evaluate(() => { document.getElementById('updDlgCheck').click(); }); await sleep(300);
+  check('it says a new version is available, right in that window', /9\.9\.9 is available/.test(await txt('updDlgMsg')), await txt('updDlgMsg'));
+  await sleep(1000);
+  check('then the window gets out of the way so the "new version" bar can be seen', !(await page.evaluate(() => document.getElementById('updateDialog').open)) && (await vis('updateBanner')) && /9\.9\.9 is available/.test(await txt('ubTitle')));
+  await page.click('#ubLater').catch(() => {}); await sleep(200);
+
   // ---- 2. manual check from Settings ----
   await page.evaluate(() => { document.getElementById('updCheckNow').click(); }); await sleep(500);
   check('"Check for updates now" shows the offer even though checking is off', (await vis('updateBanner')) && /9\.9\.9 is available/.test(await txt('ubTitle')));
@@ -82,6 +91,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('confirming installs the update', ptr && ptr.version === '9.9.9' && !ptr.disabled, JSON.stringify(ptr));
   check('the bar offers "Restart now"', (await vis('ubRestart')) && /9\.9\.9 is installed/.test(await txt('ubTitle')));
   check('the downloaded file is tidied away', !fs.existsSync(path.join(ud, 'downloads', 'Dashboard-Hub-update-9.9.9.hubupdate')));
+
+  // ---- 4b. an OLD starter program (as in a copy whose program itself is 1.10.1): it cannot install a downloaded file by name,
+  //          so the app hands the file to its file box automatically, and still tells you to restart ----
+  fs.rmSync(path.join(ud, 'updates'), { recursive: true, force: true });
+  await app.evaluate(({ ipcMain }) => { const real = ipcMain._invokeHandlers && ipcMain._invokeHandlers.get('update:info'); global.__realInfo = real; ipcMain.removeHandler('update:info'); ipcMain.handle('update:info', async (e, ...a) => { const r = await real(e, ...a); delete r.stubApi; return r; }); global.__confirm = 0; global.__boxes = []; });
+  await page.evaluate(() => { const b = document.getElementById('ubInstall'); b.classList.remove('hidden'); b.disabled = false; document.getElementById('updateBanner').classList.remove('hidden'); });
+  await page.click('#ubInstall'); await sleep(2500);
+  const ptr2 = fs.existsSync(path.join(ud, 'updates', 'active.json')) ? JSON.parse(fs.readFileSync(path.join(ud, 'updates', 'active.json'), 'utf8')) : null;
+  check('old starter: Install now still installs the downloaded update (no file box to hunt through)', ptr2 && ptr2.version === '9.9.9', JSON.stringify(ptr2));
+  check('old starter: it still asks you to confirm first', (await app.evaluate(() => global.__boxes.length)) === 1);
+  check('old starter: the bar says a restart is needed and offers "Restart now"', (await vis('ubRestart')) && /Restart needed/.test(await txt('ubTitle')) && /restart before the new version runs/.test(await txt('ubSub')), await txt('ubTitle') + ' | ' + await txt('ubSub'));
+  check('old starter: the downloaded file is tidied away', !fs.existsSync(path.join(ud, 'downloads', 'Dashboard-Hub-update-9.9.9.hubupdate')));
+  const arm = await page.evaluate(async () => [await window.updaterApi.armInstall('../../etc/passwd'), await window.updaterApi.armInstall('nothere.hubupdate'), await window.updaterApi.armInstall('Dashboard-Hub-update-1.2.3.hubupdate')]);
+  check('arming refuses paths, odd names and files that are not there', arm.every((r) => r.ok === false), JSON.stringify(arm));
 
   // ---- 5. the starter refuses anything but a plain downloaded file name ----
   const bad = await page.evaluate(async () => [await window.updateApi.installFile('../../etc/passwd'), await window.updateApi.installFile('x.hubupdate'), await window.updateApi.installFile('a/b.hubupdate'), await window.updateApi.installFile(42)]);

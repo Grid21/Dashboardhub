@@ -6,6 +6,23 @@ Web panels, encrypted notes, SSH shortcuts, a live 3D map of your network, route
 
 ---
 
+## How to install and start Dashboard Hub
+
+You don't need to know any programming. You need **Node.js 24 LTS or newer** (the free "LTS" download from [nodejs.org](https://nodejs.org)).
+
+1. **Install Node.js.** Go to [nodejs.org](https://nodejs.org), click the **LTS** download (version 24 or newer) and install it with the default choices. To check, open a terminal (Command Prompt on Windows) and type `node -v`. It should show `v24` or higher.
+2. **Get Dashboard Hub.** On the project's GitHub page click **Code**, then **Download ZIP**, and unzip it to a folder you'll keep. (Or clone it with GitHub Desktop.)
+3. **Start it.**
+   - **Windows:** double-click `RUN-APP.bat`.
+   - **Linux:** open a terminal in that folder and run `./RUN-APP.sh` (if it says permission denied, run `chmod +x RUN-APP.sh` first).
+4. **The first start takes a few minutes.** It downloads what it needs and needs an internet connection. After that it starts quickly.
+
+**Want a finished program instead of running from the folder?** Double-click `BUILD-APP.bat` on Windows (it makes `dist\Dashboard-Hub.exe`), or run `./BUILD-APP.sh` on Linux (it makes `dist/Dashboard-Hub.AppImage`). If the project's Releases page has a ready-made `Dashboard-Hub.exe`, you can download and run that directly, with no Node.js needed.
+
+**Updating later:** open **Updates** in the top bar. You can check online (if you turn that on), or install a `.hubupdate` file you were given. You can also go back to any of the last 4 versions there.
+
+---
+
 ## Why Dashboard Hub?
 
 Most of us run a network with a pile of separate tools: a browser full of bookmarks, an SSH client, a notes app, a network scanner, a router admin page for each router, an SNMP viewer, a tab for each server's management chip. Dashboard Hub puts those jobs in one place, and connects them to each other.
@@ -68,6 +85,7 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 ### 8. Web dashboard panels
 - Put all your web tools (router pages, NAS, Proxmox, Home Assistant, Grafana and more) in panels in one place, each in its own isolated web view.
 - Works with the **self-signed certificates** most home-lab tools use.
+- **Full screen for any panel**: a Maximize button makes a panel fill the whole window to work in it, with an Exit full screen button (or Esc) to go back. The page inside is not reloaded.
 - Search inside a panel with Ctrl+F, reload everything with one click.
 
 ### 9. Encrypted notes and SSH shortcuts
@@ -81,6 +99,7 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 ### 11. Manual update system
 - **Optional update checks (off until you say yes)**: the app can look for a newer version on this project's GitHub releases page. You choose what happens: **Install**, **Remind me later** or **Skip this version**. Nothing is ever installed without your click, and it asks again before installing.
 - Updates are a single small file that works with no installer and no internet connection needed. You can also pick a downloaded update file by hand.
+- **Go back to any of the last 4 versions**: Dashboard Hub keeps a checked copy of the last 4 versions it ran (plus the one running), and the Updates window lists them with a button to return to any one. There is also a way back to the built-in version.
 - Each file inside is verified with a checksum. A small fixed starter program can always start the app, so a bad update can't leave you locked out.
 
 ---
@@ -91,6 +110,7 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 - **Link speed** on every device pane (wired and Wi-Fi, in both directions), with a manual setting for cables that no router can report, and an uplink speed for switches.
 - **File-sharing detection**: marks machines that offer SMB, NFS, Apple file sharing, FTP, WebDAV, rsync or iSCSI. A "List shares" button shows what a machine shares (when it allows it without a login), and the network path can be copied in one click.
 - **DNS server detection**: finds which machines answer DNS (your router, a Pi-hole, a Windows or Linux DNS server) and says what software they run. It shows this in the device pane, along with a list of the DNS servers on the network. Which server a phone or smart device is set to use can't be seen from outside, and the app says so instead of guessing.
+- **How long a device has been online**: every device pane shows "Seen online for X days" (counted while Dashboard Hub is watching) and when it was first seen. Where the device itself reports it, the pane also shows its own uptime (SNMP switches, routers and access points, and UniFi gear) or how long a client has been connected (UniFi). When a device doesn't report it, the app says so.
 - **Network printers** are detected and shown as their own type.
 - **Game console detection** (PlayStation, Xbox, Nintendo, Steam Deck).
 - **Services list** per machine: see detected web services and VPNs, rename or hide them, and open them in your browser.
@@ -100,6 +120,8 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 
 ### Dashboard and app extras
 - **Update file tools built in**: unpack any `.hubupdate` into its source files, or pack a folder back into one, from inside the app, with plain-language messages and no command line.
+- **About window**: shows the version, the license and a table of every network port the app uses, handy when your network has a firewall.
+- **Security settings** (Settings menu): choose whether panels may use self-signed certificates, open pop-up windows, or use the camera, microphone, notifications and clipboard; switch off the thorough scan, router connections or Cisco Meraki; and require SNMP version 3. "Standard" and "Strictest" buttons set everything at once. The protections that must never be off (page isolation, update-file checks, local-network-only scanning) are fixed on purpose.
 - **Run in the background**: an option to hide in the system tray when you close the window (Windows and Linux), with notifications and live scans carrying on.
 - **Graphics card (GPU) switch** with a status line, for machines with driver trouble.
 - A tidy **Settings menu** that holds profiles, backup, server management and the tray and GPU options.
@@ -131,7 +153,7 @@ We'd rather you hear this from us first:
 
 ## Run it or build it yourself
 
-You don't need to know any programming. You only need **Node.js** (the free "LTS" download from [nodejs.org](https://nodejs.org)).
+You don't need to know any programming. You only need **Node.js 24 LTS or newer** (the free "LTS" download from [nodejs.org](https://nodejs.org)). The step-by-step version is at the top of this page.
 
 | I want to... | Windows | Linux |
 |---|---|---|

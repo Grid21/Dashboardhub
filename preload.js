@@ -82,7 +82,12 @@ contextBridge.exposeInMainWorld('updaterApi', {
   check: (manual) => ipcRenderer.invoke('updater:check', manual === true),
   skip: (version) => ipcRenderer.invoke('updater:skip', String(version || '')),
   snooze: () => ipcRenderer.invoke('updater:snooze'),
-  download: () => ipcRenderer.invoke('updater:download')
+  download: () => ipcRenderer.invoke('updater:download'),
+  openFolder: () => ipcRenderer.invoke('updater:openFolder'),
+  versions: () => ipcRenderer.invoke('updater:versions'),
+  switchTo: (v) => ipcRenderer.invoke('updater:switchTo', String(v || '')),
+  armInstall: (name) => ipcRenderer.invoke('updater:armInstall', String(name || '')),
+  tidy: () => ipcRenderer.invoke('updater:tidy')
 });
 
 contextBridge.exposeInMainWorld('updateApi', {
@@ -95,4 +100,10 @@ contextBridge.exposeInMainWorld('updateApi', {
   quit: () => ipcRenderer.invoke('update:quit'),
   restart: () => ipcRenderer.invoke('update:restart'),
   reload: () => ipcRenderer.invoke('app:reload')
+});
+
+contextBridge.exposeInMainWorld('securityApi', {
+  get: () => ipcRenderer.invoke('security:get'),
+  set: (o) => ipcRenderer.invoke('security:set', o),
+  preset: (name) => ipcRenderer.invoke('security:preset', name === 'strict' ? 'strict' : 'default')
 });

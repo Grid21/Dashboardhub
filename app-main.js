@@ -35,7 +35,7 @@ function isLanHost(h) {
 function trustedHost(u) { const h = hostOf(u); return isLanHost(h) || panelHosts.has(h); }
 app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
   event.preventDefault();
-  callback(trustedHost(url));
+  callback(security.get().certs === 'strict' ? false : trustedHost(url));
 });
 ipcMain.handle('panels:hosts', (event, urls) => {
   checkSender(event);
@@ -285,12 +285,19 @@ function rememberFolder(kind, file) {
 }
 // The "choose an update file" box belongs to the fixed starter program, which cannot be updated, so it is
 // taught here instead: it opens in the folder you last picked an update from (your Downloads folder the first time).
+let armedUpdateFile = '', armedUntil = 0;       // a downloaded update waiting to be handed to the starter's installer
 (function () {
   const original = dialog.showOpenDialog.bind(dialog);
   dialog.showOpenDialog = async function (a, b) {
     const hasWin = b !== undefined;
     const opts = hasWin ? b : a;
     if (!opts || opts.title !== 'Choose a Dashboard Hub update file') return original.apply(null, hasWin ? [a, b] : [a]);
+    // an update the app just downloaded itself: an older starter program can only install from the file box, so the file is handed over here
+    if (armedUpdateFile && Date.now() < armedUntil) {
+      const f = armedUpdateFile; armedUpdateFile = '';
+      if (fs.existsSync(f)) return { canceled: false, filePaths: [f] };
+    }
+    armedUpdateFile = '';
     const withFolder = Object.assign({}, opts, { defaultPath: lastFolder('update', 'downloads') });
     const res = hasWin ? await original(a, withFolder) : await original(withFolder);
     if (res && !res.canceled && res.filePaths && res.filePaths[0]) rememberFolder('update', res.filePaths[0]);
@@ -415,6 +422,9 @@ ipcMain.handle('backup:import', async (event) => {
 
 // ---------- router / switch connections (logins are kept encrypted, never shown again) ----------
 const connectors = require('./connectors');
+const security = require('./security');
+security.init(app.getPath('userData'));
+connectors.setPolicy(security.get());
 let connMemory = null;          // used when the computer cannot encrypt: kept only until the app closes
 const connFile = () => path.join(app.getPath('userData'), 'connections.dat');
 
@@ -518,6 +528,7 @@ ipcMain.handle('conn:remove', (event, id) => {
 });
 ipcMain.handle('conn:test', async (event, config) => {
   checkSender(event);
+  if (!security.get().connectors) return { ok: false, error: 'Router and switch connections are turned off in Settings > Security.' };
   const c = config && typeof config === 'object' ? Object.assign({}, config) : {};
   if (typeof c.id === 'string' && (!c.password || !c.secret2)) { const old = readConnections().find((x) => x.id === c.id && inProf(x)); if (old) { if (!c.password) c.password = old.password; if (!c.secret2) c.secret2 = old.secret2 || ''; } }
   const res = await connectors.poll(c);
@@ -527,6 +538,7 @@ ipcMain.handle('conn:test', async (event, config) => {
 let connPolling = false;
 ipcMain.handle('conn:poll', async (event) => {
   checkSender(event);
+  if (!security.get().connectors) return { ok: true, results: [], disabled: true };
   if (connPolling) return { ok: true, results: [], busy: true };
   connPolling = true;
   try {
@@ -686,6 +698,7 @@ ipcMain.handle('net:scan', (event, options) => {
   checkSender(event);
   if (activeScan) return { ok: false, error: 'A scan is already running.' };
   if (!options || typeof options !== 'object') return { ok: false, error: 'Bad request' };
+  if (options.mode === 'thorough' && !security.get().thoroughScan) return { ok: false, error: 'The thorough scan is turned off in Settings > Security. Use the quick scan, or turn it back on there.' };
   const send = (message) => {
     if (message.type === 'done') activeScan = null;
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('net:event', message);
@@ -712,6 +725,7 @@ ipcMain.handle('net:wake', async (event, macs) => {
 ipcMain.handle('snmp:find', async (event, req) => {
   checkSender(event);
   if (!req || typeof req !== 'object') return { ok: false, error: 'Bad request' };
+  if (security.get().snmpV3Only || !security.get().connectors) return { ok: false, error: 'The SNMP finder tries version 2c, which the Security settings do not allow right now (or router connections are off).' };
   const ips = Array.from(new Set((Array.isArray(req.ips) ? req.ips : []).filter((x) => typeof x === 'string' && connectors.isPrivateIp(x)))).slice(0, 40);
   const comms = Array.from(new Set((Array.isArray(req.communities) ? req.communities : []).map((x) => String(x).trim()).filter((x) => x && x.length <= 64 && !/[\u0000-\u001f\u007f]/.test(x)))).slice(0, 6);
   if (!ips.length) return { ok: true, found: [], silent: [] };
@@ -831,10 +845,10 @@ ipcMain.handle('updater:check', async (event, manual) => {
   updateBusy = true;
   try {
     const r = await updater.checkLatest({ current: runningVersion() });
-    lastUpdateResult = r && r.ok && r.available ? r : null;
-    r.offer = manual === true ? !!r.available : updater.shouldOffer(r, p, Date.now());
-    if (r.assetUrl) delete r.assetUrl;               // the web page never sees (or chooses) the download address
-    return r;
+    lastUpdateResult = r && r.ok && r.available ? r : null;      // kept here, with the download address, for the Install button
+    const out = updater.publicResult(r);                           // the web page never sees (or chooses) the download address
+    out.offer = manual === true ? !!out.available : updater.shouldOffer(out, p, Date.now());
+    return out;
   } finally { updateBusy = false; }
 });
 ipcMain.handle('updater:skip', (event, version) => {
@@ -850,6 +864,76 @@ ipcMain.handle('updater:snooze', (event) => {
   p.snoozeUntil = Date.now() + 24 * 3600 * 1000;
   try { updater.savePrefs(prefsFile(), p); } catch (e) { return { ok: false }; }
   return { ok: true };
+});
+// Hands a downloaded update to an older starter program's installer (see the file box note above). Only a plain name in our own downloads folder counts.
+ipcMain.handle('updater:armInstall', (event, name) => {
+  checkSender(event);
+  const dir = path.join(app.getPath('userData'), 'downloads');
+  if (typeof name !== 'string' || !updater.ASSET_RE.test(name)) return { ok: false };
+  const file = path.join(dir, name);
+  if (path.dirname(path.resolve(file)) !== path.resolve(dir) || !fs.existsSync(file)) return { ok: false };
+  armedUpdateFile = file; armedUntil = Date.now() + 120000;
+  return { ok: true };
+});
+// Removes downloaded update files once they are installed (or not wanted).
+ipcMain.handle('updater:tidy', (event) => {
+  checkSender(event);
+  armedUpdateFile = '';
+  try { const dir = path.join(app.getPath('userData'), 'downloads'); for (const f of fs.readdirSync(dir)) if (/\.hubupdate(\.part)?$/.test(f)) fs.rmSync(path.join(dir, f), { force: true }); } catch (e) { /* nothing to tidy */ }
+  return { ok: true };
+});
+// ---------- Security settings window ----------
+ipcMain.handle('security:get', (event) => { checkSender(event); return { ok: true, settings: security.get(), defaults: security.DEFAULTS }; });
+ipcMain.handle('security:set', (event, o) => {
+  checkSender(event);
+  if (!o || typeof o !== 'object') return { ok: false, error: 'Bad request' };
+  const before = security.get().certs;
+  const r = security.set(o); if (r.ok) { connectors.setPolicy(r.settings); if (r.settings.certs !== before) forgetCertDecisions(); }
+  return r;
+});
+ipcMain.handle('security:preset', (event, name) => {
+  checkSender(event);
+  const before = security.get().certs;
+  const r = security.preset(name === 'strict' ? 'strict' : 'default'); if (r.ok) { connectors.setPolicy(r.settings); if (r.settings.certs !== before) forgetCertDecisions(); }
+  return r;
+});
+// Chromium remembers "this certificate is fine" for a while: drop the open connections and cached answers so the new rule applies to the next load
+function forgetCertDecisions() {
+  try {
+    const { session } = require('electron');
+    [session.defaultSession, session.fromPartition('persist:panels')].forEach((ses) => {
+      try { ses.closeAllConnections(); ses.clearHostResolverCache(); ses.clearCache(); } catch (e) { /* best effort */ }
+    });
+  } catch (e) { /* best effort */ }
+}
+// ---------- earlier versions: the app keeps copies of the last few versions that ran, so you can go back further ----------
+const versionArchive = require('./version-archive').create(app.getPath('userData'));
+const runningDirName = /^v\d{1,4}\.\d{1,4}\.\d{1,4}(-b[a-z0-9]{1,6})?$/.test(path.basename(__dirname)) && path.basename(path.dirname(__dirname)) === 'updates' ? path.basename(__dirname) : '';
+// the version of the program itself (the starter's own package.json); 0.0.0 when it cannot be read, which only means nothing is filtered out
+function builtInVersionNow() {
+  try { const v = JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')).version; if (/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(String(v))) return v; } catch (e) { /* fall through */ }
+  return '0.0.0';
+}
+function runningVersionNow() {
+  try { if (runningDirName) { const m = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8')); if (m && typeof m.version === 'string') return m.version; } } catch (e) { /* fall through */ }
+  return builtInVersionNow();
+}
+ipcMain.handle('updater:versions', (event) => {
+  checkSender(event);
+  versionArchive.archive(runningVersionNow());
+  return { ok: true, running: runningVersionNow(), builtIn: builtInVersionNow(), list: versionArchive.choices(runningVersionNow(), builtInVersionNow()) };
+});
+ipcMain.handle('updater:switchTo', (event, version) => {
+  checkSender(event);
+  return versionArchive.switchTo(version, runningDirName, runningVersionNow(), builtInVersionNow());
+});
+// Opens the folder where the app keeps its installed updates (made if it is not there yet) in the system's file manager.
+ipcMain.handle('updater:openFolder', async (event) => {
+  checkSender(event);
+  const dir = path.join(app.getPath('userData'), 'updates');
+  try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch (e) { return { ok: false, error: 'Could not create the updates folder.' }; }
+  const err = await shell.openPath(dir);
+  return err ? { ok: false, error: 'Could not open the folder: ' + String(err).slice(0, 120) } : { ok: true, path: dir };
 });
 ipcMain.handle('updater:download', async (event) => {
   checkSender(event);
@@ -1031,7 +1115,7 @@ function createWindow() {
   });
   wc.on('did-attach-webview', (e, guest) => {
     // pop-ups (for example "sign in with ..." windows) are fine for normal web addresses only
-    guest.setWindowOpenHandler(({ url }) => (/^https?:\/\//i.test(url) ? { action: 'allow' } : { action: 'deny' }));
+    guest.setWindowOpenHandler(({ url }) => (security.get().popups && /^https?:\/\//i.test(url) ? { action: 'allow' } : { action: 'deny' }));
   });
   // Cameras, microphones, location and the like: only the panels you added (and your own network) may ask. The app window may not.
   const allowedAlways = new Set(['fullscreen', 'clipboard-sanitized-write', 'pointerLock']);
@@ -1039,7 +1123,9 @@ function createWindow() {
   const permissionHandler = (contents, permission, callback, details) => {
     if (allowedAlways.has(permission)) return callback(true);
     const isApp = contents === mainWindow.webContents;
-    callback(!isApp && askable.has(permission) && trustedHost((details && details.requestingUrl) || ''));
+    const sec = security.get();
+    const wanted = permission === 'media' || permission === 'speaker-selection' ? sec.allowMedia : permission === 'notifications' ? sec.allowNotifications : permission === 'clipboard-read' ? sec.allowClipboard : false;
+    callback(!isApp && askable.has(permission) && wanted && trustedHost((details && details.requestingUrl) || ''));
   };
   try {
     const { session } = require('electron');
@@ -1074,6 +1160,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  setTimeout(() => { try { versionArchive.archive(runningVersionNow()); } catch (e) { /* safety net only */ } }, 4000);
   settings = readSettings();
   if (settings.closeToTray) {
     if (!app.requestSingleInstanceLock()) { app.quit(); return; }       // starting the app again just brings the hidden window back

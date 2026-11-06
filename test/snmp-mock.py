@@ -12,6 +12,7 @@ mib = []
 for o, (t, v) in raw.items():
     if t == 's': val = rfc1902.OctetString(v)
     elif t == 'x': val = rfc1902.OctetString(hexValue=v)
+    elif t == 't': val = rfc1902.TimeTicks(v)
     else: val = rfc1902.Integer(v)
     mib.append((key(o), val))
 mib.sort(key=lambda x: x[0])

@@ -472,3 +472,37 @@ button.on { background: #3b82f6; border-color: #3b82f6; color: #fff; }
 .update-banner .ub-notes { flex: 1 1 100%; }
 .update-banner .ub-notes summary { cursor: pointer; color: #9db8d9; }
 .update-banner .ub-notes pre { margin: 6px 0 0; max-height: 140px; overflow: auto; white-space: pre-wrap; background: #14171c; border: 1px solid #2a3140; border-radius: 6px; padding: 8px; font-size: 12px; }
+
+/* About window: the ports table */
+.about-table-wrap { max-height: min(320px, 45vh); overflow: auto; border: 1px solid #38415a; border-radius: 8px; margin: 8px 0 12px; }
+.about-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.about-table th, .about-table td { text-align: left; padding: 7px 10px; vertical-align: top; border-bottom: 1px solid #2a3142; }
+.about-table th { position: sticky; top: 0; background: #232938; color: #aab3c5; font-weight: 600; }
+.about-table tr:last-child td { border-bottom: 0; }
+.about-table td:first-child { width: 45%; color: #e6e9ef; }
+.about-table td:last-child { color: #c3cbdb; }
+
+/* a panel in full screen: fills the whole window above the top bar */
+.panel.maximized { position: fixed; inset: 0; z-index: 900; border-radius: 0; border: 0; scroll-margin-top: 0; }
+.panel.maximized .panel-head { cursor: default; }
+.panel.maximized .panel-body { flex: 1 1 auto; height: auto; min-height: 0; }
+body.has-maximized { overflow: hidden; }
+
+/* Security settings window */
+.sec-group { border: 1px solid #38415a; border-radius: 8px; padding: 6px 12px 10px; margin: 10px 0; }
+.sec-group h4 { margin: 6px 0; }
+.sec-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+.sec-row select { flex: 1; min-width: 0; }
+/* tall windows keep their buttons in view on small screens: the content scrolls, the buttons stay */
+#securityDialog .dialog-buttons, #aboutDialog .dialog-buttons { position: sticky; bottom: -20px; background: #1b1f27; padding: 10px 0 4px; margin-top: 6px; }
+dialog .sec-row { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 6px 0; color: #e6e9ef; font-size: 13px; }
+dialog .sec-row input[type=checkbox] { width: auto; margin: 2px 0 0; flex: none; }
+dialog .sec-row span { flex: 1; min-width: 0; text-align: left; }
+dialog .sec-row select { margin: 0; flex: 1; }
+dialog .sec-row > span:first-child:not(:last-child) { flex: none; color: #a9b1c0; padding-top: 6px; }
+
+/* earlier versions list in the Updates window */
+.ver-list { list-style: none; margin: 6px 0 12px; padding: 0; border: 1px solid #38415a; border-radius: 8px; }
+.ver-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 10px; border-bottom: 1px solid #2a3142; font-size: 13px; }
+.ver-list li:last-child { border-bottom: 0; }
+.ver-list button { white-space: nowrap; flex: none; }

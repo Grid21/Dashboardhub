@@ -792,7 +792,8 @@
 
   // ---------- device groups: a soft circle around each named group, and the group can move as one ----------
   const groupObjs = new Map();   // group name -> { mesh, ring, sprite, label }
-  let groupDiscGeo = null, groupRingGeo = null;
+  let groupDiscGeo = null;
+  const RING_W = 0.14;     // every group ring is this thick in map units, whatever the circle's size
   function groupColor(name) {
     let h = 0;
     for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
@@ -825,7 +826,7 @@
     const o = groupObjs.get(name);
     if (!o) return;
     scene.remove(o.mesh, o.ring, o.sprite);
-    o.mesh.material.dispose(); o.ring.material.dispose();
+    o.mesh.material.dispose(); o.ring.material.dispose(); o.ring.geometry.dispose();
     if (o.sprite.material.map) o.sprite.material.map.dispose();
     o.sprite.material.dispose();
     groupObjs.delete(name);
@@ -851,10 +852,10 @@
       r = Math.min(Math.max(r + 1.6, 2.2), 400);
       let o = groupObjs.get(name);
       if (!o) {
-        if (!groupDiscGeo) { groupDiscGeo = new THREE.CircleGeometry(1, 96); groupRingGeo = new THREE.RingGeometry(0.96, 1, 96); }
+        if (!groupDiscGeo) { groupDiscGeo = new THREE.CircleGeometry(1, 96); }
         const col = groupColor(name);
         const mesh = new THREE.Mesh(groupDiscGeo, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.24, depthWrite: false, side: THREE.DoubleSide }));
-        const ring = new THREE.Mesh(groupRingGeo, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 1, depthWrite: false, side: THREE.DoubleSide }));
+        const ring = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 96), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 1, depthWrite: false, side: THREE.DoubleSide }));
         mesh.rotation.x = ring.rotation.x = -Math.PI / 2;
         mesh.renderOrder = 1; ring.renderOrder = 1;
         const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: groupLabelTexture(name), transparent: true, depthWrite: false, depthTest: false }));
@@ -866,6 +867,11 @@
       const y = FLOOR_Y + 0.04;
       o.mesh.position.set(cx, y, cz); o.ring.position.set(cx, y + 0.01, cz);
       o.mesh.scale.setScalar(r); o.ring.scale.setScalar(r);
+      if (o.ringR === undefined || Math.abs(o.ringR - r) > 0.005) {      // rebuild the ring so its thickness stays RING_W
+        o.ring.geometry.dispose();
+        o.ring.geometry = new THREE.RingGeometry(Math.max(0.5, 1 - RING_W / r), 1, 96);
+        o.ringR = r;
+      }
       const lh = Math.min(Math.max(r * 0.3, 1.6), 3.6), asp = (o.sprite.material.map && o.sprite.material.map.userData && o.sprite.material.map.userData.aspect) || 5;
       o.sprite.scale.set(lh * asp, lh, 1);
       o.sprite.position.set(cx, y + 1.2, cz + r + lh * 0.6);
@@ -3157,7 +3163,7 @@
 
   // small helper used by the automatic tests (where on screen is a machine or a line?)
   window.__hubMap = {
-    groups: function () { return Array.from(groupObjs.entries()).map(([k, o]) => ({ name: k, x: o.mesh.position.x, z: o.mesh.position.z, r: o.mesh.scale.x, ringOpacity: o.ring.material.opacity, fillOpacity: o.mesh.material.opacity, labelH: o.sprite.scale.y, labelW: o.sprite.scale.x, labelOnTop: o.sprite.material.depthTest === false })); },
+    groups: function () { return Array.from(groupObjs.entries()).map(([k, o]) => ({ name: k, x: o.mesh.position.x, z: o.mesh.position.z, r: o.mesh.scale.x, ringOpacity: o.ring.material.opacity, fillOpacity: o.mesh.material.opacity, labelH: o.sprite.scale.y, labelW: o.sprite.scale.x, labelOnTop: o.sprite.material.depthTest === false, ringWidth: (1 - o.ring.geometry.parameters.innerRadius) * o.ring.scale.x }));  },
     glInfo: function () { return renderer ? { frames: renderer.info.render.frame, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, software: softwareGl, lost: glLost, running: running, gen: loopGen, pixelRatio: renderer.getPixelRatio(), width: canvas.width, height: canvas.height } : null; },
     screenOf: function (key) {
       const v = new THREE.Vector3();

@@ -44,6 +44,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const lvl2 = await page.evaluate(() => Object.values(window.hubNetmap.exportData().devices).map((x) => x.pos.y));
   check('old saved heights are flattened on load', lvl2.every((y) => y === 0), JSON.stringify(lvl2));
   check('the floor grid sits just under the machines, not far below', await page.evaluate(() => { const g = window.__hubMap.floorY(); return g > -2 && g < -0.5; }));
+  // two groups of very different size must have rings of the same thickness
+  await page.evaluate(() => { const e = window.hubNetmap.exportData(); ['4', '5'].forEach((n) => { const d = e.devices['aa:bb:cc:00:03:' + n]; d.group = 'Far'; }); e.devices['aa:bb:cc:00:03:4'].pos = { x: -40, y: 0, z: -30 }; e.devices['aa:bb:cc:00:03:5'].pos = { x: -10, y: 0, z: 25 }; window.hubNetmap.importData(e, true); }); await sleep(1000);
+  const two = await groups();
+  check('a small and a very large group both get a ring', two.length === 2 && Math.max(...two.map((x) => x.r)) > 3 * Math.min(...two.map((x) => x.r)), JSON.stringify(two.map((x) => [x.name, Math.round(x.r)])));
+  check('both rings have exactly the same thickness', two.length === 2 && Math.abs(two[0].ringWidth - two[1].ringWidth) < 0.01 && two[0].ringWidth > 0.1 && two[0].ringWidth < 0.5, JSON.stringify(two.map((x) => x.ringWidth)));
+  await page.evaluate(() => { const e = window.hubNetmap.exportData(); ['4', '5'].forEach((n) => { e.devices['aa:bb:cc:00:03:' + n].group = ''; }); e.devices['aa:bb:cc:00:03:4'].pos = { x: -10, y: 0, z: -6 }; e.devices['aa:bb:cc:00:03:5'].pos = { x: -10, y: 0, z: 6 }; window.hubNetmap.importData(e, true); }); await sleep(800);
   // switch off circles
   await page.evaluate(() => { const c = document.getElementById('mapGroupCircles'); c.checked = false; c.dispatchEvent(new Event('change', { bubbles: true })); }); await sleep(500);
   check('Group circles off: no circle', (await groups()).length === 0);

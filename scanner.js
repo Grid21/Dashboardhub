@@ -20,6 +20,7 @@ const dns = require('dns');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const discovery = require('./discovery');
 
 // ---------- port lists ----------
 const SERVICES = {
@@ -661,6 +662,16 @@ function guessOs(host, routerIp) {
 }
 
 // ---------- the scan ----------
+// Which methods noticed this machine (for the machine's details)
+function foundVia(ip, info, mac, arp, disc) {
+  const via = [];
+  if (info && (info.ttl !== null || (info.open && info.open.size > 0) || info.answered)) via.push('Ping / port check');
+  if (arp && arp.has(ip)) via.push('ARP table');
+  const d = disc && disc.get(ip);
+  if (d) d.via.forEach((v) => { if (!via.includes(v)) via.push(v); });
+  return via;
+}
+
 // options: { cidr, mode: 'quick'|'thorough', router }
 // emit(message) is called with progress, host and done messages.
 function startScan(options, emit) {
@@ -674,6 +685,13 @@ function startScan(options, emit) {
   const loopback = (parsed.base >>> 24) === 127;
   let canceled = false;
   const session = { cancel: () => { canceled = true; } };
+  // Which ways of finding machines are allowed (Settings > Security > Finding machines). All on by default.
+  const M = Object.assign({ probe: true, mdns: true, ssdp: true, netbios: true, reverseDns: true }, options.methods && typeof options.methods === 'object' ? options.methods : {});
+  const testHooks = options.testHooks || {};   // only used by the automatic tests (never passed in from the window)
+  // Listening-only discovery starts right away and runs while the other checks work
+  const discoveryPromise = (M.mdns || M.ssdp)
+    ? discovery.discoverNames(Object.assign({ ms: background ? 1500 : 2300, useMdns: M.mdns, useSsdp: M.ssdp }, testHooks.discovery || {})).catch(() => new Map())
+    : Promise.resolve(new Map());
 
   // A background scan is deliberately gentle: far fewer connections at the same time
   const tcp = limiter(background ? 40 : 200);
@@ -691,7 +709,7 @@ function startScan(options, emit) {
     let finished = 0;
     await Promise.all(parsed.hosts.map(async (ip) => {
       const info = { ttl: null, open: new Set(), answered: false };
-      await Promise.all([
+      await Promise.all(!M.probe ? [] : [
         pings(async () => { if (!canceled) info.ttl = await pingHost(ip); }),
         Promise.all(DISCOVERY_PORTS.map((p) => tcp(async () => {
           if (canceled) return;
@@ -708,6 +726,7 @@ function startScan(options, emit) {
     }));
     if (canceled) return;
 
+    const disc = await discoveryPromise;
     let arp = await readArpTable();
     const found = [];
     for (const ip of parsed.hosts) {
@@ -717,7 +736,9 @@ function startScan(options, emit) {
       const answered = info.ttl !== null || info.open.size > 0 || info.answered || (loopback && info.answered);
       if (isMine || answered) {
         found.push(ip);
-      } else if (hasMac && !background && !known.has(ip)) {
+      } else if (disc.has(ip)) {
+        found.push(ip);      // it announced itself (mDNS / SSDP) even though it ignores pings and port checks
+      } else if (hasMac && (!M.probe || (!background && !known.has(ip)))) {
         // On initial manual scan, include host if present in ARP so firewalled machines are discovered.
         // A machine the map already knows that no longer answers is NOT kept alive by an old ARP entry (that is how an unplugged switch stayed "online")
         found.push(ip);
@@ -730,6 +751,7 @@ function startScan(options, emit) {
       const info = alive.get(ip) || { ttl: null, open: new Set() };
       const mac = arp.get(ip) || mine.get(ip) || null;
       const host = { ip: ip, mac: mac, vendor: vendorFor(mac), hostname: null, ttl: info.ttl, ports: [], self: mine.has(ip), alive: true, scanning: true };
+      host.found = foundVia(ip, info, mac, arp, disc);
       host.os = guessOs(host, routerIp);
       hostsOut.set(ip, host);
       if (background && known.has(ip)) {
@@ -752,7 +774,7 @@ function startScan(options, emit) {
         const ip = queue.shift();
         const host = hostsOut.get(ip);
         const open = [];
-        await Promise.all(ports.map((p) => tcp(async () => {
+        await Promise.all((M.probe ? ports : []).map((p) => tcp(async () => {
           if (canceled) return;
           if (await tcpProbe(ip, p, 900) === 'open') open.push(p);
         })));
@@ -763,7 +785,14 @@ function startScan(options, emit) {
           detail.push({ port: p, service: SERVICES[p] || null, banner: info.banner || null, title: info.title || null });
         }
         host.ports = detail;
-        host.hostname = host.self ? cleanText(os.hostname(), 80) : await reverseName(ip);
+        let nm = host.self ? cleanText(os.hostname(), 80) : (M.reverseDns ? await reverseName(ip) : null);
+        const dd = disc.get(ip);
+        if (!nm && dd && dd.name) nm = cleanText(dd.name, 80);
+        if (!nm && !host.self && M.netbios && (open.includes(139) || open.includes(445) || !M.probe)) {
+          const n = await discovery.netbiosName(ip, 900, testHooks.netbiosPort);
+          if (n) { nm = cleanText(n, 80); if (!host.found.includes('NetBIOS')) host.found.push('NetBIOS'); }
+        }
+        host.hostname = nm || null;
         host.os = guessOs(host, routerIp);
         if (host.self) host.vpn = vpnInterfaces();
         host.scanning = false;

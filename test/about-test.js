@@ -20,7 +20,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     check('shows the version', /Version \d+\.\d+\.\d+/.test(t), t.slice(0, 120));
     check('shows the license', /GNU General Public License/.test(t));
     check('shows the ports table with SNMP and a header', /UDP 161/.test(t) && /What it is for/.test(t) && /TCP 49000/.test(t));
-    check('table has every row', await page.evaluate(() => document.querySelectorAll('#aboutPorts tr').length === 15));
+    check('table has every row', await page.evaluate(() => document.querySelectorAll('#aboutPorts tr').length === 19));
     check('window fits on screen and Close is reachable', await page.evaluate(() => { const r = document.getElementById('aboutClose').getBoundingClientRect(); return r.bottom <= innerHeight && r.top >= 0 && r.right <= innerWidth; }));
     await page.click('#aboutClose'); await sleep(300);
     check('Close works', !(await page.evaluate(() => document.getElementById('aboutDialog').open)));

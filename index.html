@@ -313,10 +313,21 @@
       <label class="sec-row"><input type="checkbox" id="secMeraki"> <span>Allow Cisco Meraki (contacts the internet)</span></label>
       <label class="sec-row"><input type="checkbox" id="secV3"> <span>SNMP version 3 only (versions 1 and 2c send the community name as plain text; the SNMP finder needs 2c)</span></label>
     </div>
+    <div class="sec-group">
+      <h4>Finding machines (no SNMP needed)</h4>
+      <label class="sec-row"><input type="checkbox" id="secProbe"> <span>Ping machines and check their ports (turn off for a quiet scan that only listens)</span></label>
+      <label class="sec-row"><input type="checkbox" id="secMdns"> <span>Listen for mDNS / Bonjour announcements (phones, TVs, printers, Macs)</span></label>
+      <label class="sec-row"><input type="checkbox" id="secSsdp"> <span>Listen for SSDP / UPnP announcements (smart TVs, routers, media boxes)</span></label>
+      <label class="sec-row"><input type="checkbox" id="secNb"> <span>Ask Windows machines for their name (NetBIOS)</span></label>
+      <label class="sec-row"><input type="checkbox" id="secRdns"> <span>Look up machine names with your DNS server</span></label>
+      <label class="sec-row"><input type="checkbox" id="secSnmpOn"> <span>Allow SNMP at all (off = never used: SNMP connections, the SNMP finder and SNMP traffic numbers stop)</span></label>
+      <p class="hint">Every machine is also read from the computer's own ARP table, and your router or controller connections (UniFi, MikroTik, OPNsense, OpenWrt and others) give lists of machines without SNMP. "Quiet scan" sends no pings and no port checks, so it only finds machines that announce themselves or were recently seen by this computer.</p>
+    </div>
     <p id="secMsg" class="hint"></p>
     <div class="dialog-buttons">
       <button type="button" id="secDefault" title="Back to the standard settings">Standard settings</button>
       <button type="button" id="secStrict" title="Turns on every restriction">Strictest settings</button>
+      <button type="button" id="secQuiet" title="Listening-only scans, no pings or port checks, SNMP off">Quiet scan, no SNMP</button>
       <button type="button" id="secClose" class="primary">Close</button>
     </div>
   </dialog>

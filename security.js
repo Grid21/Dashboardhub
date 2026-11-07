@@ -12,8 +12,16 @@ const DEFAULTS = Object.freeze({
   thoroughScan: true,        // the "thorough" scan (ports 1 to 1024) is available
   connectors: true,          // router / switch / controller connections may run
   meraki: true,              // Cisco Meraki (cloud) may be contacted
-  snmpV3Only: false          // refuse SNMP version 1 and 2c (they send the community name as plain text)
+  snmpV3Only: false,         // refuse SNMP version 1 and 2c (they send the community name as plain text)
+  snmpEnabled: true,         // false: SNMP is never used at all (connections of type SNMP, the SNMP finder, traffic counters over SNMP)
+  scanProbe: true,           // scans may ping machines and check their ports (false = "quiet": only listen, no probing)
+  scanMdns: true,            // scans may listen for mDNS / Bonjour announcements
+  scanSsdp: true,            // scans may listen for SSDP / UPnP announcements
+  scanNetbios: true,         // scans may ask Windows machines for their name (NetBIOS)
+  scanReverseDns: true       // scans may look up machine names with your DNS server
 });
+// "Quiet" changes only how machines are found: nothing is pinged or port-checked, no NetBIOS questions, SNMP is off.
+const QUIET = Object.freeze({ scanProbe: false, scanNetbios: false, snmpEnabled: false });
 const STRICT = Object.freeze({ certs: 'strict', allowMedia: false, allowNotifications: false, allowClipboard: false, popups: false, thoroughScan: false, connectors: true, meraki: false, snmpV3Only: true });
 
 function clean(o) {
@@ -52,6 +60,6 @@ function set(o) {
   cache = next;
   return { ok: true, settings: next };
 }
-function preset(name) { return set(name === 'strict' ? STRICT : DEFAULTS); }
+function preset(name) { return set(name === 'strict' ? STRICT : name === 'quiet' ? QUIET : DEFAULTS); }
 
-module.exports = { DEFAULTS, STRICT, clean, init, get, set, preset };
+module.exports = { DEFAULTS, STRICT, QUIET, clean, init, get, set, preset };

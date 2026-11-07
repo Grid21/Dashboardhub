@@ -11,6 +11,7 @@
 //   openwrt   OpenWrt (ubus over HTTP): DHCP leases, host names, Wi-Fi clients.
 //   mikrotik  MikroTik RouterOS 7 (REST API): ARP table, DHCP names, Wi-Fi clients.
 //   opnsense  OPNsense (API key and secret): ARP table and DHCP leases.
+//   ssh       Any switch or router with SSH (Linux/OpenWrt, MikroTik, Cisco IOS, or any that answers "show arp"): ARP, MAC table with ports, DHCP leases. No SNMP.
 //   asus      ASUS routers (original firmware, usually Merlin too): client list with Wi-Fi band and signal.
 //
 // Only private addresses on your own network are allowed. Passwords are used for the request only and
@@ -20,6 +21,7 @@ const http = require('http');
 const https = require('https');
 const dgram = require('dgram');
 const crypto = require('crypto');
+const sshpoll = require('./ssh-poll');
 
 const TEST_HOOKS = {};        // only the test programs set this (it lets the Meraki test talk to a pretend server)
 const TYPES = {
@@ -35,7 +37,8 @@ const TYPES = {
   meraki: { label: 'Cisco Meraki (cloud dashboard, needs internet)', defaults: { port: 443, https: true }, userLabel: '', secretLabel: 'API key', cloud: true },
   cisco: { label: 'Cisco IOS XE switch or router (RESTCONF)', defaults: { port: 443, https: true }, userLabel: 'User name', secretLabel: 'Password' },
   arubacx: { label: 'Aruba CX switch (REST API)', defaults: { port: 443, https: true }, userLabel: 'User name', secretLabel: 'Password' },
-  hpe: { label: 'HPE OfficeConnect / 1820 / 1920 switch (SNMP)', defaults: { port: 161, https: false }, userLabel: '', secretLabel: 'Community name' }
+  hpe: { label: 'HPE OfficeConnect / 1820 / 1920 switch (SNMP)', defaults: { port: 161, https: false }, userLabel: '', secretLabel: 'Community name' },
+  ssh: { label: 'Any switch or router over SSH (no SNMP: reads the ARP / MAC / DHCP tables)', defaults: { port: 22, https: false }, userLabel: 'SSH user name', secretLabel: 'Password (empty = use your SSH key)' }
 };
 
 // ---------- helpers ----------
@@ -707,6 +710,36 @@ async function pollMikrotik(c) {
   };
 }
 
+// ---------- Any switch or router over SSH ----------
+async function pollSsh(c) {
+  const kind = String(c.site || 'linux').toLowerCase();
+  let r;
+  try { r = await sshpoll.readDevice(c, kind); }
+  catch (e) { throw new ConnError(e && e.kind ? e.kind : 'bad', e && e.message ? e.message : 'The SSH login did not work.'); }
+  const by = new Map();
+  r.rows.forEach((row) => {                                         // address table rows: the machines that really answer
+    if (row.lease) return;
+    const mac = normMac(String(row.mac || '')), ip = cleanIp(String(row.ip || ''));
+    if (!mac || !ip) return;
+    const cl = by.get(mac) || newClient(mac); by.set(mac, cl);
+    cl.ip = ip;
+    if (row.port) { cl.port = cleanText(row.port, 24); cl.via = 'port ' + cl.port; }
+  });
+  r.rows.forEach((row) => {                                         // names from the DHCP leases
+    if (!row.lease) return;
+    const mac = normMac(String(row.mac || ''));
+    if (!mac || !by.has(mac)) return;
+    const cl = by.get(mac);
+    if (row.name) cl.name = cleanText(row.name, 60) || cl.name;
+    cl.ip = cl.ip || cleanIp(String(row.ip || ''));
+  });
+  return {
+    host: c.host,
+    self: { name: '', brand: kind === 'cisco' ? 'Cisco' : kind === 'mikrotik' ? 'MikroTik' : '', model: '', ports: null, descr: 'Read over SSH (' + kind + ')', kind: kind === 'cisco' ? 'switch' : 'router' },
+    clients: Array.from(by.values()).slice(0, 3000), gear: []
+  };
+}
+
 // ---------- OPNsense ----------
 async function pollOpnsense(c) {
   const base = { host: c.host, port: c.port, https: c.https !== false, auth: c.username + ':' + c.password };
@@ -1269,7 +1302,7 @@ function cleanConfig(raw) {
     name: cleanText(o.name || '', 60),
     host: host,
     port: port,
-    https: (type === 'snmp' || type === 'hpe') ? false : (o.https === undefined ? !!def.https : o.https === true || o.https === 'true'),
+    https: (type === 'snmp' || type === 'hpe' || type === 'ssh') ? false : (o.https === undefined ? !!def.https : o.https === true || o.https === 'true'),
     username: String(o.username || '').slice(0, 100),
     password: String(o.password || '').slice(0, 200),
     site: /^[A-Za-z0-9_. -]{1,40}$/.test(String(o.site || '')) ? String(o.site).trim() : '',
@@ -1281,6 +1314,11 @@ function cleanConfig(raw) {
 }
 // extra rules that depend on the kind of device (called after the saved password has been filled in)
 function checkLogin(c) {
+  if (c.type === 'ssh') {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$/.test(c.username)) return 'Type the SSH user name (letters, numbers and . _ @ - only).';
+    const k = String(c.site || 'linux').toLowerCase();
+    if (!sshpoll.PROFILES[k]) return 'The device kind must be one of: ' + Object.keys(sshpoll.PROFILES).join(', ') + '.';
+  }
   if ((c.type === 'snmp' || c.type === 'hpe') && c.snmpVersion === 3) {
     if (!c.username) return 'SNMP version 3 needs the user name set in the device.';
     if (c.authProto !== 'none' && c.password.length < 8) return 'The authentication password of SNMP version 3 is at least 8 characters long.';
@@ -1293,7 +1331,7 @@ function checkLogin(c) {
 function explain(type, e) {
   const t = TYPES[type];
   const kind = e && e.kind ? e.kind : 'bad';
-  if (kind === 'refused') return { code: 'refused', error: 'Nothing answered at that address and port. Check the address and port, and that the service is switched on' + (type === 'mikrotik' ? ' (RouterOS 7: IP > Services > www-ssl or www)' : type === 'unifi' ? ' (UniFi OS consoles use port 443, classic controllers 8443)' : type === 'netgear' ? ' (Netgear routers usually answer on port 5000, or 443 with https)' : type === 'fritz' ? ' (FRITZ!Box: port 49000, or 49443 with https, and "access for applications" must be allowed)' : type === 'omada' ? ' (Omada: port 8043 for the software controller, 443 for an OC200)' : type === 'cisco' ? ' (Cisco: "restconf" and "ip http secure-server" must be switched on)' : type === 'arubacx' ? ' (Aruba CX: the REST API must be switched on for the management VRF)' : type === 'meraki' ? ' (Meraki needs an internet connection)' : '') + '.' };
+  if (kind === 'refused') return { code: 'refused', error: 'Nothing answered at that address and port. Check the address and port, and that the service is switched on' + (type === 'ssh' ? ' (SSH must be switched on in the device, usually on port 22)' : type === 'mikrotik' ? ' (RouterOS 7: IP > Services > www-ssl or www)' : type === 'unifi' ? ' (UniFi OS consoles use port 443, classic controllers 8443)' : type === 'netgear' ? ' (Netgear routers usually answer on port 5000, or 443 with https)' : type === 'fritz' ? ' (FRITZ!Box: port 49000, or 49443 with https, and "access for applications" must be allowed)' : type === 'omada' ? ' (Omada: port 8043 for the software controller, 443 for an OC200)' : type === 'cisco' ? ' (Cisco: "restconf" and "ip http secure-server" must be switched on)' : type === 'arubacx' ? ' (Aruba CX: the REST API must be switched on for the management VRF)' : type === 'meraki' ? ' (Meraki needs an internet connection)' : '') + '.' };
   if (kind === 'timeout') {
     return { code: 'timeout', error: (type === 'snmp' || type === 'hpe')
       ? 'No answer. SNMP must be switched on in the device (version 1, 2c or 3, read-only), the community name must be right ("public" is the usual default), and this computer must be allowed to reach it.'
@@ -1302,6 +1340,7 @@ function explain(type, e) {
   if (kind === 'auth') {
     if (e.message && /^v3: /.test(e.message)) return { code: 'auth', error: e.message.slice(4) };
     return { code: 'auth', error: (type === 'snmp' || type === 'hpe') ? 'The device answered, but not to this community name. Check the community name (it is case sensitive).'
+      : type === 'ssh' ? 'The SSH login was refused. Check the user name and password. With an empty password the login uses your SSH key, so the key must be set up on this computer (ssh-agent or a default key in your .ssh folder) and allowed on the device.'
       : type === 'opnsense' ? 'The API key or secret was refused. Create an API key under System > Access > Users and type the key as the user name and the secret as the password.'
       : type === 'unifi' ? 'The user name or password was refused. Use a local UniFi account (a read-only one is enough), not your ubiquiti.com login.'
       : 'The user name or password was refused. Check them, and that this account may log in to the device\'s web page.' };
@@ -1392,6 +1431,7 @@ async function countersAsus(c) {
 async function counters(config) {
   let c;
   try { c = cleanConfig(config); const bad = checkLogin(c); if (bad) throw new Error(bad); } catch (e) { return { ok: false, code: 'config', error: e.message }; }
+  if ((c.type === 'snmp' || c.type === 'hpe') && !POLICY.snmpEnabled) return SNMP_OFF;
   const run = { snmp: countersSnmp, hpe: countersSnmp, asus: countersAsus }[c.type];
   if (!run) return { ok: false, code: 'unsupported', error: 'This kind of device does not share live traffic numbers with Dashboard Hub yet.' };
   try { return Object.assign({ ok: true }, await run(c)); }
@@ -1401,6 +1441,7 @@ async function counters(config) {
 // ---------- SNMP finder: does this machine answer SNMP, and with which community name? ----------
 // A device with the wrong community name stays silent, exactly like one with SNMP switched off, so the two cannot be told apart.
 async function snmpProbe(host, communities, port) {
+  if (!POLICY.snmpEnabled) return { ok: false };
   if (!isPrivateIp(host)) return { ok: false, error: 'Only addresses inside your own network are allowed.' };
   const tries = [];
   [2, 1].forEach((v) => communities.forEach((cm) => tries.push({ v: v, cm: cm })));
@@ -1425,14 +1466,16 @@ async function snmpProbe(host, communities, port) {
 
 // ---------- ask one device ----------
 // Switches from the Security settings window
-const POLICY = { snmpV3Only: false, meraki: true };
-function setPolicy(p) { POLICY.snmpV3Only = !!(p && p.snmpV3Only); POLICY.meraki = !(p && p.meraki === false); }
+const POLICY = { snmpV3Only: false, meraki: true, snmpEnabled: true };
+function setPolicy(p) { POLICY.snmpV3Only = !!(p && p.snmpV3Only); POLICY.meraki = !(p && p.meraki === false); POLICY.snmpEnabled = !(p && p.snmpEnabled === false); }
+const SNMP_OFF = { ok: false, code: 'blocked', error: 'SNMP is turned off in the Security settings (Finding machines). Use another connection type, or turn SNMP back on there.' };
 async function poll(config) {
   let c;
   try { c = cleanConfig(config); const bad = checkLogin(c); if (bad) throw new Error(bad); } catch (e) { return { ok: false, code: 'config', error: e.message }; }
   if (c.type === 'meraki' && !POLICY.meraki) return { ok: false, code: 'blocked', error: 'Cisco Meraki is turned off in the Security settings (it needs an internet connection).' };
+  if ((c.type === 'snmp' || c.type === 'hpe') && !POLICY.snmpEnabled) return SNMP_OFF;
   if ((c.type === 'snmp' || c.type === 'hpe') && POLICY.snmpV3Only && c.snmpVersion !== 3) return { ok: false, code: 'blocked', error: 'This connection uses SNMP version 1 or 2c, which the Security settings do not allow. Change it to version 3, or turn "SNMP version 3 only" off.' };
-  const run = { snmp: pollSnmp, hpe: pollSnmp, unifi: pollUnifi, openwrt: pollOpenwrt, mikrotik: pollMikrotik, opnsense: pollOpnsense, asus: pollAsus, netgear: pollNetgear, fritz: pollFritz, omada: pollOmada, meraki: pollMeraki, cisco: pollCisco, arubacx: pollArubaCx }[c.type];
+  const run = { snmp: pollSnmp, hpe: pollSnmp, unifi: pollUnifi, openwrt: pollOpenwrt, mikrotik: pollMikrotik, opnsense: pollOpnsense, asus: pollAsus, netgear: pollNetgear, fritz: pollFritz, omada: pollOmada, meraki: pollMeraki, cisco: pollCisco, arubacx: pollArubaCx, ssh: pollSsh }[c.type];
   try {
     const data = await run(c);
     const out = { ok: true, host: c.host, type: c.type, self: data.self || null, clients: data.clients || [], gear: data.gear || [], note: data.note || '' };
@@ -1444,4 +1487,4 @@ async function poll(config) {
   }
 }
 
-module.exports = { setPolicy, snmpProbe, counters, hexNum, httpRequest, ConnError, bandName, freqBand, parseRate, mbps, TEST_HOOKS, poll, cleanConfig, checkLogin, TYPES, SNMP, isPrivateIp, normMac };
+module.exports = { sshpoll, setPolicy, snmpProbe, counters, hexNum, httpRequest, ConnError, bandName, freqBand, parseRate, mbps, TEST_HOOKS, poll, cleanConfig, checkLogin, TYPES, SNMP, isPrivateIp, normMac };

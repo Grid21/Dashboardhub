@@ -7,6 +7,10 @@
   // [what it is for, ports, who is contacted]  (all connections start from this computer)
   const PORTS = [
     ['Finding machines', 'Ping, plus this computer\'s own address table (no port)'],
+    ['Reading a switch or router over SSH (optional connection)', 'TCP 22 (or the port you set) to that device'],
+    ['Listening for announcements (mDNS and SSDP)', 'UDP 5353 and UDP 1900 (local network multicast), then one web request to a device that answered'],
+    ['Asking Windows machines for their name (NetBIOS)', 'UDP 137'],
+    ['Looking up machine names', 'DNS (UDP 53) to your own DNS server'],
     ['Checking whether a machine is alive', 'TCP 22, 53, 80, 135, 139, 443, 445, 3389, 8080, 62078'],
     ['Quick scan', 'About 100 common service ports (SSH, web, file sharing, printers, media servers...)'],
     ['Thorough scan', 'The quick-scan ports plus TCP 1 to 1024'],

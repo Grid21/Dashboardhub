@@ -707,6 +707,7 @@ ipcMain.handle('net:scan', (event, options) => {
     cidr: String(options.cidr || ''),
     mode: options.mode === 'thorough' ? 'thorough' : options.mode === 'background' ? 'background' : 'quick',
     router: String(options.router || ''),
+    methods: { probe: security.get().scanProbe, mdns: security.get().scanMdns, ssdp: security.get().scanSsdp, netbios: security.get().scanNetbios, reverseDns: security.get().scanReverseDns },
     known: Array.isArray(options.known) ? options.known.slice(0, 1100).filter((x) => typeof x === 'string' && x.length < 16) : []
   }, send);
   if (!result.ok) return result;
@@ -725,6 +726,7 @@ ipcMain.handle('net:wake', async (event, macs) => {
 ipcMain.handle('snmp:find', async (event, req) => {
   checkSender(event);
   if (!req || typeof req !== 'object') return { ok: false, error: 'Bad request' };
+  if (security.get().snmpEnabled === false) return { ok: false, error: 'SNMP is turned off in the Security settings (Finding machines), so the SNMP finder is not available. Turn SNMP back on there to use it.' };
   if (security.get().snmpV3Only || !security.get().connectors) return { ok: false, error: 'The SNMP finder tries version 2c, which the Security settings do not allow right now (or router connections are off).' };
   const ips = Array.from(new Set((Array.isArray(req.ips) ? req.ips : []).filter((x) => typeof x === 'string' && connectors.isPrivateIp(x)))).slice(0, 40);
   const comms = Array.from(new Set((Array.isArray(req.communities) ? req.communities : []).map((x) => String(x).trim()).filter((x) => x && x.length <= 64 && !/[\u0000-\u001f\u007f]/.test(x)))).slice(0, 6);
@@ -894,7 +896,7 @@ ipcMain.handle('security:set', (event, o) => {
 ipcMain.handle('security:preset', (event, name) => {
   checkSender(event);
   const before = security.get().certs;
-  const r = security.preset(name === 'strict' ? 'strict' : 'default'); if (r.ok) { connectors.setPolicy(r.settings); if (r.settings.certs !== before) forgetCertDecisions(); }
+  const r = security.preset(name === 'strict' ? 'strict' : name === 'quiet' ? 'quiet' : 'default'); if (r.ok) { connectors.setPolicy(r.settings); if (r.settings.certs !== before) forgetCertDecisions(); }
   return r;
 });
 // Chromium remembers "this certificate is fine" for a while: drop the open connections and cached answers so the new rule applies to the next load

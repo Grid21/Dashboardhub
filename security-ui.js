@@ -3,7 +3,7 @@
   const $ = (id) => document.getElementById(id);
   const dlg = $('securityDialog'), btn = $('securityMenuBtn');
   if (!dlg || !btn || !window.securityApi) return;
-  const MAP = { secPopups: 'popups', secMedia: 'allowMedia', secNotif: 'allowNotifications', secClip: 'allowClipboard', secThorough: 'thoroughScan', secConn: 'connectors', secMeraki: 'meraki', secV3: 'snmpV3Only' };
+  const MAP = { secPopups: 'popups', secMedia: 'allowMedia', secNotif: 'allowNotifications', secClip: 'allowClipboard', secThorough: 'thoroughScan', secConn: 'connectors', secMeraki: 'meraki', secV3: 'snmpV3Only', secSnmpOn: 'snmpEnabled', secProbe: 'scanProbe', secMdns: 'scanMdns', secSsdp: 'scanSsdp', secNb: 'scanNetbios', secRdns: 'scanReverseDns' };
   const say = (t) => { $('secMsg').textContent = t || ''; };
 
   function fill(s) {
@@ -22,9 +22,10 @@
   Object.keys(MAP).forEach((id) => $(id).addEventListener('change', () => save({ [MAP[id]]: $(id).checked })));
   const preset = async (name) => {
     let r; try { r = await window.securityApi.preset(name); } catch (e) { r = null; }
-    if (r && r.ok) { fill(r.settings); say(name === 'strict' ? 'Strictest settings applied.' : 'Standard settings restored.'); } else say('The settings could not be saved.');
+    if (r && r.ok) { fill(r.settings); say(name === 'strict' ? 'Strictest settings applied.' : name === 'quiet' ? 'Quiet finding applied: listening only, SNMP off.' : 'Standard settings restored.'); } else say('The settings could not be saved.');
   };
   $('secDefault').addEventListener('click', () => preset('default'));
   $('secStrict').addEventListener('click', () => preset('strict'));
+  $('secQuiet').addEventListener('click', () => preset('quiet'));
   $('secClose').addEventListener('click', () => dlg.close());
 })();

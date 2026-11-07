@@ -108,5 +108,5 @@ contextBridge.exposeInMainWorld('updateApi', {
 contextBridge.exposeInMainWorld('securityApi', {
   get: () => ipcRenderer.invoke('security:get'),
   set: (o) => ipcRenderer.invoke('security:set', o),
-  preset: (name) => ipcRenderer.invoke('security:preset', name === 'strict' ? 'strict' : 'default')
+  preset: (name) => ipcRenderer.invoke('security:preset', name === 'strict' ? 'strict' : name === 'quiet' ? 'quiet' : 'default')
 });

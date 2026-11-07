@@ -8,6 +8,7 @@
 
   const HELP = {
     snmp: 'Switch on SNMP (read-only) in the device\'s settings. Version 2c needs a "community" name (often "public"); version 3 needs the user name and passwords you set up in the device (at least 8 characters each). Works with most managed switches, routers and access points (HPE / Aruba, Cisco, Netgear, TP-Link, Zyxel, D-Link, MikroTik and more). It also tells you which switch port each machine is plugged into.',
+    ssh: 'No SNMP needed. The app logs in over SSH and runs a few fixed read-only "show" commands to read the ARP table, the MAC table (which port each machine is on) and DHCP leases. Device kind: linux (OpenWrt, pfSense-style and other Linux routers), mikrotik, cisco (IOS / IOS XE), or other (any device that answers "show arp"). Leave the password empty to use your SSH key (set it up with ssh-agent or a default key in your .ssh folder). A password works on Linux and macOS; on Windows use a key. The first connection trusts the device\'s SSH identity and remembers it.',
     unifi: 'Use a local UniFi account (a read-only one is enough, not your ubiquiti.com login). Works with UniFi OS consoles (port 443) and classic controllers (port 8443). Shows Wi-Fi or cable, the access point or switch port, and lists your UniFi switches and access points.',
     openwrt: 'Needs the packages uhttpd-mod-ubus and rpcd-mod-luci (normally installed). Log in with the root account. Shows which machines are on Wi-Fi.',
     mikrotik: 'RouterOS 7 or newer: switch on the "www-ssl" service (IP > Services) and use a read-only user. Shows names and which machines are on Wi-Fi.',
@@ -21,7 +22,7 @@
     arubacx: 'On an Aruba CX switch, switch on the REST API ("https-server rest access-mode read-only" with the management VRF enabled) and use a user that may read. Shows the model, port count and which port each machine is on.',
     hpe: 'Works with HPE OfficeConnect (1810, 1820, 1910, 1920, 1920S, 1950) and ProCurve switches. Switch on SNMP in the web interface (version 2c with community name "public" or your custom community). It reads the switch model, port count, and which switch port each machine is plugged into.'
   };
-  const SITE_LABEL = { unifi: ['UniFi site name', 'default'], omada: ['Omada site name (empty = all sites)', ''], meraki: ['Network name (empty = all networks)', ''] };
+  const SITE_LABEL = { ssh: ['Device kind: linux, mikrotik, cisco or other', 'linux'], unifi: ['UniFi site name', 'default'], omada: ['Omada site name (empty = all sites)', ''], meraki: ['Network name (empty = all networks)', ''] };
 
   let types = {}, canEncrypt = true, list = [], editing = null, lastPoll = 0, polling = false;
   const msg = $('connMsg');
@@ -85,7 +86,7 @@
     const cloud = !!t.cloud;
     $('connHostRow').classList.toggle('hidden', cloud);
     $('connPortRow').classList.toggle('hidden', cloud);
-    $('connHttpsRow').classList.toggle('hidden', snmp || cloud);
+    $('connHttpsRow').classList.toggle('hidden', snmp || cloud || k === 'ssh');
     $('connSnmpRow').classList.toggle('hidden', !snmp);
     $('connV3Auth').classList.toggle('hidden', !v3);
     $('connV3Priv').classList.toggle('hidden', !v3 || $('connAuthProto').value === 'none');

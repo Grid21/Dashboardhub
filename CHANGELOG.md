@@ -2,6 +2,18 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.10.80
+- New connection type **SSH** (no SNMP): reads the ARP table, MAC table with switch ports, and DHCP leases from Linux/OpenWrt routers, MikroTik, Cisco IOS / IOS XE, or any device that answers "show arp". Key login, or a password on Linux and macOS.
+- Only a fixed list of read-only commands is ever run; user names and device kinds are checked.
+- About window lists the SSH port.
+
+## 1.10.79
+- New "Finding machines (no SNMP needed)" section in Settings > Security: separate switches for ping and port checks, mDNS/Bonjour, SSDP/UPnP, NetBIOS names, DNS name lookups, and a master switch that turns SNMP off completely.
+- New "Quiet scan, no SNMP" button: listening only, no pings or port checks, no NetBIOS questions, SNMP off.
+- Scans now use mDNS, SSDP and NetBIOS to find and name machines (machines that ignore pings but announce themselves are now found).
+- Each machine records which methods found it.
+- About window lists the ports used by the new methods.
+
 ## 1.10.78
 - Group circle rings are now all the same thin thickness, whatever the circle's size.
 

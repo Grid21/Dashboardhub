@@ -133,7 +133,7 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 - The app's pages are isolated from the system (no direct system access), and every internal request is checked.
 - Notes, router logins and server logins are encrypted with the operating system's secure storage. When a computer can't encrypt, they're kept in memory only and never written to disk.
 - Backups are cleaned and checked when imported.
-- **Device groups:** tick machines in the Devices list, type a name and press "Set group". The map draws a bold coloured circle with the name around them and they move together when you drag one (Ctrl+drag moves just one). "Move groups together" and "Group circles" switch each part on or off.
+- **Device groups:** tick machines in the Devices list, type a name and press "Set group" (or "Remove from group" to take them out). The map draws a coloured circle with the name around them and they move together when you drag one (Ctrl+drag moves just one). "Move groups together" and "Group circles" switch each part on or off.
 - **Graphics safety:** the 3D map stops drawing completely while the window is hidden, minimised or in the tray, and idles at a low, steady rate when nothing changes (independent of monitor refresh rate). It survives a graphics-driver reset (context loss/restore), falls back gracefully on weak graphics, caps its picture size, and never runs two draw loops. If the graphics process crashes 3 times in 10 minutes, the app switches to software drawing by itself and explains why in Settings. A crashed main page reloads automatically.
 
 ### Quality

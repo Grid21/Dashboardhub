@@ -37,6 +37,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const png = await page.screenshot();
   const px = await page.evaluate(async (b64) => { const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode(); const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const x = c.getContext('2d'); x.drawImage(img, 0, 0); const d = x.getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) { if (d[i + 2] > 200 && d[i] > 120 && d[i] < 200 && d[i + 1] > 120 && d[i + 1] < 210) n++; } return n; }, png.toString('base64'));
   check('the ring is really drawn on screen (pixel check)', px > 300, 'ring-coloured pixels: ' + px);
+  // flat map: no lifting, everything on one level, circle sits on the floor
+  const lvl = await page.evaluate(() => { const d = window.hubNetmap.exportData().devices; return Object.values(d).map((x) => x.pos.y); });
+  check('every machine is on the same flat level', lvl.every((y) => y === 0), JSON.stringify(lvl));
+  await page.evaluate(() => { const e = window.hubNetmap.exportData(); Object.values(e.devices).forEach((d) => { if (!d.isRouter) d.pos.y = 9; }); window.hubNetmap.importData(e, true); }); await sleep(800);
+  const lvl2 = await page.evaluate(() => Object.values(window.hubNetmap.exportData().devices).map((x) => x.pos.y));
+  check('old saved heights are flattened on load', lvl2.every((y) => y === 0), JSON.stringify(lvl2));
+  check('the floor grid sits just under the machines, not far below', await page.evaluate(() => { const g = window.__hubMap.floorY(); return g > -2 && g < -0.5; }));
   // switch off circles
   await page.evaluate(() => { const c = document.getElementById('mapGroupCircles'); c.checked = false; c.dispatchEvent(new Event('change', { bubbles: true })); }); await sleep(500);
   check('Group circles off: no circle', (await groups()).length === 0);
@@ -87,6 +94,31 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const rows = await page.locator('.ml-row').count();
   check('the machine list still shows the machines with group headings', rows >= 5 && (await page.locator('.ml-group').count()) >= 2, String(rows));
   const hint = await page.evaluate(() => document.getElementById('mapHint') ? document.getElementById('mapHint').textContent : '');
+
+  // remove from group
+  const listOpen = await page.evaluate(() => !!document.querySelector('.ml-row'));
+  if (!listOpen) { await page.click('#mapList, text=Devices'); await sleep(400); }
+  await page.evaluate(() => { document.querySelectorAll('.ml-row input[type=checkbox]').forEach((c) => { if (c.checked) c.click(); }); });
+  const lrows = page.locator('.ml-row');
+  const tick = (label, on) => page.evaluate(([l, o]) => { const r = [...document.querySelectorAll('.ml-row')].find((x) => x.textContent.includes(l)); const c = r.querySelector('input[type=checkbox]'); if (c.checked !== o) c.click(); }, [label, on]);
+  const find = async (label) => { const n = await lrows.count(); for (let i = 0; i < n; i++) { if ((await lrows.nth(i).innerText()).includes(label)) return i; } return -1; };
+  const i4 = await find('dev4'), i1 = await find('dev1'), i2 = await find('dev2');
+  await tick('dev4', true); await sleep(200);
+  check('Remove from group is greyed out when nobody selected is in a group', await page.locator('#mapBulkUngroup').isDisabled());
+  await tick('dev4', false);
+  await tick('dev1', true); await sleep(200);
+  check('Remove from group shows how many machines it will take out', /\(1\)/.test(await page.locator('#mapBulkUngroup').innerText()));
+  await page.evaluate(() => document.getElementById('mapBulkUngroup').click()); await sleep(800);
+  const gAfter = await page.evaluate(() => { const e = window.hubNetmap.exportData().devices; return Object.values(e).filter((d) => d.group === 'IoT').length; });
+  check('one machine was taken out of the group, the rest stay', gAfter === 2, 'still in IoT: ' + gAfter);
+  check('its group is now empty', (await page.evaluate((k) => window.hubNetmap.exportData().devices[k].group, M + 1)) === '');
+  check('the circle still surrounds the 2 remaining machines', (await groups()).length === 1);
+  await tick('dev2', true); await page.evaluate(() => document.getElementById('mapBulkUngroup').click()); await sleep(800);
+  check('a group with only one machine left loses its circle', (await groups()).length === 0);
+  await page.fill('#mapBulkGroup', ''); 
+  await tick('dev3', true); await page.evaluate(() => [...document.querySelectorAll('.ml-bulk button')].find((b) => b.textContent === 'Set group').click()); await sleep(500);
+  check('Set group with an empty name does nothing (no accidental clearing)', (await page.evaluate((k) => window.hubNetmap.exportData().devices[k].group, M + 3)) === 'IoT');
+  check('the machine pane has its own Remove from group button', await (async () => { await page.evaluate((k) => { window.hubNetmap.selectDevice ? window.hubNetmap.selectDevice(k) : null; }, M + 3); const sc = await page.evaluate((k) => window.__hubMap.screenOf(k), M + 3); await page.mouse.click(sc.x, sc.y); await sleep(500); return (await page.locator('#mapSideUngroup').count()) === 1; })());
   check('no page errors', errors.length === 0, errors.join(' | '));
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
   await app.close();

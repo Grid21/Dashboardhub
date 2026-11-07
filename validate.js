@@ -129,7 +129,7 @@ function cleanNetDevice(key, d) {
   }
   const isRouter = key === 'router';
   const manual = key.startsWith('manual:');
-  const pos = o.pos && typeof o.pos === 'object' ? { x: coord(o.pos.x), y: coord(o.pos.y), z: coord(o.pos.z) } : { x: 0, y: 0, z: 0 };
+  const pos = o.pos && typeof o.pos === 'object' ? { x: coord(o.pos.x), y: 0, z: coord(o.pos.z) } : { x: 0, y: 0, z: 0 };
   return {
     key: key,
     ip: isIp(o.ip) ? o.ip : '',

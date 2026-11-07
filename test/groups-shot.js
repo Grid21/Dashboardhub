@@ -21,7 +21,7 @@ const ROOT = path.join(__dirname, '..'); const sleep = (ms) => new Promise((r) =
   const chk = page.locator('.ml-row input[type=checkbox]'); const n = await chk.count(); console.log('rows', n);
   for (let i = 0; i < n; i++) await chk.nth(i).check();
   await page.fill('#mapBulkGroup', 'IoT'); await page.click('text=Set group'); await sleep(1200);
-  await page.screenshot({ path: process.argv[2] + '/after.png' }); await page.click('#mapTop'); await sleep(1500); await page.screenshot({ path: process.argv[2] + '/after-top.png', clip: { x: 320, y: 220, width: 740, height: 680 } });
+  await page.evaluate(() => document.getElementById('mapBulkUngroup').scrollIntoView({ block: 'center' })); await sleep(300); await page.screenshot({ path: process.argv[2] + '/bulk.png', clip: { x: 0, y: 220, width: 330, height: 680 } }); await page.screenshot({ path: process.argv[2] + '/after.png' }); await page.click('#mapTop'); await sleep(1500); await page.screenshot({ path: process.argv[2] + '/after-top.png', clip: { x: 320, y: 220, width: 740, height: 680 } });
   console.log(JSON.stringify(await page.evaluate(() => window.__hubMap.groups())));
   await app.close();
 })();

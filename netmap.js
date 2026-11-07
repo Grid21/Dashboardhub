@@ -41,12 +41,13 @@
     return h.match(/../g).join(':');
   }
   const text = (v, max) => String(v === null || v === undefined ? '' : v).slice(0, max || 100);
+  const FLOOR_Y = -1.1;   // the grid floor sits just under the machines
   const num = (v, fallback) => (typeof v === 'number' && isFinite(v) ? Math.max(-300, Math.min(300, v)) : fallback);
 
   function spiralPos(i) {
     const angle = i * 2.39996;
     const r = 11 + 3.2 * Math.sqrt(i);
-    return { x: Math.cos(angle) * r, y: (((i * 5) % 5) - 2) * 0.8, z: Math.sin(angle) * r };
+    return { x: Math.cos(angle) * r, y: 0, z: Math.sin(angle) * r };
   }
 
   function cleanExtras(d) {
@@ -116,7 +117,7 @@
       isRouter: key === 'router',
       pos: { x: 0, y: 0, z: 0 }
     };
-    if (d.pos) out.pos = { x: num(d.pos.x, 0), y: num(d.pos.y, 0), z: num(d.pos.z, 0) };
+    if (d.pos) out.pos = { x: num(d.pos.x, 0), y: 0, z: num(d.pos.z, 0) };      // every machine sits on the same flat level
     return Object.assign(out, cleanExtras(d));
   }
 
@@ -469,7 +470,7 @@
     scene.add(fill);
 
     const grid = new THREE.GridHelper(160, 32, 0x2c3340, 0x1c2330);
-    grid.position.y = -7;
+    grid.position.y = FLOOR_Y;
     scene.add(grid);
 
     nodeGeo = new THREE.BoxGeometry(3.2, 2, 2);
@@ -842,15 +843,15 @@
     Array.from(groupObjs.keys()).forEach((k) => { if (!want.has(k) || want.get(k).length < 2) removeGroupObj(k); });
     want.forEach((list, name) => {
       if (list.length < 2) return;
-      let cx = 0, cz = 0, minY = Infinity;
-      list.forEach((d) => { cx += d.pos.x; cz += d.pos.z; minY = Math.min(minY, d.pos.y); });
+      let cx = 0, cz = 0;
+      list.forEach((d) => { cx += d.pos.x; cz += d.pos.z; });
       cx /= list.length; cz /= list.length;
       let r = 0;
       list.forEach((d) => { r = Math.max(r, Math.hypot(d.pos.x - cx, d.pos.z - cz)); });
       r = Math.min(Math.max(r + 1.6, 2.2), 400);
       let o = groupObjs.get(name);
       if (!o) {
-        if (!groupDiscGeo) { groupDiscGeo = new THREE.CircleGeometry(1, 96); groupRingGeo = new THREE.RingGeometry(0.92, 1, 96); }
+        if (!groupDiscGeo) { groupDiscGeo = new THREE.CircleGeometry(1, 96); groupRingGeo = new THREE.RingGeometry(0.96, 1, 96); }
         const col = groupColor(name);
         const mesh = new THREE.Mesh(groupDiscGeo, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.24, depthWrite: false, side: THREE.DoubleSide }));
         const ring = new THREE.Mesh(groupRingGeo, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 1, depthWrite: false, side: THREE.DoubleSide }));
@@ -862,7 +863,7 @@
         o = { mesh: mesh, ring: ring, sprite: sprite };
         groupObjs.set(name, o);
       }
-      const y = minY - 0.45;
+      const y = FLOOR_Y + 0.04;
       o.mesh.position.set(cx, y, cz); o.ring.position.set(cx, y + 0.01, cz);
       o.mesh.scale.setScalar(r); o.ring.scale.setScalar(r);
       const lh = Math.min(Math.max(r * 0.3, 1.6), 3.6), asp = (o.sprite.material.map && o.sprite.material.map.userData && o.sprite.material.map.userData.aspect) || 5;
@@ -1072,18 +1073,12 @@
     return hits.length ? hits[0].object.userData.linkId : null;
   }
 
-  function planeFor(dev, shift) {
-    const p = new THREE.Vector3(dev.pos.x, dev.pos.y, dev.pos.z);
-    let normal = new THREE.Vector3(0, 1, 0);
-    if (shift) {
-      normal = new THREE.Vector3(camera.position.x - p.x, 0, camera.position.z - p.z);
-      if (normal.lengthSq() < 1e-6) normal.set(0, 0, 1);
-      normal.normalize();
-    }
-    return new THREE.Plane().setFromNormalAndCoplanarPoint(normal, p);
+  function planeFor(dev) {
+    const p = new THREE.Vector3(dev.pos.x, 0, dev.pos.z);
+    return new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), p);
   }
-  function planeHit(dev, shift) {
-    const plane = planeFor(dev, shift);
+  function planeHit(dev) {
+    const plane = planeFor(dev);
     const pt = new THREE.Vector3();
     if (!raycaster.ray.intersectPlane(plane, pt)) return null;
     if (pt.distanceTo(camera.position) > 600) return null;
@@ -1096,8 +1091,8 @@
     downInfo = { x: e.clientX, y: e.clientY, key: key };
     if (key) {
       const dev = net.devices[key];
-      const hit = key === 'router' ? null : planeHit(dev, e.shiftKey);
-      drag = { key: key, moved: false, solo: !!(e.ctrlKey || e.metaKey), mates: null, shift: !!e.shiftKey, offset: hit ? new THREE.Vector3(dev.pos.x - hit.x, dev.pos.y - hit.y, dev.pos.z - hit.z) : new THREE.Vector3() };
+      const hit = key === 'router' ? null : planeHit(dev);
+      drag = { key: key, moved: false, solo: !!(e.ctrlKey || e.metaKey), mates: null, offset: hit ? new THREE.Vector3(dev.pos.x - hit.x, 0, dev.pos.z - hit.z) : new THREE.Vector3() };
       controls.enabled = false;
       try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
       e.stopPropagation();
@@ -1110,21 +1105,16 @@
       if (drag.moved && drag.key !== 'router') {
         const dev = net.devices[drag.key];
         setRay(e);
-        if (!!e.shiftKey !== drag.shift) {      // switched between flat and lift mode: re-grab from here
-          drag.shift = !!e.shiftKey;
-          const h = planeHit(dev, drag.shift);
-          drag.offset = h ? new THREE.Vector3(dev.pos.x - h.x, dev.pos.y - h.y, dev.pos.z - h.z) : new THREE.Vector3();
-        }
-        const pt = planeHit(dev, drag.shift);
+        const pt = planeHit(dev);
         if (pt) {
           if (!drag.mates) drag.mates = drag.solo ? [] : clusterMates(dev);     // Ctrl (or Cmd) + drag moves just this one machine out of its group
-          const ox = dev.pos.x, oy = dev.pos.y, oz = dev.pos.z;
+          const ox = dev.pos.x, oz = dev.pos.z;
           dev.pos.x = num(pt.x + drag.offset.x, dev.pos.x);
-          dev.pos.y = num(pt.y + drag.offset.y, dev.pos.y);
+          dev.pos.y = 0;
           dev.pos.z = num(pt.z + drag.offset.z, dev.pos.z);
           drag.mates.forEach((m) => {
             m.pos.x = num(m.pos.x + dev.pos.x - ox, m.pos.x);
-            m.pos.y = num(m.pos.y + dev.pos.y - oy, m.pos.y);
+            m.pos.y = 0;
             m.pos.z = num(m.pos.z + dev.pos.z - oz, m.pos.z);
           });
           syncScene();
@@ -1242,7 +1232,7 @@
   }
 
   function setHint(extra) {
-    els.hint.textContent = extra || 'Drag a machine to move it (its whole group follows) · Ctrl+drag moves just one · Shift+drag to lift it up or down · Drag empty space to rotate · Right-drag to move the view · Scroll to zoom';
+    els.hint.textContent = extra || 'Drag a machine to move it (its whole group follows) · Ctrl+drag moves just one · Drag empty space to rotate · Right-drag to move the view · Scroll to zoom';
   }
 
   function refresh() {
@@ -1693,11 +1683,16 @@
           });
           side.appendChild(csel);
         }
-        side.appendChild(el('p', 'small-note', 'Group (for sorting in the Devices list):'));
+        side.appendChild(el('p', 'small-note', 'Group (machines in a group get a circle and move together):'));
         const gin = el('input');
         gin.type = 'text'; gin.maxLength = 30; gin.placeholder = 'for example: Living room'; gin.value = d.group || '';
-        gin.addEventListener('change', () => { d.group = text(gin.value.trim(), 30); save(); queueSync(); });
+        gin.addEventListener('change', () => { d.group = text(gin.value.trim(), 30); save(); queueSync(); renderList(); });
         side.appendChild(gin);
+        if (d.group) {
+          const rmb = btn('Remove from group "' + d.group + '"', () => { d.group = ''; save(); queueSync(); renderSide(); renderList(); });
+          rmb.id = 'mapSideUngroup';
+          side.appendChild(rmb);
+        }
         const rowC = el('div', 'btnrow');
         const dropDevice = (ignoreIt) => {
           if (ignoreIt && !d.manual) {
@@ -1752,7 +1747,7 @@
     side.appendChild(el('h4', null, 'How to use the map'));
     const ul = el('ul');
     ['Click a machine to see its IP, MAC address, open ports and system.',
-      'Drag a machine to move it. Hold Shift while dragging to lift it up or down.',
+      'Drag a machine to move it.',
       'Press "Draw lines", then click two machines to connect them. Click a line to select it, then delete it.',
       'Press "Add switch" to put a switch on the map, then connect it to the router and your machines with lines.',
       'With Live update on, the map quietly watches for machines joining and leaving.',
@@ -2595,11 +2590,22 @@
     grp.appendChild(gin);
     grp.appendChild(btn('Set group', () => {
       const name = text(gin.value.trim(), 30);
+      if (!name) { listMsg = 'Type a group name first (or use "Remove from group").'; renderList(); return; }
       keys().forEach((d) => { d.group = name; });
-      listMsg = name ? 'Group "' + name + '" set.' : 'Group cleared.';
+      listMsg = 'Group "' + name + '" set.';
       save(); queueSync(); renderSide(); renderList();
     }));
     lsBulk.appendChild(grp);
+    const inGroup = keys().filter((d) => d.group);
+    const rm = btn(inGroup.length ? 'Remove from group (' + inGroup.length + ')' : 'Remove from group', () => {
+      const c = inGroup.length;
+      inGroup.forEach((d) => { d.group = ''; });
+      listMsg = c + (c === 1 ? ' machine' : ' machines') + ' removed from ' + (c === 1 ? 'its group.' : 'their groups.');
+      save(); queueSync(); renderSide(); renderList();
+    });
+    rm.id = 'mapBulkUngroup';
+    if (!inGroup.length) { rm.disabled = true; rm.title = 'None of the selected machines is in a group.'; }
+    lsBulk.appendChild(rm);
     const wrow = el('div', 'ml-grp');
     wrow.appendChild(btn('Wake up selected', () => {
       const list = keys();
@@ -3162,6 +3168,7 @@
       return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height };
     },
     sync: function () { syncScene(); },
+    floorY: function () { return FLOOR_Y; },
     labelOf: function (key) { const n = nodes.get(key); return n ? n.sig : null; },
     linkOpacity: function (x, y) { const o = linkObjs.get(linkId(x, y)); return o ? { op: o.vis.material.opacity, pulse: !!o.pulse, dashed: !!o.vis.material.alphaMap, alphaTest: o.vis.material.alphaTest, transparent: o.vis.material.transparent } : null; },
     linkStyle: function (x, y) { const l = net.links.find((q) => linkId(q.a, q.b) === linkId(x, y)); if (!l) return null; return { color: linkColor(l), auto: !!l.auto, cable: l.cable === true, wireless: isWireless(l) }; },

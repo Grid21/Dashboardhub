@@ -20,7 +20,9 @@ contextBridge.exposeInMainWorld('settingsApi', {
   set: (s) => ipcRenderer.invoke('app:settings:set', s),
   notify: (text) => ipcRenderer.invoke('app:notify', text),
   setGpu: (on) => ipcRenderer.invoke('app:gpu:set', on),
-  restart: () => ipcRenderer.invoke('app:restart')
+  restart: () => ipcRenderer.invoke('app:restart'),
+  // told when the window is hidden, minimised or shown again, so the page can stop drawing while nobody can see it
+  onVisible: (cb) => { if (typeof cb === 'function') ipcRenderer.on('window:visible', (e, v) => cb(v === true)); }
 });
 
 contextBridge.exposeInMainWorld('bmcApi', {
@@ -85,6 +87,7 @@ contextBridge.exposeInMainWorld('updaterApi', {
   download: () => ipcRenderer.invoke('updater:download'),
   openFolder: () => ipcRenderer.invoke('updater:openFolder'),
   versions: () => ipcRenderer.invoke('updater:versions'),
+  setKeep: (n) => ipcRenderer.invoke('updater:setKeep', Number(n)),
   switchTo: (v) => ipcRenderer.invoke('updater:switchTo', String(v || '')),
   armInstall: (name) => ipcRenderer.invoke('updater:armInstall', String(name || '')),
   tidy: () => ipcRenderer.invoke('updater:tidy')

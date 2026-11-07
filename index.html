@@ -142,6 +142,8 @@
       <button id="mapReset" type="button" title="Back to the starting camera angle">Reset view</button>
       <button id="mapTidy" type="button" title="Put every machine back in a neat spiral around the router">Tidy up</button>
       <label class="check-inline"><input type="checkbox" id="mapOffline" checked> Show offline</label>
+      <label class="check-inline" title="Machines in the same group (set in the machine list) move together when you drag one. Ctrl+drag moves just one."><input type="checkbox" id="mapGroupMove" checked> Move groups together</label>
+      <label class="check-inline" title="Draw a coloured circle and name around each group of machines"><input type="checkbox" id="mapGroupCircles" checked> Group circles</label>
       <label class="check-inline" title="Show the services (web apps, Docker containers, VPNs...) found on each machine as small boxes around it"><input type="checkbox" id="mapServices"> Show services</label>
     </div>
     <div class="map-progress hidden" id="mapProgress"><div id="mapProgressBar"></div></div>
@@ -257,9 +259,12 @@
     <p id="updDlgMsg" class="hint" aria-live="polite"></p>
     <p class="hint">Or install from a file: choose the update file you were given (it ends in .hubupdate). The app checks it,
        installs it, and then needs to be closed and opened again. Your panels, notes, map and settings are kept.</p>
-    <div id="updVersionsBox" class="hidden">
+    <div id="updVersionsBox">
       <h4>Earlier versions kept on this computer</h4>
-      <p class="hint">Dashboard Hub keeps the last 4 versions it ran. If something stops working, you can go back to any of them. Your panels, notes and settings are kept.</p>
+      <p class="hint">Dashboard Hub keeps a checked copy of the versions it ran, so you can go back if something stops working. Your panels, notes and settings are kept. Each copy takes about 1 MB.</p>
+      <label class="keep-row">Keep this many earlier versions
+        <select id="updKeep"></select></label>
+      <p id="updVersionsNone" class="hint hidden">No earlier versions are stored yet. When you install your next update, the version you are leaving is kept here.</p>
       <ul id="updVersions" class="ver-list"></ul>
     </div>
     <div id="updateProblem" class="problem hidden">

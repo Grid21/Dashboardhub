@@ -6,7 +6,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const KEEP_OLDER = 4;                                   // earlier versions kept besides the one running
+const KEEP_OLDER = 4;                                   // earlier versions kept besides the one running (the default; you can change it)
+const KEEP_MIN = 1, KEEP_MAX = 10;
 const DIR_RE = /^v\d{1,4}\.\d{1,4}\.\d{1,4}(-b[a-z0-9]{1,6})?$/;
 const VER_RE = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/;
 const NAME_RE = /^(vendor\/)?[A-Za-z0-9][A-Za-z0-9._-]{0,60}\.(js|json|html|css)$/;
@@ -49,6 +50,23 @@ function create(userData) {
   const updatesRoot = path.join(userData, 'updates');
   const archiveRoot = path.join(userData, 'version-archive');
   const pointerFile = path.join(updatesRoot, 'active.json');
+  const keepFile = path.join(userData, 'version-keep.json');
+
+  // how many earlier versions to keep: 1 to 10, 4 unless you changed it
+  function getKeep() {
+    const j = readJson(keepFile);
+    return j && Number.isInteger(j.keep) && j.keep >= KEEP_MIN && j.keep <= KEEP_MAX ? j.keep : KEEP_OLDER;
+  }
+  function setKeep(n) {
+    const v = typeof n === 'number' ? n : (typeof n === 'string' && /^\d{1,2}$/.test(n) ? Number(n) : NaN);
+    if (!Number.isInteger(v) || v < KEEP_MIN || v > KEEP_MAX) return { ok: false, error: 'Choose a number from ' + KEEP_MIN + ' to ' + KEEP_MAX + '.' };
+    try {
+      const tmp = keepFile + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify({ keep: v }), { mode: 0o600 });
+      fs.renameSync(tmp, keepFile);
+    } catch (e) { return { ok: false, error: 'The setting could not be saved.' }; }
+    return { ok: true, keep: v };
+  }
 
   // Copies every installed version that is complete and unchanged into the archive, then drops the oldest. Never throws.
   function archive(runningVersion) {
@@ -83,7 +101,7 @@ function create(userData) {
     const all = listArchive();
     const keep = new Set();
     if (runningVersion) keep.add(runningVersion);
-    all.filter((v) => v.version !== runningVersion).slice(0, KEEP_OLDER).forEach((v) => keep.add(v.version));
+    all.filter((v) => v.version !== runningVersion).slice(0, getKeep()).forEach((v) => keep.add(v.version));
     let names = []; try { names = fs.readdirSync(archiveRoot); } catch (e) { return; }
     for (const n of names) {
       const m = /^v(\d{1,4}\.\d{1,4}\.\d{1,4})$/.exec(n);
@@ -94,7 +112,7 @@ function create(userData) {
 
   // Versions you can go back to: kept copies other than the running one, newest first, and newer than the built-in program (older ones cannot run from an update).
   function choices(runningVersion, builtInVersion) {
-    return listArchive().filter((v) => v.version !== runningVersion && cmp(v.version, builtInVersion) > 0).slice(0, KEEP_OLDER);
+    return listArchive().filter((v) => v.version !== runningVersion && cmp(v.version, builtInVersion) > 0).slice(0, getKeep());
   }
 
   // Puts a kept version back in the updates folder and points the starter at it. The starter checks it again when it starts.
@@ -121,7 +139,7 @@ function create(userData) {
     } catch (e) { return { ok: false, error: 'Could not switch to version ' + version + ': ' + String(e.message).slice(0, 100) }; }
   }
 
-  return { archive, choices, switchTo, listArchive, prune, archiveRoot };
+  return { archive, choices, switchTo, listArchive, prune, archiveRoot, getKeep, setKeep };
 }
 
-module.exports = { create, KEEP_OLDER, verifiedFolder };
+module.exports = { create, KEEP_OLDER, KEEP_MIN, KEEP_MAX, verifiedFolder };

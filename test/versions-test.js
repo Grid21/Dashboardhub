@@ -58,4 +58,15 @@ r = va.switchTo('1.10.65', 'v1.10.65', '1.10.66', '1.10.1');
 const ptr2 = JSON.parse(fs.readFileSync(path.join(upd, 'active.json'), 'utf8'));
 check('if that folder name is the one running, a new name is used (so a running folder is never overwritten)', r.ok && /^v1\.10\.65-b[a-z0-9]+$/.test(ptr2.dir) && fs.existsSync(path.join(upd, 'v1.10.65')), ptr2.dir);
 check('the archive still has the 5 copies after switching', fs.readdirSync(path.join(ud, 'version-archive')).filter((n) => /^v\d/.test(n)).length >= 4);
+// ---- the "keep this many" setting ----
+check('keeps 4 until you change it', va.getKeep() === 4);
+check('odd values are refused and change nothing', [0, 11, -1, 2.5, 'x', '3; x', null, undefined, NaN].every((v) => va.setKeep(v).ok === false) && va.getKeep() === 4);
+check('1 to 10 are accepted (also typed as text)', va.setKeep(2).ok && va.getKeep() === 2 && va.setKeep('7').ok && va.getKeep() === 7);
+va.setKeep(2); va.archive('1.10.67');
+let k2 = fs.readdirSync(path.join(ud, 'version-archive')).filter((n) => /^v\d/.test(n));
+check('lowering it deletes the oldest copies (running + 2 kept)', k2.length === 3, k2.join());
+check('and the choices shrink to match', va.choices('1.10.67', '1.10.1').length === 2);
+check('the setting is remembered by a new instance (as after a restart)', VA.create(ud).getKeep() === 2);
+fs.writeFileSync(path.join(ud, 'version-keep.json'), '{"keep": 99}');
+check('a damaged settings file falls back to 4', VA.create(ud).getKeep() === 4);
 console.log('\n' + passed + ' passed, ' + failed + ' failed'); process.exit(failed ? 1 : 0);

@@ -19,7 +19,7 @@ You don't need to know any programming. You need **Node.js 24 LTS or newer** (th
 
 **Want a finished program instead of running from the folder?** Double-click `BUILD-APP.bat` on Windows (it makes `dist\Dashboard-Hub.exe`), or run `./BUILD-APP.sh` on Linux (it makes `dist/Dashboard-Hub.AppImage`). If the project's Releases page has a ready-made `Dashboard-Hub.exe`, you can download and run that directly, with no Node.js needed.
 
-**Updating later:** open **Updates** in the top bar. You can check online (if you turn that on), or install a `.hubupdate` file you were given. You can also go back to any of the last 4 versions there.
+**Updating later:** open **Updates** in the top bar. You can check online (if you turn that on), or install a `.hubupdate` file you were given. You can also go back to earlier versions there, and choose how many are kept.
 
 ---
 
@@ -99,7 +99,7 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 ### 11. Manual update system
 - **Optional update checks (off until you say yes)**: the app can look for a newer version on this project's GitHub releases page. You choose what happens: **Install**, **Remind me later** or **Skip this version**. Nothing is ever installed without your click, and it asks again before installing.
 - Updates are a single small file that works with no installer and no internet connection needed. You can also pick a downloaded update file by hand.
-- **Go back to any of the last 4 versions**: Dashboard Hub keeps a checked copy of the last 4 versions it ran (plus the one running), and the Updates window lists them with a button to return to any one. There is also a way back to the built-in version.
+- **Go back to an earlier version**: Dashboard Hub keeps a checked copy of the versions it ran, and the Updates window lists them with a button to return to any one. You choose how many earlier versions to keep (1 to 10, standard 4), like the backup count in backup programs. There is also a way back to the built-in version.
 - Each file inside is verified with a checksum. A small fixed starter program can always start the app, so a bad update can't leave you locked out.
 
 ---
@@ -133,6 +133,8 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 - The app's pages are isolated from the system (no direct system access), and every internal request is checked.
 - Notes, router logins and server logins are encrypted with the operating system's secure storage. When a computer can't encrypt, they're kept in memory only and never written to disk.
 - Backups are cleaned and checked when imported.
+- **Device groups:** tick machines in the Devices list, type a name and press "Set group". The map draws a bold coloured circle with the name around them and they move together when you drag one (Ctrl+drag moves just one). "Move groups together" and "Group circles" switch each part on or off.
+- **Graphics safety:** the 3D map stops drawing completely while the window is hidden, minimised or in the tray, and idles at a low, steady rate when nothing changes (independent of monitor refresh rate). It survives a graphics-driver reset (context loss/restore), falls back gracefully on weak graphics, caps its picture size, and never runs two draw loops. If the graphics process crashes 3 times in 10 minutes, the app switches to software drawing by itself and explains why in Settings. A crashed main page reloads automatically.
 
 ### Quality
 - Extensive automated tests cover the scanner, the router and switch connectors, the update system, profiles, the network guard, notifications and the interface. It has been tested on real home-lab hardware as well as on simulated devices (more about that below).
@@ -161,6 +163,8 @@ You don't need to know any programming. You only need **Node.js 24 LTS or newer*
 | **Build** the finished program | double-click `BUILD-APP.bat` (makes `dist\Dashboard-Hub.exe`) | run `./BUILD-APP.sh` (makes `dist/Dashboard-Hub.AppImage`) |
 
 The first time, these download what they need (a few minutes, internet connection required). Developers can also use `npm install`, `npm start` and `npm run dist`.
+**Linux: "Cannot mount AppImage, please check your FUSE setup"?** That is not a Dashboard Hub bug. An AppImage needs a small system library called FUSE 2, and newer Ubuntu-based systems (Linux Mint 22, Ubuntu 24.04) do not include it. Fix it once in a terminal: `sudo apt install libfuse2t64` (on Mint 21 / Ubuntu 22.04 use `sudo apt install libfuse2`). Or skip the fix and start it with `./Dashboard-Hub.AppImage --appimage-extract-and-run`. Running from the source folder with `./RUN-APP.sh` never needs FUSE.
+
 macOS: the code is written to be cross-platform, but there is no macOS build set up yet and it has had little testing.
 
 ---

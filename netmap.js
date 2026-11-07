@@ -12,7 +12,7 @@
     tabPanels: $('tabPanels'), tabMap: $('tabMap'), view: $('mapView'), wrap: $('mapWrap'),
     iface: $('mapIface'), cidr: $('mapCidr'), router: $('mapRouter'), mode: $('mapMode'),
     scan: $('mapScan'), stop: $('mapStop'), status: $('mapStatus'), progress: $('mapProgress'), bar: $('mapProgressBar'),
-    connect: $('mapConnect'), cable: $('mapCable'), top: $('mapTop'), reset: $('mapReset'), tidy: $('mapTidy'), offline: $('mapOffline'),
+    connect: $('mapConnect'), cable: $('mapCable'), top: $('mapTop'), reset: $('mapReset'), tidy: $('mapTidy'), offline: $('mapOffline'), gCluster: $('mapGroupMove'), gCircles: $('mapGroupCircles'),
     hint: $('mapHint'), legend: $('mapLegend'), tip: $('mapTip'), empty: $('mapEmpty'), side: $('mapSide'),
     list: $('mapList'), listBtn: $('mapListBtn'), alerts: $('mapAlerts'), services: $('mapServices'), toasts: $('mapToasts'),
     live: $('mapLive'), liveDot: $('mapLiveDot'), liveText: $('mapLiveText'), addSwitch: $('mapAddSwitch')
@@ -200,6 +200,8 @@
       cidr: typeof src.cidr === 'string' ? src.cidr.slice(0, 20) : '',
       mode: src.mode === 'thorough' ? 'thorough' : 'quick',
       showOffline: src.showOffline === true,
+      groupCluster: src.groupCluster !== false,
+      groupCircles: src.groupCircles !== false,
       autoSeconds: LIVE_CHOICES.includes(Number(src.autoSeconds)) ? Number(src.autoSeconds) : 60,
       scannedOnce: !!src.scannedOnce,
       presenceAt: Number.isFinite(src.presenceAt) && src.presenceAt > 0 ? src.presenceAt : 0,
@@ -405,7 +407,7 @@
 
   // ---------- 3D scene ----------
   let renderer = null, scene = null, camera = null, controls = null, raycaster = null, canvas = null;
-  let webglFailed = false;
+  let webglFailed = false, softwareGl = false, glLost = false, glLostTimer = null;
   const nodes = new Map();      // device key -> { group, mesh, edges, sprite, sig }
   const linkObjs = new Map();   // link id -> { group, vis, pick, a, b }
   let nodeGeo, routerGeo, switchGeo, linkGeo, svcGeo;
@@ -422,15 +424,34 @@
     if (renderer || webglFailed) return !webglFailed;
     if (!THREE || !OrbitControls) { webglFailed = true; return false; }
     try {
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      // smooth edges first; some graphics drivers refuse that, so try again without it before giving up
+      try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); }
+      catch (e1) { renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true }); }
     } catch (e) {
       webglFailed = true;
       els.empty.textContent = 'The 3D map could not start because this computer\'s graphics are not available.';
       els.empty.classList.remove('hidden');
       return false;
     }
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // software drawing (no real graphics card) is slow and heats the processor: keep that case light
+    try {
+      const gl = renderer.getContext(), dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      softwareGl = !!dbg && /swiftshader|llvmpipe|softpipe|software|basic render/i.test(String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)));
+    } catch (e) { softwareGl = false; }
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, softwareGl ? 1 : 2));
     canvas = renderer.domElement;
+    // the graphics driver can reset (a driver update, sleep, a crash it recovers from): pause while the picture is gone, then carry on
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      glLost = true;
+      clearTimeout(glLostTimer);
+      glLostTimer = setTimeout(() => { if (glLost) { els.empty.textContent = 'The graphics driver reset and has not come back yet. The map will return by itself; if it does not, close and reopen Dashboard Hub, or switch the graphics card off in Settings.'; els.empty.classList.remove('hidden'); } }, 6000);
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+      glLost = false; clearTimeout(glLostTimer);
+      updateEmptyMessage();
+      queueSync(); wakeLoop();
+    });
     canvas.tabIndex = 0;
     els.wrap.insertBefore(canvas, els.wrap.firstChild);
 
@@ -482,6 +503,9 @@
     wakeLoop();
     if (!renderer) return;
     const w = Math.max(1, els.wrap.clientWidth), h = Math.max(1, els.wrap.clientHeight);
+    // never ask for more than about a 4K picture, however big the window or sharp the screen
+    const pr = Math.max(0.5, Math.min(window.devicePixelRatio || 1, softwareGl ? 1 : 2, Math.sqrt(8500000 / (w * h))));
+    if (Math.abs(renderer.getPixelRatio() - pr) > 0.01) renderer.setPixelRatio(pr);
     renderer.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
@@ -521,10 +545,23 @@
       wakeLoop();
     });
   })();
-  var lastMove = performance.now(), idleSkip = 0, lastCam = '';
-  function wakeLoop() { lastMove = performance.now(); }
-  function loop() {
-    if (!running) return;
+  var lastMove = performance.now(), lastCam = '', lastDraw = 0, loopGen = 0, idleTimer = null;
+  // Anything that touches the map wakes it up at once (also when it was sleeping between slow redraws).
+  function wakeLoop() {
+    lastMove = performance.now();
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; if (running) next(0); }
+  }
+  // Schedules the next pass: now (on the next screen refresh) or after a pause. A pass belongs to one "generation", so a stop
+  // followed by a quick start can never leave two loops running at the same time.
+  function next(ms) {
+    const g = loopGen;
+    if (ms > 0) idleTimer = setTimeout(() => { idleTimer = null; if (running && g === loopGen) requestAnimationFrame(() => loop(g)); }, ms);
+    else requestAnimationFrame(() => loop(g));
+  }
+  function loop(g) {
+    if (!running || g !== loopGen) return;
+    // nobody can see the picture (window hidden in the tray, minimised, or the graphics were reset): draw nothing, look again in a second
+    if (window.hubWindowHidden || document.hidden || glLost) { next(1000); return; }
     const now = performance.now();
     stepAnimations();
     controls.update();
@@ -532,13 +569,25 @@
     let busy = cam !== lastCam; lastCam = cam;
     nodes.forEach((x) => { if (x.anim) busy = true; });
     if (busy) lastMove = now;
-    if (pulseOn) { const t = now / 1000; linkObjs.forEach((o) => { if (o.pulse) { const s = 0.7 * Math.sin(t * 2.4 + o.phase) + 0.3 * Math.sin(t * 5.1 + o.phase * 1.7); o.vis.material.opacity = 0.7 + 0.3 * s; } }); }
-    if (now - lastMove > 2000 && (idleSkip = (idleSkip + 1) % 4) !== 0) { requestAnimationFrame(loop); return; }
+    let anyPulse = false;
+    if (pulseOn) linkObjs.forEach((o) => { if (o.pulse) anyPulse = true; });
+    if (now - lastMove > 2000) {
+      // Resting: redraw only as often as the blinking needs (about 15 times a second, 10 after a minute of rest), or once every half
+      // second when nothing moves at all. This is by time, so a 144 Hz or 240 Hz screen does not draw more often than a 60 Hz one.
+      const wait = anyPulse ? (now - lastMove > 60000 ? 100 : 66) : (softwareGl ? 1000 : 500);
+      const since = now - lastDraw;
+      if (since < wait) { next(Math.max(4, wait - since - 6)); return; }
+    }
+    if (anyPulse) { const t = now / 1000; linkObjs.forEach((o) => { if (o.pulse) { const sv = 0.7 * Math.sin(t * 2.4 + o.phase) + 0.3 * Math.sin(t * 5.1 + o.phase * 1.7); o.vis.material.opacity = 0.7 + 0.3 * sv; } }); }
     renderer.render(scene, camera);
-    requestAnimationFrame(loop);
+    lastDraw = now;
+    next(0);
   }
-  function startLoop() { if (renderer && !running) { running = true; requestAnimationFrame(loop); } }
-  function stopLoop() { running = false; }
+  function startLoop() { if (renderer && !running) { running = true; loopGen++; next(0); } }
+  function stopLoop() { running = false; loopGen++; if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; } }
+  // the app window was hidden or shown (the main program tells the page): wake up right away when it comes back
+  window.addEventListener('hub-visibility', wakeLoop);
+  document.addEventListener('visibilitychange', wakeLoop);
 
   // label sprite
   function labelTexture(lines, dim) {
@@ -740,6 +789,92 @@
     o.vis.scale.x = o.vis.scale.z = (isSel ? 0.16 : (l.cable === true && !l.auto ? 0.14 : 0.09)) * Math.max(0.001, sc) * (wl ? 1.25 : 1);
   }
 
+  // ---------- device groups: a soft circle around each named group, and the group can move as one ----------
+  const groupObjs = new Map();   // group name -> { mesh, ring, sprite, label }
+  let groupDiscGeo = null, groupRingGeo = null;
+  function groupColor(name) {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+    return new THREE.Color().setHSL(h / 360, 0.65, 0.6);
+  }
+  function groupMembers(name) {
+    return devices().filter((d) => !d.isRouter && d.group === name && nodeVisible(d));
+  }
+  function groupLabelTexture(name) {
+    const font = 'bold 56px "Segoe UI", system-ui, sans-serif';
+    const m = document.createElement('canvas').getContext('2d');
+    m.font = font;
+    let t = name;
+    while (m.measureText(t).width > 700 && t.length > 3) t = t.slice(0, -2);
+    const w = Math.ceil(m.measureText(t).width) + 48, h = 96;
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const g = c.getContext('2d');
+    g.fillStyle = 'rgba(8,12,20,0.78)';
+    g.beginPath();
+    if (g.roundRect) g.roundRect(2, 8, w - 4, h - 16, 24); else g.rect(2, 8, w - 4, h - 16);
+    g.fill();
+    g.font = font; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = '#ffffff'; g.fillText(t, w / 2, h / 2 + 2);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.userData = { aspect: w / h };
+    return tex;
+  }
+  function removeGroupObj(name) {
+    const o = groupObjs.get(name);
+    if (!o) return;
+    scene.remove(o.mesh, o.ring, o.sprite);
+    o.mesh.material.dispose(); o.ring.material.dispose();
+    if (o.sprite.material.map) o.sprite.material.map.dispose();
+    o.sprite.material.dispose();
+    groupObjs.delete(name);
+  }
+  function syncGroups() {
+    if (!renderer || !net) return;
+    const want = new Map();
+    if (net.groupCircles !== false) {
+      devices().forEach((d) => {
+        if (d.isRouter || !d.group || !nodeVisible(d)) return;
+        if (!want.has(d.group)) want.set(d.group, []);
+        want.get(d.group).push(d);
+      });
+    }
+    Array.from(groupObjs.keys()).forEach((k) => { if (!want.has(k) || want.get(k).length < 2) removeGroupObj(k); });
+    want.forEach((list, name) => {
+      if (list.length < 2) return;
+      let cx = 0, cz = 0, minY = Infinity;
+      list.forEach((d) => { cx += d.pos.x; cz += d.pos.z; minY = Math.min(minY, d.pos.y); });
+      cx /= list.length; cz /= list.length;
+      let r = 0;
+      list.forEach((d) => { r = Math.max(r, Math.hypot(d.pos.x - cx, d.pos.z - cz)); });
+      r = Math.min(Math.max(r + 1.6, 2.2), 400);
+      let o = groupObjs.get(name);
+      if (!o) {
+        if (!groupDiscGeo) { groupDiscGeo = new THREE.CircleGeometry(1, 96); groupRingGeo = new THREE.RingGeometry(0.92, 1, 96); }
+        const col = groupColor(name);
+        const mesh = new THREE.Mesh(groupDiscGeo, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.24, depthWrite: false, side: THREE.DoubleSide }));
+        const ring = new THREE.Mesh(groupRingGeo, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 1, depthWrite: false, side: THREE.DoubleSide }));
+        mesh.rotation.x = ring.rotation.x = -Math.PI / 2;
+        mesh.renderOrder = 1; ring.renderOrder = 1;
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: groupLabelTexture(name), transparent: true, depthWrite: false, depthTest: false }));
+        sprite.renderOrder = 6;
+        scene.add(mesh, ring, sprite);
+        o = { mesh: mesh, ring: ring, sprite: sprite };
+        groupObjs.set(name, o);
+      }
+      const y = minY - 0.45;
+      o.mesh.position.set(cx, y, cz); o.ring.position.set(cx, y + 0.01, cz);
+      o.mesh.scale.setScalar(r); o.ring.scale.setScalar(r);
+      const lh = Math.min(Math.max(r * 0.3, 1.6), 3.6), asp = (o.sprite.material.map && o.sprite.material.map.userData && o.sprite.material.map.userData.aspect) || 5;
+      o.sprite.scale.set(lh * asp, lh, 1);
+      o.sprite.position.set(cx, y + 1.2, cz + r + lh * 0.6);
+    });
+  }
+  function clusterMates(dev) {
+    if (!net || net.groupCluster === false || !dev || dev.isRouter || !dev.group) return [];
+    return groupMembers(dev.group).filter((d) => d.key !== dev.key);
+  }
+
   function syncScene() {
     syncQueued = false;
     if (!renderer) return;
@@ -776,6 +911,7 @@
       }
     });
     syncServices();
+    syncGroups();
     animateNew = true;
     updateEmptyMessage();
     renderList();
@@ -961,7 +1097,7 @@
     if (key) {
       const dev = net.devices[key];
       const hit = key === 'router' ? null : planeHit(dev, e.shiftKey);
-      drag = { key: key, moved: false, shift: !!e.shiftKey, offset: hit ? new THREE.Vector3(dev.pos.x - hit.x, dev.pos.y - hit.y, dev.pos.z - hit.z) : new THREE.Vector3() };
+      drag = { key: key, moved: false, solo: !!(e.ctrlKey || e.metaKey), mates: null, shift: !!e.shiftKey, offset: hit ? new THREE.Vector3(dev.pos.x - hit.x, dev.pos.y - hit.y, dev.pos.z - hit.z) : new THREE.Vector3() };
       controls.enabled = false;
       try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
       e.stopPropagation();
@@ -981,9 +1117,16 @@
         }
         const pt = planeHit(dev, drag.shift);
         if (pt) {
+          if (!drag.mates) drag.mates = drag.solo ? [] : clusterMates(dev);     // Ctrl (or Cmd) + drag moves just this one machine out of its group
+          const ox = dev.pos.x, oy = dev.pos.y, oz = dev.pos.z;
           dev.pos.x = num(pt.x + drag.offset.x, dev.pos.x);
           dev.pos.y = num(pt.y + drag.offset.y, dev.pos.y);
           dev.pos.z = num(pt.z + drag.offset.z, dev.pos.z);
+          drag.mates.forEach((m) => {
+            m.pos.x = num(m.pos.x + dev.pos.x - ox, m.pos.x);
+            m.pos.y = num(m.pos.y + dev.pos.y - oy, m.pos.y);
+            m.pos.z = num(m.pos.z + dev.pos.z - oz, m.pos.z);
+          });
           syncScene();
         }
       }
@@ -1099,7 +1242,7 @@
   }
 
   function setHint(extra) {
-    els.hint.textContent = extra || 'Drag a machine to move it · Shift+drag to lift it up or down · Drag empty space to rotate · Right-drag to move the view · Scroll to zoom';
+    els.hint.textContent = extra || 'Drag a machine to move it (its whole group follows) · Ctrl+drag moves just one · Shift+drag to lift it up or down · Drag empty space to rotate · Right-drag to move the view · Scroll to zoom';
   }
 
   function refresh() {
@@ -2867,6 +3010,10 @@
     els.reset.addEventListener('click', () => fitView(false));
     els.tidy.addEventListener('click', () => { if (confirm('Move every machine back to its neat starting position? Your own layout will be lost.')) tidy(); });
     els.offline.addEventListener('change', () => { net.showOffline = els.offline.checked; save(); queueSync(); });
+    els.gCluster.checked = net.groupCluster !== false;
+    els.gCircles.checked = net.groupCircles !== false;
+    els.gCluster.addEventListener('change', () => { net.groupCluster = els.gCluster.checked; save(); queueSync(); });
+    els.gCircles.addEventListener('change', () => { net.groupCircles = els.gCircles.checked; save(); queueSync(); });
     els.services.addEventListener('change', () => { net.showServices = els.services.checked; save(); queueSync(); });
     els.alerts.addEventListener('change', () => { net.alerts = els.alerts.value; save(); if (net.alerts === 'desktop') desktopNotify('Desktop notices are on.'); });
     els.addSwitch.addEventListener('click', addSwitch);
@@ -2907,6 +3054,8 @@
     els.router.value = net.router;
     els.mode.value = net.mode;
     els.offline.checked = net.showOffline;
+    els.gCluster.checked = net.groupCluster !== false;
+    els.gCircles.checked = net.groupCircles !== false;
     els.alerts.value = net.alerts;
     els.services.checked = net.showServices;
     els.live.value = String(net.autoSeconds);
@@ -3002,6 +3151,8 @@
 
   // small helper used by the automatic tests (where on screen is a machine or a line?)
   window.__hubMap = {
+    groups: function () { return Array.from(groupObjs.entries()).map(([k, o]) => ({ name: k, x: o.mesh.position.x, z: o.mesh.position.z, r: o.mesh.scale.x, ringOpacity: o.ring.material.opacity, fillOpacity: o.mesh.material.opacity, labelH: o.sprite.scale.y, labelW: o.sprite.scale.x, labelOnTop: o.sprite.material.depthTest === false })); },
+    glInfo: function () { return renderer ? { frames: renderer.info.render.frame, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, software: softwareGl, lost: glLost, running: running, gen: loopGen, pixelRatio: renderer.getPixelRatio(), width: canvas.width, height: canvas.height } : null; },
     screenOf: function (key) {
       const v = new THREE.Vector3();
       const n = nodes.get(key);

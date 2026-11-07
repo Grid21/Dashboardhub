@@ -284,6 +284,11 @@ function render() {
     wv.addEventListener('did-stop-loading', () => {
       if (status.textContent === 'Loading...') status.textContent = '';
     });
+    wv.addEventListener('render-process-gone', (e) => {
+      const why = e && e.reason;
+      if (why === 'clean-exit') return;
+      status.textContent = 'This page stopped working (' + (why || 'crashed') + ') - press reload';
+    });
     wv.addEventListener('did-fail-load', (e) => {
       // -3 means "cancelled", which is normal and not a real error
       if (e.isMainFrame && e.errorCode !== -3) {
@@ -887,6 +892,12 @@ async function doImport() {
   if (!chk || !window.settingsApi) return;
   const gchk = document.getElementById('gpuCheck'), ghint = document.getElementById('gpuHint'), grestart = document.getElementById('gpuRestart');
   window.settingsApi.get().then((r) => { window.hubBackground = !!(r && r.closeToTray); }).catch(() => {});
+  // while the window cannot be seen (hidden in the tray, minimised) nothing is drawn, and animations stand still
+  if (window.settingsApi.onVisible) window.settingsApi.onVisible((visible) => {
+    window.hubWindowHidden = !visible;
+    document.body.classList.toggle('window-hidden', !visible);
+    window.dispatchEvent(new Event('hub-visibility'));
+  });
   async function load() {
     msg.textContent = '';
     try {
@@ -901,7 +912,7 @@ async function doImport() {
         const st = r && r.gpuState;
         const now = st === 'on' ? 'Right now: the graphics card is being used.' : st === 'off' ? 'Right now: switched off (software drawing).' : st === 'software' ? 'Right now: this computer is not letting the app use the graphics card (software drawing).' : '';
         const pend = r && r.gpu !== r.gpuRunning;
-        ghint.textContent = (pend ? 'Restart the app to apply the change. ' : '') + now;
+        ghint.textContent = (r && r.gpuAutoOff ? 'The graphics card was switched off automatically because the graphics driver kept crashing. Switch it back on here if the driver has been fixed. ' : '') + (pend ? 'Restart the app to apply the change. ' : '') + now;
         grestart.hidden = !pend;
       }
     } catch (e) { hint.textContent = ''; }

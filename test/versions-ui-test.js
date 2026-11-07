@@ -29,17 +29,31 @@ function makeVersion(upd, v) {
   await page.evaluate(() => { window.confirm = () => true; });
   await page.click('#updatesBtn'); await sleep(900);
   const items = await page.evaluate(() => Array.from(document.querySelectorAll('#updVersions li')).map((li) => li.innerText.replace(/\s+/g, ' ')));
-  check('the Updates window lists the last 4 earlier versions, newest first', items.length === 4 && /1\.11\.66/.test(items[0]) && /1\.11\.63/.test(items[3]), JSON.stringify(items));
+  check('the Updates window lists the last 4 earlier versions, newest first (standard setting)', items.length === 4 && /1\.11\.66/.test(items[0]) && /1\.11\.63/.test(items[3]), JSON.stringify(items));
   check('each has a "Go back to this version" button', await page.evaluate(() => Array.from(document.querySelectorAll('#updVersions button')).every((b) => /Go back to this version/.test(b.textContent))));
   check('the running version is not in the list', !items.some((t) => /1\.11\.67/.test(t)));
   check('the list fits in the window', await page.evaluate(() => { const d = document.getElementById('updateDialog').getBoundingClientRect(); return d.top >= 0 && d.bottom <= innerHeight; }));
   check('copies were made in the archive folder', fs.readdirSync(path.join(ud, 'version-archive')).filter((n) => /^v\d/.test(n)).length === 5);
   await page.screenshot({ path: path.join(os.tmpdir(), 'ver-shot.png') });
-  // go back to 1.11.64
-  await page.click('#updVersions li:nth-child(3) button'); await sleep(1200);
+  // the "keep this many" setting
+  check('the setting shows the standard 4', await page.evaluate(() => document.getElementById('updKeep').value === '4' && document.getElementById('updKeep').options.length === 10));
+  await page.selectOption('#updKeep', '2'); await sleep(900);
+  const afterKeep = await page.evaluate(() => Array.from(document.querySelectorAll('#updVersions li')).map((li) => li.innerText.replace(/\s+/g, ' ')));
+  check('choosing 2 shrinks the list to the 2 newest earlier versions', afterKeep.length === 2 && /1\.11\.66/.test(afterKeep[0]) && /1\.11\.65/.test(afterKeep[1]), JSON.stringify(afterKeep));
+  check('and the extra stored copies are deleted from the computer', fs.readdirSync(path.join(ud, 'version-archive')).filter((n) => /^v\d/.test(n)).length === 3);
+  check('the choice is saved', JSON.parse(fs.readFileSync(path.join(ud, 'version-keep.json'), 'utf8')).keep === 2);
+  check('and the window says so', /now keeps the last 2 earlier versions/.test(await page.textContent('#updateMsg')));
+  await page.evaluate(() => { window.confirm = () => false; });
+  await page.selectOption('#updKeep', '1'); await sleep(600);
+  check('saying no to "this deletes copies" changes nothing', await page.evaluate(() => document.getElementById('updKeep').value === '2' && document.querySelectorAll('#updVersions li').length === 2));
+  await page.evaluate(() => { window.confirm = () => true; });
+  const badKeep = await page.evaluate(async () => [await window.updaterApi.setKeep(0), await window.updaterApi.setKeep(50), await window.updaterApi.setKeep('abc')]);
+  check('the app refuses a number outside 1 to 10', badKeep.every((r) => r.ok === false), JSON.stringify(badKeep));
+  // go back to 1.11.65 (now the oldest kept)
+  await page.click('#updVersions li:nth-child(2) button'); await sleep(1200);
   const ptr = JSON.parse(fs.readFileSync(path.join(upd, 'active.json'), 'utf8'));
-  check('"Go back to this version" points the starter at that version', ptr.version === '1.11.64' && ptr.dir === 'v1.11.64' && ptr.disabled === false, JSON.stringify(ptr));
-  check('the window says to restart and offers "Restart now"', /Restart Dashboard Hub now to use version 1\.11\.64/.test(await page.textContent('#updateMsg')) && await page.evaluate(() => !document.getElementById('updateRestart').classList.contains('hidden')));
+  check('"Go back to this version" points the starter at that version', ptr.version === '1.11.65' && ptr.dir === 'v1.11.65' && ptr.disabled === false, JSON.stringify(ptr));
+  check('the window says to restart and offers "Restart now"', /Restart Dashboard Hub now to use version 1\.11\.65/.test(await page.textContent('#updateMsg')) && await page.evaluate(() => !document.getElementById('updateRestart').classList.contains('hidden')));
   check('no page errors', errors.length === 0, errors.join(' | ').slice(0, 300));
   await app.close();
 
@@ -47,10 +61,10 @@ function makeVersion(upd, v) {
   const app2 = await _electron.launch({ executablePath: path.join(ROOT, 'node_modules/electron/dist/electron'), args: [path.join(ROOT, 'test/upd-harness.js'), '--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--user-data-dir=' + ud] });
   const p2 = await app2.firstWindow(); await p2.waitForSelector('#tabMap'); await sleep(1500);
   const i2 = await p2.evaluate(() => window.updateApi.info());
-  check('after a restart the app runs version 1.11.64', i2.version === '1.11.64' && i2.source === 'update', JSON.stringify(i2).slice(0, 200));
+  check('after a restart the app runs version 1.11.65', i2.version === '1.11.65' && i2.source === 'update', JSON.stringify(i2).slice(0, 200));
   await p2.click('#updatesBtn'); await sleep(900);
   const items2 = await p2.evaluate(() => Array.from(document.querySelectorAll('#updVersions li')).map((li) => li.innerText.replace(/\s+/g, ' ')));
-  check('and the newer versions are still there to go forward to', items2.some((t) => /1\.11\.67/.test(t)) && !items2.some((t) => /1\.11\.64/.test(t)), JSON.stringify(items2));
+  check('and the newer versions are still there to go forward to', items2.some((t) => /1\.11\.67/.test(t)) && !items2.some((t) => /1\.11\.65/.test(t)), JSON.stringify(items2));
   await app2.close();
   console.log('\n' + passed + ' passed, ' + failed + ' failed'); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log('CRASH', e); process.exit(1); });

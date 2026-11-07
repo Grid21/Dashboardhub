@@ -66,13 +66,23 @@
   }
 
   // the last few versions kept on this computer, each with a button to go back to it
+  let keepNow = 4, listLen = 0;
   async function loadVersions() {
-    const box = $('updVersionsBox'), ul = $('updVersions');
-    if (!box || !ul || !window.updaterApi || !window.updaterApi.versions) return;
+    const box = $('updVersionsBox'), ul = $('updVersions'), sel = $('updKeep');
+    if (!box || !ul || !sel || !window.updaterApi || !window.updaterApi.versions) { if (box) box.classList.add('hidden'); return; }
     let r; try { r = await window.updaterApi.versions(); } catch (e) { r = null; }
+    if (!r || !r.ok) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    keepNow = r.keep;
+    if (!sel.options.length) for (let n = 1; n <= 10; n++) { const o = document.createElement('option'); o.value = String(n); o.textContent = n + (n === 4 ? ' (standard)' : ''); sel.appendChild(o); }
+    sel.value = String(r.keep);
+    renderList(Array.isArray(r.list) ? r.list : []);
+  }
+  function renderList(list) {
+    const ul = $('updVersions');
+    listLen = list.length;
     ul.textContent = '';
-    const list = r && r.ok && Array.isArray(r.list) ? r.list : [];
-    box.classList.toggle('hidden', list.length === 0);
+    $('updVersionsNone').classList.toggle('hidden', list.length > 0);
     list.forEach((v) => {
       const li = document.createElement('li');
       const label = document.createElement('span');
@@ -91,6 +101,13 @@
       ul.appendChild(li);
     });
   }
+  $('updKeep').addEventListener('change', async () => {
+    const sel = $('updKeep'), n = Number(sel.value);
+    if (n < listLen && !confirm('Keeping ' + n + ' earlier ' + (n === 1 ? 'version' : 'versions') + ' deletes the ' + (listLen - n) + ' oldest stored ' + (listLen - n === 1 ? 'copy' : 'copies') + ' from this computer. Continue?')) { sel.value = String(keepNow); return; }
+    let r; try { r = await window.updaterApi.setKeep(n); } catch (e) { r = null; }
+    if (r && r.ok) { keepNow = r.keep; renderList(r.list || []); say('Saved. Dashboard Hub now keeps the last ' + r.keep + ' earlier ' + (r.keep === 1 ? 'version' : 'versions') + '.', true); }
+    else { say((r && r.error) || 'The setting could not be saved.'); sel.value = String(keepNow); }
+  });
 
   $('updatesBtn').addEventListener('click', () => {
     say('');

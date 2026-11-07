@@ -921,7 +921,14 @@ function runningVersionNow() {
 ipcMain.handle('updater:versions', (event) => {
   checkSender(event);
   versionArchive.archive(runningVersionNow());
-  return { ok: true, running: runningVersionNow(), builtIn: builtInVersionNow(), list: versionArchive.choices(runningVersionNow(), builtInVersionNow()) };
+  return { ok: true, keep: versionArchive.getKeep(), running: runningVersionNow(), builtIn: builtInVersionNow(), list: versionArchive.choices(runningVersionNow(), builtInVersionNow()) };
+});
+ipcMain.handle('updater:setKeep', (event, n) => {
+  checkSender(event);
+  const r = versionArchive.setKeep(n);
+  if (!r.ok) return r;
+  versionArchive.archive(runningVersionNow());        // also deletes the copies beyond the new number
+  return { ok: true, keep: r.keep, list: versionArchive.choices(runningVersionNow(), builtInVersionNow()) };
 });
 ipcMain.handle('updater:switchTo', (event, version) => {
   checkSender(event);
@@ -968,14 +975,14 @@ app.on('web-contents-created', (event, wc) => {
 const TRAY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAaklEQVR42u3XzQoAEBAE4H0vb+edUS6Uq7+INWXU3tR8B2lHZHCM9enEyMo5FbqFuR0+RGiFNxHa4RUCEuBCnM7O3QrQ02kACoIAAgiABaj9hrAAvgECCPgH8Hwl41YMUUwgqhlEOX1RzzOrN4Ba/Ln20gAAAABJRU5ErkJggg==';
 function settingsFile() { return path.join(app.getPath('userData'), 'settings.json'); }
 function readSettings() {
-  try { const j = JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); return { closeToTray: j && j.closeToTray === true, gpu: !(j && j.gpu === false) }; } catch (e) { return { closeToTray: false, gpu: true }; }
+  try { const j = JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); return { closeToTray: j && j.closeToTray === true, gpu: !(j && j.gpu === false), gpuAutoOff: !!(j && j.gpu === false && j.gpuAutoOff === true) }; } catch (e) { return { closeToTray: false, gpu: true, gpuAutoOff: false }; }
 }
 function writeSettings(s) {
   const tmp = settingsFile() + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify({ closeToTray: s.closeToTray === true, gpu: s.gpu !== false }));
+  fs.writeFileSync(tmp, JSON.stringify({ closeToTray: s.closeToTray === true, gpu: s.gpu !== false, gpuAutoOff: s.gpu === false && s.gpuAutoOff === true }));
   fs.renameSync(tmp, settingsFile());
 }
-let settings = { closeToTray: false, gpu: true };
+let settings = { closeToTray: false, gpu: true, gpuAutoOff: false };
 let tray = null;
 let quitting = false;
 function showWindow() {
@@ -1014,7 +1021,7 @@ ipcMain.handle('app:settings:get', (event) => { checkSender(event); let gpuState
       gpuState = v.some((x) => /^enabled/.test(x)) ? 'on' : (v.length ? 'software' : 'unknown');
     }
   } catch (e) { /* unknown */ }
-  return { ok: true, closeToTray: settings.closeToTray, platform: process.platform, gpu: settings.gpu !== false, gpuRunning: gpuWanted, gpuState: gpuState };
+  return { ok: true, closeToTray: settings.closeToTray, platform: process.platform, gpu: settings.gpu !== false, gpuRunning: gpuWanted, gpuState: gpuState, gpuAutoOff: settings.gpu === false && settings.gpuAutoOff === true };
 });
 // Desktop notices are sent from here (not from the page) so they still appear while the window is hidden in the tray.
 let lastNoticeAt = 0;
@@ -1034,6 +1041,7 @@ ipcMain.handle('app:notify', (event, body) => {
 ipcMain.handle('app:gpu:set', (event, on) => {
   checkSender(event);
   settings.gpu = on !== false;
+  settings.gpuAutoOff = false;
   try { writeSettings(settings); } catch (e) { return { ok: false, error: 'The setting could not be saved.' }; }
   return { ok: true, gpu: settings.gpu, needsRestart: settings.gpu !== gpuWanted };
 });
@@ -1057,6 +1065,22 @@ ipcMain.handle('app:settings:set', (event, s) => {
 });
 
 // ---------- window ----------
+// If the graphics driver keeps crashing the graphics process (3 times in 10 minutes), switch the graphics card off for the next start and
+// say so in Settings. Chromium also falls back to software drawing by itself during the session; this makes it stick, so the app does not
+// keep running into the same driver fault every time it opens.
+const gpuCrashes = [];
+app.on('child-process-gone', (e, details) => {
+  try {
+    if (!details || details.type !== 'GPU' || details.reason === 'clean-exit' || details.reason === 'killed') return;
+    const now = Date.now();
+    while (gpuCrashes.length && now - gpuCrashes[0] > 600000) gpuCrashes.shift();
+    gpuCrashes.push(now);
+    if (gpuCrashes.length >= 3 && settings.gpu !== false) {
+      settings.gpu = false; settings.gpuAutoOff = true;
+      writeSettings(settings);
+    }
+  } catch (err) { /* a safety net must never cause a crash of its own */ }
+});
 const windowState = require('./window-state');
 function windowStateFile() { return path.join(app.getPath('userData'), 'window-state.json'); }
 function createWindow() {
@@ -1085,6 +1109,23 @@ function createWindow() {
   });
 
   if (place.maximized) mainWindow.maximize();
+
+  // ---- graphics safety net ----
+  // 1) the page is told whenever the window cannot be seen (hidden in the tray, minimised), so it stops drawing
+  const sendVisible = () => {
+    try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('window:visible', mainWindow.isVisible() && !mainWindow.isMinimized()); } catch (e) { /* ignore */ }
+  };
+  ['show', 'hide', 'minimize', 'restore'].forEach((ev) => mainWindow.on(ev, sendVisible));
+  mainWindow.webContents.on('did-finish-load', sendVisible);
+  // 2) if the window's page process dies (out of memory, a graphics fault), bring it back by itself, but not in an endless loop
+  const pageCrashes = [];
+  mainWindow.webContents.on('render-process-gone', (e, details) => {
+    if (!details || details.reason === 'clean-exit' || details.reason === 'killed') return;
+    const now = Date.now();
+    while (pageCrashes.length && now - pageCrashes[0] > 120000) pageCrashes.shift();
+    pageCrashes.push(now);
+    if (pageCrashes.length <= 3 && mainWindow && !mainWindow.isDestroyed()) setTimeout(() => { try { mainWindow.webContents.reload(); } catch (e2) { /* ignore */ } }, 800);
+  });
   let saveTimer = null;
   const rememberPlace = () => {
     if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized() || mainWindow.isFullScreen()) return;

@@ -506,3 +506,9 @@ dialog .sec-row > span:first-child:not(:last-child) { flex: none; color: #a9b1c0
 .ver-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 10px; border-bottom: 1px solid #2a3142; font-size: 13px; }
 .ver-list li:last-child { border-bottom: 0; }
 .ver-list button { white-space: nowrap; flex: none; }
+
+.keep-row { display: flex !important; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 0 10px; color: #e6e9ef !important; }
+.keep-row select { width: auto; }
+
+/* nobody can see the window (hidden in the tray or minimised): nothing animates */
+body.window-hidden *, body.window-hidden *::before, body.window-hidden *::after { animation-play-state: paused !important; transition: none !important; }

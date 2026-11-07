@@ -214,6 +214,8 @@ function cleanNetwork(raw) {
     cidr: typeof raw.cidr === 'string' && /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(raw.cidr) ? raw.cidr : '',
     mode: raw.mode === 'thorough' ? 'thorough' : 'quick',
     showOffline: raw.showOffline === true,
+    groupCluster: raw.groupCluster !== false,
+    groupCircles: raw.groupCircles !== false,
     autoSeconds: [0, 15, 30, 60, 120, 300, 600, 1800].includes(live) ? live : 60,
     scannedOnce: raw.scannedOnce === true,
     presenceAt: Number.isFinite(raw.presenceAt) && raw.presenceAt > 0 ? raw.presenceAt : 0,

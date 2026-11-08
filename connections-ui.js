@@ -177,7 +177,7 @@
     const pid = window.hubActiveProfile ? window.hubActiveProfile() : null;
     if (!quiet) { say('Asking your devices...'); $('connSync').disabled = true; }
     try {
-      const r = await window.connApi.poll();
+      const r = await window.connApi.poll({ force: !quiet });
       if (window.hubActiveProfile && window.hubActiveProfile() !== pid) { polling = false; $('connSync').disabled = false; return; }      // the network profile was switched meanwhile: those answers belong to the other network
       if (r && r.ok && r.list) list = r.list;
       lastPoll = Date.now();

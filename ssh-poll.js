@@ -13,6 +13,7 @@ const PROFILES = {
   linux: {
     label: 'Linux, OpenWrt, pfSense-like routers (ip neigh + DHCP leases)',
     commands: ['ip -4 neigh show', 'cat /tmp/dhcp.leases /var/lib/misc/dnsmasq.leases 2>/dev/null'],
+    oneLogin: true,                  // both commands in a single login (one handshake instead of two)
     parse(out) {
       const rows = [];
       String(out[0] || '').split(/\r?\n/).forEach((l) => {
@@ -82,6 +83,7 @@ function findSsh() {
   return null;
 }
 
+const SPLIT = '@@HUB-SPLIT@@';
 class SshError extends Error { constructor(kind, message) { super(message); this.kind = kind; } }
 
 function runOne(c, command, sshPath) {
@@ -127,6 +129,12 @@ async function readDevice(c, profileName) {
   if (!ssh) throw new SshError('bad', 'The ssh program is not installed. Install it with your package manager (for example: sudo apt install openssh-client). On Windows: Settings > Apps > Optional features > OpenSSH Client.');
   if (c.password && process.platform === 'win32') throw new SshError('bad', 'On Windows, SSH logins use an SSH key (password login is not supported here). Leave the password empty and set up key login, or use another connection type.');
   const outs = [];
+  if (prof.oneLogin && prof.commands.length > 1) {
+    const text = await runOne(c, prof.commands.join(' ; echo ' + SPLIT + ' ; '), ssh);
+    const parts = text.split(SPLIT);
+    for (let i = 0; i < prof.commands.length; i++) outs.push((parts[i] || '').replace(/^\r?\n/, ''));
+    return { rows: prof.parse(outs), profile: prof };
+  }
   for (let i = 0; i < prof.commands.length; i++) {
     try { outs.push(await runOne(c, prof.commands[i], ssh)); }
     catch (e) { if (i === 0 || e.kind === 'auth' || e.kind === 'refused' || e.kind === 'timeout') throw e; outs.push(''); }

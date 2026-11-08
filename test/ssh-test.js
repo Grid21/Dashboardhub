@@ -18,12 +18,13 @@ case "$host" in
   10.9.9.4) pw=$("$SSH_ASKPASS" 2>/dev/null); if [ "$pw" != "s3cret pass" ]; then echo "Permission denied" >&2; exit 255; fi;;
 esac
 case "$last" in
-  "ip -4 neigh show")
+  "ip -4 neigh show"*)
     echo "192.168.0.10 dev br-lan lladdr aa:bb:cc:00:00:10 REACHABLE"
     echo "192.168.0.11 dev br-lan lladdr aa:bb:cc:00:00:11 STALE"
     echo "192.168.0.12 dev br-lan  FAILED"
-    echo "192.168.0.13 dev br-lan lladdr aa:bb:cc:00:00:13 INCOMPLETE";;
-  cat*) echo "1730000000 aa:bb:cc:00:00:10 192.168.0.10 living-room-tv 01:aa:bb:cc:00:00:10"
+    echo "192.168.0.13 dev br-lan lladdr aa:bb:cc:00:00:13 INCOMPLETE"
+    echo "@@HUB-SPLIT@@"
+    echo "1730000000 aa:bb:cc:00:00:10 192.168.0.10 living-room-tv 01:aa:bb:cc:00:00:10"
         echo "1730000001 aa:bb:cc:00:00:11 192.168.0.11 * *"
         echo "1730000002 aa:bb:cc:00:00:99 192.168.0.99 gone-device *";;
   "/ip/arp/print terse")
@@ -66,6 +67,9 @@ const byIp = (r) => Object.fromEntries((r.clients || []).map((c) => [c.ip, c]));
   check('a "*" name in the lease file means no name', m['192.168.0.11'].name === '');
   check('the interface is shown', m['192.168.0.10'].via === 'port br-lan', m['192.168.0.10'].via);
   check('addresses are tidied (lower case, colons)', m['192.168.0.10'].mac === 'aa:bb:cc:00:00:10');
+
+  const logins = fs.readFileSync(log, 'utf8').split('\n').filter((x) => x.startsWith('HOST=10.9.9.1')).length;
+  check('a Linux router is read in one login, not two', logins === 1, 'logins so far: ' + logins);
 
   console.log('MikroTik');
   r = await connectors.poll(cfg({ site: 'mikrotik' })); m = byIp(r);

@@ -500,10 +500,14 @@
     return true;
   }
 
+  let lastW = 0, lastH = 0, lastDpr = 0;
   function resize() {
     wakeLoop();
     if (!renderer) return;
     const w = Math.max(1, els.wrap.clientWidth), h = Math.max(1, els.wrap.clientHeight);
+    // resizing the picture is expensive (the graphics card has to make a new one): do it only when the size really changed
+    if (w === lastW && h === lastH && (window.devicePixelRatio || 1) === lastDpr) return;
+    lastW = w; lastH = h; lastDpr = window.devicePixelRatio || 1;
     // never ask for more than about a 4K picture, however big the window or sharp the screen
     const pr = Math.max(0.5, Math.min(window.devicePixelRatio || 1, softwareGl ? 1 : 2, Math.sqrt(8500000 / (w * h))));
     if (Math.abs(renderer.getPixelRatio() - pr) > 0.01) renderer.setPixelRatio(pr);
@@ -573,9 +577,10 @@
     let anyPulse = false;
     if (pulseOn) linkObjs.forEach((o) => { if (o.pulse) anyPulse = true; });
     if (now - lastMove > 2000) {
-      // Resting: redraw only as often as the blinking needs (about 15 times a second, 10 after a minute of rest), or once every half
+      // Resting: redraw only as often as the blinking needs (about 15 times a second, 10 after a minute of rest, 5 after five minutes), or once every half
       // second when nothing moves at all. This is by time, so a 144 Hz or 240 Hz screen does not draw more often than a 60 Hz one.
-      const wait = anyPulse ? (now - lastMove > 60000 ? 100 : 66) : (softwareGl ? 1000 : 500);
+      const rest = now - lastMove;
+      const wait = anyPulse ? (rest > 300000 ? 200 : rest > 60000 ? 100 : 66) : (softwareGl ? 1000 : 500);
       const since = now - lastDraw;
       if (since < wait) { next(Math.max(4, wait - since - 6)); return; }
     }
@@ -3164,7 +3169,7 @@
   // small helper used by the automatic tests (where on screen is a machine or a line?)
   window.__hubMap = {
     groups: function () { return Array.from(groupObjs.entries()).map(([k, o]) => ({ name: k, x: o.mesh.position.x, z: o.mesh.position.z, r: o.mesh.scale.x, ringOpacity: o.ring.material.opacity, fillOpacity: o.mesh.material.opacity, labelH: o.sprite.scale.y, labelW: o.sprite.scale.x, labelOnTop: o.sprite.material.depthTest === false, ringWidth: (1 - o.ring.geometry.parameters.innerRadius) * o.ring.scale.x }));  },
-    glInfo: function () { return renderer ? { frames: renderer.info.render.frame, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, software: softwareGl, lost: glLost, running: running, gen: loopGen, pixelRatio: renderer.getPixelRatio(), width: canvas.width, height: canvas.height } : null; },
+    glInfo: function () { return renderer ? { frames: renderer.info.render.frame, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, software: softwareGl, lost: glLost, running: running, gen: loopGen, pixelRatio: renderer.getPixelRatio(), width: canvas.width, height: canvas.height } : null; },
     screenOf: function (key) {
       const v = new THREE.Vector3();
       const n = nodes.get(key);

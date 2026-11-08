@@ -54,7 +54,7 @@ contextBridge.exposeInMainWorld('connApi', {
   save: (config) => ipcRenderer.invoke('conn:save', config),
   remove: (id) => ipcRenderer.invoke('conn:remove', id),
   test: (config) => ipcRenderer.invoke('conn:test', config),
-  poll: () => ipcRenderer.invoke('conn:poll'),
+  poll: (opts) => ipcRenderer.invoke('conn:poll', opts),
   findSnmp: (req) => ipcRenderer.invoke('snmp:find', req),
   setProfile: (id) => ipcRenderer.invoke('conn:profile', id),
   copyProfile: (from, to) => ipcRenderer.invoke('conn:profile:copy', from, to),

@@ -512,3 +512,9 @@ dialog .sec-row > span:first-child:not(:last-child) { flex: none; color: #a9b1c0
 
 /* nobody can see the window (hidden in the tray or minimised): nothing animates */
 body.window-hidden *, body.window-hidden *::before, body.window-hidden *::after { animation-play-state: paused !important; transition: none !important; }
+
+/* the "checked 10:19:47 PM" label always keeps its space, so the toolbar never re-wraps (and the 3D picture is never re-created) when it appears */
+#mapLiveText { display: inline-block; min-width: 135px; white-space: nowrap; }
+
+/* the scan progress line keeps its 3 pixels of space while hidden, so starting a scan does not move the map (and rebuild the 3D picture) */
+.map-progress.hidden { display: block !important; visibility: hidden; }

@@ -137,7 +137,18 @@ function parseUpnpXml(xml) {
   const pick = (tag) => { const m = new RegExp('<' + tag + '>([^<]{1,120})</' + tag + '>', 'i').exec(xml); return m ? clean(m[1], 80) : ''; };
   return { name: pick('friendlyName'), model: [pick('manufacturer'), pick('modelName')].filter(Boolean).join(' ') };
 }
+// A device's UPnP description (its name and model) hardly ever changes, so it is fetched once and kept for half an hour.
+// Without this, every background scan would download the description of every smart TV and router again.
+const upnpCache = new Map();
 function fetchUpnp(location, from, ms) {
+  const hit = upnpCache.get(location + '|' + from);
+  if (hit && Date.now() - hit.at < 30 * 60 * 1000) return Promise.resolve(hit.v);
+  return fetchUpnpNow(location, from, ms).then((v) => {
+    if (v) { if (upnpCache.size >= 300) upnpCache.delete(upnpCache.keys().next().value); upnpCache.set(location + '|' + from, { at: Date.now(), v: v }); }
+    return v;
+  });
+}
+function fetchUpnpNow(location, from, ms) {
   return new Promise((resolve) => {
     let u; try { u = new URL(location); } catch (e) { resolve(null); return; }
     if (u.protocol !== 'http:' || u.hostname !== from || !isPrivate(u.hostname)) { resolve(null); return; }      // only the machine that answered, only inside your network

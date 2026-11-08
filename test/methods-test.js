@@ -86,6 +86,16 @@ function runScan(methods, hooks) {
   d = await discovery.discoverNames(Object.assign({ ms: 900, useMdns: false, useSsdp: false }, hooks.discovery));
   check('with both switched off nothing is sent or found', d.size === 0);
 
+  console.log('Less repeated work');
+  let hits = 0; const web2 = http.createServer((q, a) => { hits++; a.end('<root><device><friendlyName>Cached TV</friendlyName></device></root>'); });
+  await new Promise((r) => web2.listen(httpPort + 10, '127.0.0.2', r));
+  const ssdp2 = await udp(ssdpPort + 10, (s, m, r) => s.send(Buffer.from('HTTP/1.1 200 OK\r\nLOCATION: http://127.0.0.2:' + (httpPort + 10) + '/d.xml\r\nST: upnp:rootdevice\r\n\r\n'), r.port, r.address));
+  const opts2 = { ms: 900, useMdns: false, ssdp: { port: ssdpPort + 10, target: '127.0.0.2' } };
+  let d1 = await discovery.discoverNames(opts2); let d2 = await discovery.discoverNames(opts2); let d3 = await discovery.discoverNames(opts2);
+  check('a device description is downloaded once, not on every scan', hits === 1 && d3.get('127.0.0.2') && d3.get('127.0.0.2').name === 'Cached TV', 'downloads: ' + hits);
+  check('the name is still found on every scan', [d1, d2, d3].every((d) => d.get('127.0.0.2') && d.get('127.0.0.2').name === 'Cached TV'));
+  ssdp2.close(); web2.close();
+
   console.log('SNMP master switch');
   const cfg = { type: 'snmp', host: '192.168.0.1', port: 161, password: 'public', snmpVersion: 2 };
   connectors.setPolicy({ snmpEnabled: false });

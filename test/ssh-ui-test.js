@@ -8,11 +8,14 @@ const check = (n, ok, d) => { if (ok) { passed++; console.log('  ok    ' + n); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 (async () => {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'pathssh-'));
+  const LOGF = path.join(bin, 'calls.log'); fs.writeFileSync(LOGF, '');
   fs.writeFileSync(path.join(bin, 'ssh'), `#!/bin/sh
 for a in "$@"; do last="$a"; done
+prev=""; host=""; for a in "$@"; do if [ "$a" = "$last" ]; then host="$prev"; fi; prev="$a"; done
+echo "$host" >> "${LOGF}"
+if [ "$host" = "192.168.0.3" ]; then echo "Permission denied (publickey)." >&2; exit 255; fi
 case "$last" in
-  "ip -4 neigh show") echo "192.168.0.10 dev br-lan lladdr aa:bb:cc:00:00:10 REACHABLE"; echo "192.168.0.11 dev br-lan lladdr aa:bb:cc:00:00:11 STALE";;
-  cat*) echo "1730000000 aa:bb:cc:00:00:10 192.168.0.10 living-room-tv *";;
+  "ip -4 neigh show"*) echo "192.168.0.10 dev br-lan lladdr aa:bb:cc:00:00:10 REACHABLE"; echo "192.168.0.11 dev br-lan lladdr aa:bb:cc:00:00:11 STALE"; echo "@@HUB-SPLIT@@"; echo "1730000000 aa:bb:cc:00:00:10 192.168.0.10 living-room-tv *";;
   *) exit 1;;
 esac
 `, { mode: 0o755 });
@@ -47,6 +50,35 @@ esac
   await page.click('#connSync'); await sleep(3500);
   const msg2 = await page.evaluate(() => document.getElementById('connMsg').textContent);
   check('"Ask them now" reads the machines through SSH', /Core router|192\.168\.0\.2/.test(msg2) && !/did not work|refused|not installed/i.test(msg2), msg2);
+  // ---- how often devices are asked ----
+  const calls = (h) => fs.readFileSync(LOGF, 'utf8').split('\n').filter((x) => x === h).length;
+  const poll = (force) => page.evaluate((f) => window.connApi.poll({ force: f }), force);
+  await sleep(500); fs.writeFileSync(LOGF, '');
+  await poll(true);
+  const base = calls('192.168.0.2');
+  check('a forced read logs in once (one login covers both tables)', base === 1, String(base));
+  await poll(false); await poll(false);
+  check('automatic polls within a minute reuse the last answer (no new logins)', calls('192.168.0.2') === base, String(calls('192.168.0.2')));
+  await poll(true);
+  check('"Ask them now" always asks again', calls('192.168.0.2') === base + 1, String(calls('192.168.0.2')));
+  let res = await poll(true); const mine = res.results.find((x) => x.host === '192.168.0.2');
+  check('the answer still lists the machines', mine && mine.ok && mine.clients.length === 2, JSON.stringify(mine && mine.clients && mine.clients.length));
+  // a second device whose login is refused
+  await page.evaluate(() => window.connApi.save({ type: 'ssh', name: 'Locked', host: '192.168.0.3', port: 22, username: 'admin', password: '', site: 'linux' })); await sleep(500);
+  fs.writeFileSync(LOGF, '');
+  res = await poll(false); const lock1 = res.results.find((x) => x.host === '192.168.0.3');
+  check('a refused login is reported', lock1 && !lock1.ok && lock1.code === 'auth', JSON.stringify(lock1 && lock1.code));
+  await poll(false); await poll(false);
+  check('a refused login is NOT retried automatically (protects the account from lockout)', calls('192.168.0.3') === 1, String(calls('192.168.0.3')));
+  res = await poll(false); const lock2 = res.results.find((x) => x.host === '192.168.0.3');
+  check('the message explains why it is not retried', lock2 && /Not tried again automatically/.test(lock2.error), lock2 && lock2.error);
+  await poll(true);
+  check('"Ask them now" does retry it at once', calls('192.168.0.3') === 2, String(calls('192.168.0.3')));
+  await page.evaluate(() => { const l = window.connApi.list(); return l; });
+  const lst = await page.evaluate(() => window.connApi.list()); const lk = (lst.list || lst).find((x) => x.host === '192.168.0.3');
+  await page.evaluate((c) => window.connApi.save({ id: c.id, type: 'ssh', name: 'Locked', host: '192.168.0.3', port: 22, username: 'other', password: '', site: 'linux' }), lk); await sleep(500);
+  fs.writeFileSync(LOGF, ''); await poll(false);
+  check('changing the connection clears the wait, so the new login is tried at once', calls('192.168.0.3') === 1, String(calls('192.168.0.3')));
   check('no page errors', errors.length === 0, errors.join(' | '));
   await app.close();
   console.log('\n' + passed + ' passed, ' + failed + ' failed'); process.exit(failed ? 1 : 0);

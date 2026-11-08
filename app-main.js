@@ -504,6 +504,7 @@ ipcMain.handle('conn:profile:drop', (event, id) => {
 });
 ipcMain.handle('conn:save', (event, config) => {
   checkSender(event);
+  sshPollMemory.clear();
   let clean;
   try { clean = connectors.cleanConfig(config); } catch (e) { return { ok: false, error: e.message }; }
   if (!activeProfile) return { ok: false, error: 'The network profile is still loading. Try again in a moment.' };
@@ -536,8 +537,22 @@ ipcMain.handle('conn:test', async (event, config) => {
   return { ok: true, count: res.clients.length, gear: res.gear.length, self: res.self, note: res.note };
 });
 let connPolling = false;
-ipcMain.handle('conn:poll', async (event) => {
+// SSH logins are heavier than a web request and can trip a device's lockout rules, so they are asked less often:
+// a good answer is reused for a minute, and a refused login is not tried again for five minutes (editing the connection clears this).
+const SSH_REUSE_MS = 60 * 1000, SSH_AUTH_BACKOFF_MS = 5 * 60 * 1000;
+const sshPollMemory = new Map();
+function pollOrReuse(c, force) {
+  if (c.type !== 'ssh') return connectors.poll(c);
+  const mem = sshPollMemory.get(c.id), now = Date.now();
+  if (mem && !force) {
+    if (mem.res.ok && now - mem.at < SSH_REUSE_MS) return Promise.resolve(mem.res);
+    if (!mem.res.ok && mem.res.code === 'auth' && now - mem.at < SSH_AUTH_BACKOFF_MS) return Promise.resolve(Object.assign({}, mem.res, { error: mem.res.error + ' (Not tried again automatically for a few minutes, so the device does not lock the account. "Ask them now" tries at once.)' }));
+  }
+  return connectors.poll(c).then((res) => { sshPollMemory.set(c.id, { at: Date.now(), res: res }); return res; });
+}
+ipcMain.handle('conn:poll', async (event, opts) => {
   checkSender(event);
+  const force = !!(opts && opts.force === true);
   if (!security.get().connectors) return { ok: true, results: [], disabled: true };
   if (connPolling) return { ok: true, results: [], busy: true };
   connPolling = true;
@@ -562,7 +577,7 @@ ipcMain.handle('conn:poll', async (event) => {
           return { ok: false, code: 'timeout', unreachable: true, error: 'It does not answer at all (switched off or unplugged?).' };
         })() : new Promise(() => {});
         res = await Promise.race([
-          connectors.poll(c),
+          pollOrReuse(c, force),
           guard,
           new Promise((resolve) => setTimeout(() => resolve({ ok: false, code: 'timeout', error: 'No answer in time. It may be switched off or unplugged.' }), 25000))
         ]);
@@ -796,8 +811,12 @@ function reloadWindow() {
 }
 
 // Starts the program again (used after installing an update, so you do not have to close and open it by hand).
+const RELAUNCHED_FLAG = '--hub-relaunched';       // tells the new copy that it was started by the old one and may wait for it to finish closing
 function restartProgram() {
-  const opts = { args: process.argv.slice(1).filter((a) => a !== '--builtin') };
+  // Give the single-instance lock back first. Otherwise the new copy can start while the old one still holds it,
+  // decide "I am already running" and quit, and then the old one closes too: nothing comes back.
+  try { app.releaseSingleInstanceLock(); } catch (e) { /* none held */ }
+  const opts = { args: process.argv.slice(1).filter((a) => a !== '--builtin' && a !== RELAUNCHED_FLAG).concat([RELAUNCHED_FLAG]) };
   // the portable Windows .exe and the Linux AppImage unpack themselves; start the real file again, not the unpacked copy
   if (process.env.PORTABLE_EXECUTABLE_FILE) opts.execPath = process.env.PORTABLE_EXECUTABLE_FILE;
   else if (process.env.APPIMAGE) opts.execPath = process.env.APPIMAGE;
@@ -1050,8 +1069,7 @@ ipcMain.handle('app:gpu:set', (event, on) => {
 ipcMain.handle('app:restart', (event) => {
   checkSender(event);
   quitting = true;
-  app.relaunch();
-  app.exit(0);
+  restartProgram();          // same careful restart as after an update (portable .exe and AppImage included)
   return { ok: true };
 });
 ipcMain.handle('app:settings:set', (event, s) => {
@@ -1205,16 +1223,27 @@ function createWindow() {
 app.whenReady().then(() => {
   setTimeout(() => { try { versionArchive.archive(runningVersionNow()); } catch (e) { /* safety net only */ } }, 4000);
   settings = readSettings();
-  if (settings.closeToTray) {
-    if (!app.requestSingleInstanceLock()) { app.quit(); return; }       // starting the app again just brings the hidden window back
-    app.on('second-instance', showWindow);
-    ensureTray();
-  }
-  createWindow();
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  startWithLock((locked) => {
+    if (locked) { app.on('second-instance', showWindow); ensureTray(); }
+    createWindow();
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
   });
 });
+
+// With "keep running in the tray" only one copy may run (starting it again just brings the hidden window back).
+// A copy started by a restart waits up to 20 seconds for the old one to finish closing instead of giving up at once.
+function startWithLock(next) {
+  if (!settings.closeToTray) { next(false); return; }
+  if (app.requestSingleInstanceLock()) { next(true); return; }
+  if (!process.argv.includes(RELAUNCHED_FLAG)) { app.quit(); return; }
+  let tries = 0;
+  const timer = setInterval(() => {
+    if (app.requestSingleInstanceLock()) { clearInterval(timer); next(true); }
+    else if (++tries >= 80) { clearInterval(timer); app.quit(); }
+  }, 250);
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

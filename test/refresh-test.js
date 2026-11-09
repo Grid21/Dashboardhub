@@ -32,7 +32,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(500);
   check('Settings menu no longer has the speed check', await page.evaluate(() => !document.getElementById('speedTestTargets')));
   const read = async (key) => { const p = await page.evaluate((k) => window.__hubMap.screenOf(k), key); await page.mouse.click(p.x, p.y); await sleep(500); };
-  await page.evaluate(() => window.__hubMap.sync()); await page.click('#mapTidy'); await sleep(1200); await page.evaluate(() => window.__hubMap.sync()); await sleep(300);
+  await page.evaluate(() => window.__hubMap.sync()); await page.evaluate(() => document.getElementById('mapTidy').click()); await sleep(1200); await page.evaluate(() => window.__hubMap.sync()); await sleep(300);
   await read(M + '01');
   check('device pane has Run LAN speedtest', await page.evaluate(() => !!document.getElementById('mapLanBtn') && /Run LAN speedtest/.test(document.getElementById('mapLanBtn').textContent)));
   await page.click('#mapLanBtn'); await sleep(900);

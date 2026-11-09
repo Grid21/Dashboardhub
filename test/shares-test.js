@@ -56,7 +56,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.evaluate((d) => window.hubNetmap.importData(d, true), { router: '10.7.0.1', cidr: '10.7.0.0/24', scannedOnce: true,
     devices: { router: { key: 'router', ip: '10.7.0.1', isRouter: true }, [M + '01']: dev('01', '10.7.0.30', 'NAS', [{ port: 445, service: 'SMB' }, { port: 2049, service: 'NFS' }]), [M + '02']: dev('02', '10.7.0.31', 'Plain PC', [{ port: 22, service: 'SSH' }]) },
     links: [{ a: 'router', b: M + '01', auto: true }, { a: 'router', b: M + '02', auto: true }] });
-  await sleep(800); await page.evaluate(() => window.__hubMap.sync()); await page.click('#mapTidy'); await sleep(1500); await page.evaluate(() => window.__hubMap.sync()); await sleep(500);
+  await sleep(800); await page.evaluate(() => window.__hubMap.sync()); await page.evaluate(() => document.getElementById('mapTidy').click()); await sleep(1500); await page.evaluate(() => window.__hubMap.sync()); await sleep(500);
   const read = async (key) => { const p = await page.evaluate((k) => window.__hubMap.screenOf(k), key); await page.mouse.click(p.x, p.y); await sleep(500); return page.evaluate(() => document.getElementById('mapSide').innerText.replace(/\s+/g, ' ')); };
   const labels = await page.evaluate((M) => { const f = window.__hubMap.labelOf; return f ? [f(M + '01'), f(M + '02')] : null; }, M);
   if (labels) check('map label shows file sharing only on the machine that has it', /SMB/.test(labels[0]) && !/SMB|NFS/.test(labels[1]), JSON.stringify(labels)); else console.log('  (no labelOf hook; checked through the pane instead)');

@@ -39,7 +39,7 @@ const launch = async () => {
   l = await page.evaluate(() => window.connApi.list());
   check('a NEW profile starts with no router & switch links', B !== A && l.list.length === 0, JSON.stringify(l.list));
   check('...and no server logins', (await page.evaluate(() => window.bmcApi.list())).list.length === 0);
-  await page.click('#tabMap'); await sleep(300); await page.click('#mapConnBtn'); await sleep(500);
+  await page.click('#tabMap'); await sleep(300); await page.evaluate(() => document.getElementById('mapConnBtn').click()); await sleep(500);
   check('the Router & switch links window shows none', /No connections yet/.test(await page.evaluate(() => document.getElementById('connList').innerText)), await page.evaluate(() => document.getElementById('connList').innerText));
   await page.evaluate(() => document.getElementById('connClose').click()); await sleep(200);
   const bw = await page.evaluate(() => window.netApi.bandwidth());
@@ -54,7 +54,7 @@ const launch = async () => {
   await page.evaluate((id) => window.hubProfilesSwitch(id), A); await sleep(900);
   l = await page.evaluate(() => window.connApi.list());
   check('switching back shows only A\'s links', l.list.length === 2 && !l.list.some((x) => x.host === '10.9.0.2'), JSON.stringify(l.list.map((x) => x.name)));
-  await page.click('#mapConnBtn'); await sleep(500);
+  await page.evaluate(() => document.getElementById('mapConnBtn').click()); await sleep(500);
   const txt = await page.evaluate(() => document.getElementById('connList').innerText);
   check('the window lists A\'s links and not B\'s', /Old switch/.test(txt) && /Old router/.test(txt) && !/Client switch/.test(txt), txt);
   await page.evaluate(() => document.getElementById('connClose').click()); await sleep(200);

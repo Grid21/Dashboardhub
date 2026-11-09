@@ -19,7 +19,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   });
   for (const [w, h] of [[1400, 900], [1000, 700], [760, 600], [600, 700]]) {
     await app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0].setContentSize(s[0], s[1]), [w, h]); await sleep(300);
-    await page.click('#mapConnBtn'); await sleep(500);
+    await page.evaluate(() => document.getElementById('mapConnBtn').click()); await sleep(500);
     for (const type of ['snmp', 'unifi', 'asus']) {
       await page.selectOption('#connType', type); await sleep(150);
       if (type === 'snmp') { await page.selectOption('#connSnmpVer', '3'); await sleep(150); }

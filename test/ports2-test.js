@@ -43,7 +43,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     links: [{ a: 'router', b: SW, auto: true }, { a: SW, b: PC, auto: true }, { a: SW, b: NAS, auto: true }] });
   await sleep(500);
   await page.evaluate((r) => window.hubNetmap.applyConnector(r), res); await sleep(500);
-  await page.evaluate(() => window.__hubMap.sync()); await page.click('#mapTidy'); await sleep(1200); await page.evaluate(() => window.__hubMap.sync()); await sleep(300);
+  await page.evaluate(() => window.__hubMap.sync()); await page.evaluate(() => document.getElementById('mapTidy').click()); await sleep(1200); await page.evaluate(() => window.__hubMap.sync()); await sleep(300);
   const read = async (key) => { const p = await page.evaluate((k) => window.__hubMap.screenOf(k), key); await page.mouse.click(p.x, p.y); await sleep(500); return page.evaluate(() => document.getElementById('mapSide').innerText.replace(/\s+/g, ' ')); };
   const t = await read(SW);
   try { await (await page.$('#mapSide')).screenshot({ path: path.join(ROOT, 'test', 'ports-shot.png') }); } catch (e) { /* picture is optional */ }

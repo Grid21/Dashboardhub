@@ -18,7 +18,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.evaluate((d) => window.hubNetmap.importData(d, true), { router: '10.7.0.1', cidr: '10.7.0.0/24', scannedOnce: true,
     devices: { router: { key: 'router', ip: '10.7.0.1', isRouter: true }, [E]: { key: E, mac: E, ip: '10.7.0.30', label: 'box', online: true } }, links: [{ a: 'router', b: E, auto: true }] });
   await sleep(500);
-  await page.evaluate(() => window.__hubMap.sync()); await page.click('#mapTidy'); await sleep(1200); await page.evaluate(() => window.__hubMap.sync()); await sleep(300);
+  await page.evaluate(() => window.__hubMap.sync()); await page.evaluate(() => document.getElementById('mapTidy').click()); await sleep(1200); await page.evaluate(() => window.__hubMap.sync()); await sleep(300);
   const p = await page.evaluate((k) => window.__hubMap.screenOf(k), E); await page.mouse.click(p.x, p.y); await sleep(500);
   const sel = '#mapSide input[type=text]';
   check('device pane has a text box', await page.locator(sel).count() > 0);

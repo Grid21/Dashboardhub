@@ -1,0 +1,41 @@
+'use strict';
+//   xvfb-run -a node test/mapmenu-test.js
+// The "Map layout and hardware" dropdown holds the 7 map buttons, opens, closes and still works.
+const path = require('path'), fs = require('fs'), os = require('os');
+const { _electron } = require(process.env.PLAYWRIGHT_DIR || '/home/claude/.npm-global/lib/node_modules/playwright');
+const ROOT = path.join(__dirname, '..');
+let passed = 0, failed = 0;
+const check = (n, ok, d) => { if (ok) { passed++; console.log('  ok    ' + n); } else { failed++; console.log('  FAIL  ' + n + (d !== undefined ? '   -> ' + d : '')); } };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+(async () => {
+  const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-'));
+  const app = await _electron.launch({ executablePath: path.join(ROOT, 'node_modules/electron/dist/electron'), args: [ROOT, '--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--user-data-dir=' + ud] });
+  const page = await app.firstWindow(); await page.setViewportSize({ width: 1400, height: 900 }); await page.waitForSelector('#tabMap');
+  await page.click('#tabMap'); await sleep(800);
+  const vis = (id) => page.evaluate((i) => { const e = document.getElementById(i); return !!e && e.offsetParent !== null; }, id);
+  const ids = ['mapConnBtn', 'mapAddSwitch', 'mapCable', 'mapConnect', 'mapTop', 'mapReset', 'mapTidy'];
+  check('menu button is on the toolbar', await vis('mapMenuBtn'));
+  check('menu button says "Map layout and hardware"', (await page.textContent('#mapMenuBtn')).includes('Map layout and hardware'));
+  let hidden = 0; for (const i of ids) if (!(await vis(i))) hidden++;
+  check('the 7 buttons are tucked away while the menu is closed', hidden === 7, hidden);
+  await page.click('#mapMenuBtn'); await sleep(200);
+  let shown = 0; for (const i of ids) if (await vis(i)) shown++;
+  check('clicking the menu shows all 7 buttons', shown === 7, shown);
+  const box = await page.evaluate(() => { const r = document.getElementById('mapMenu').getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; });
+  check('menu stays inside the window', box.l >= 0 && box.r <= 1400 && box.b <= 900, JSON.stringify(box));
+  await page.screenshot({ path: process.env.SHOT || path.join(os.tmpdir(), 'mapmenu.png') });
+  await page.click('#mapTop'); await sleep(300);
+  check('picking an item closes the menu', !(await vis('mapTop')));
+  await page.click('#mapMenuBtn'); await sleep(150); await page.keyboard.press('Escape'); await sleep(150);
+  check('Escape closes it', !(await vis('mapTop')));
+  await page.click('#mapMenuBtn'); await sleep(150); await page.mouse.click(300, 600); await sleep(150);
+  check('clicking elsewhere closes it', !(await vis('mapTop')));
+  await page.click('#mapMenuBtn'); await sleep(150); await page.click('#mapConnect'); await sleep(200);
+  check('"Draw lines" still switches on', await page.evaluate(() => document.getElementById('mapConnect').classList.contains('on')));
+  check('the menu button lights up while drawing', await page.evaluate(() => document.getElementById('mapMenuBtn').classList.contains('on')));
+  await page.click('#mapMenuBtn'); await sleep(150); await page.click('#mapConnect'); await sleep(200);
+  check('and switches off again, menu button back to normal', await page.evaluate(() => !document.getElementById('mapConnect').classList.contains('on') && !document.getElementById('mapMenuBtn').classList.contains('on')));
+  await page.click('#mapMenuBtn'); await sleep(150); await page.click('#mapConnBtn'); await sleep(500);
+  check('"Router & switch links" still opens its window', await page.evaluate(() => [...document.querySelectorAll('dialog')].some(d => d.open)));
+  console.log(failed ? '\nFAILED ' + failed : '\nAll ' + passed + ' passed'); await app.close(); process.exit(failed ? 1 : 0);
+})().catch(e => { console.log('ERR', e); process.exit(2); });

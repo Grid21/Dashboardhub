@@ -67,7 +67,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.evaluate((d) => window.hubNetmap.importData(d, true), { router: '10.9.0.1', cidr: '10.9.0.0/24', scannedOnce: true,
     devices: { router: { key: 'router', ip: '10.9.0.1', isRouter: true }, [M + '01']: { key: M + '01', mac: M + '01', ip: '10.9.0.50', label: 'Dad\'s server', online: false, os: { id: 'linux', label: 'Linux', confidence: 'high', reasons: [] } } },
     links: [{ a: 'router', b: M + '01', auto: true }] });
-  await sleep(400); await page.click('#mapTidy'); await sleep(700);
+  await sleep(400); await page.evaluate(() => document.getElementById('mapTidy').click()); await sleep(700);
   await page.evaluate(() => { document.getElementById('mapOffline').checked = true; document.getElementById('mapOffline').dispatchEvent(new Event('change')); }); await sleep(700);
   // add the server (the dialog does the same call)
   const saved = await page.evaluate(async (a) => window.bmcApi.save(Object.assign({}, a.cfg, { mac: a.mac })), { cfg: cfg, mac: M + '01' });

@@ -46,7 +46,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(300);
   const dd = await page.evaluate((E) => window.hubNetmap.exportData().devices[E], E);
   check('an SNMP printer that was labelled a switch is corrected to printer', dd.osOverride === 'printer', dd.osOverride);
-  await page.evaluate(() => window.__hubMap.sync()); await page.click('#mapTidy'); await sleep(1200); await page.evaluate(() => window.__hubMap.sync()); await sleep(300);
+  await page.evaluate(() => window.__hubMap.sync()); await page.evaluate(() => document.getElementById('mapTidy').click()); await sleep(1200); await page.evaluate(() => window.__hubMap.sync()); await sleep(300);
   const p = await page.evaluate((k) => window.__hubMap.screenOf(k), E); await page.mouse.click(p.x, p.y); await sleep(500);
   const side = await page.evaluate(() => document.getElementById('mapSide').innerText.replace(/\s+/g, ' '));
   check('device pane says Printer', /System\s+Printer/.test(side), side.slice(0, 300));

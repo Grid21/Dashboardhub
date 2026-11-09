@@ -33,7 +33,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('the circle is bold: solid ring and a clearly visible fill', g[0].ringOpacity >= 0.9 && g[0].fillOpacity >= 0.2, JSON.stringify(g[0]));
   check('the group name is big enough to read and never hidden behind machines', g[0].labelH >= 1.6 && g[0].labelW > g[0].labelH && g[0].labelOnTop, JSON.stringify(g[0]));
   // real pixels: the ring colour must show up in a top-down screenshot
-  await page.click('#mapTop'); await sleep(1500);
+  await page.evaluate(() => document.getElementById('mapTop').click()); await sleep(1500);
   const png = await page.screenshot();
   const px = await page.evaluate(async (b64) => { const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode(); const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const x = c.getContext('2d'); x.drawImage(img, 0, 0); const d = x.getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) { if (d[i + 2] > 200 && d[i] > 120 && d[i] < 200 && d[i + 1] > 120 && d[i + 1] < 210) n++; } return n; }, png.toString('base64'));
   check('the ring is really drawn on screen (pixel check)', px > 300, 'ring-coloured pixels: ' + px);

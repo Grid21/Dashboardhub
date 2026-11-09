@@ -34,7 +34,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.evaluate((d) => window.hubNetmap.importData(d, true), { router: '10.7.0.1', cidr: '10.7.0.0/24', scannedOnce: true,
     devices: { router: { key: 'router', ip: '10.7.0.1', isRouter: true }, 'aa:bb:cc:00:00:01': mk('01', '127.0.0.1', 'Closet switch'), 'aa:bb:cc:00:00:02': mk('02', '127.0.0.2', 'Silent PC') }, links: [{ a: 'router', b: 'aa:bb:cc:00:00:01', auto: true }, { a: 'router', b: 'aa:bb:cc:00:00:02', auto: true }] });
   await sleep(500);
-  await page.click('#mapConnBtn'); await sleep(500);
+  await page.evaluate(() => document.getElementById('mapConnBtn').click()); await sleep(500);
   await page.click('#snmpFind summary'); await sleep(200);
   await page.fill('#snmpFindNames', 'public, homelab');
   await page.click('#snmpFindGo');

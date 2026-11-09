@@ -20,7 +20,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.evaluate((d) => window.hubNetmap.importData(d, true), { router: '10.7.0.1', cidr: '10.7.0.0/24', scannedOnce: true,
     devices: { router: { key: 'router', ip: '10.7.0.1', isRouter: true }, [M + '01']: dev('01', '10.7.0.21', 'Laptop', { attach: at(true, 866.7, 780) }), [M + '02']: dev('02', '10.7.0.22', 'NAS', { attach: at(false, 2500, null) }), [M + '03']: dev('03', '10.7.0.9', 'This PC', { self: true }), [M + '04']: dev('04', '10.7.0.24', 'Desk PC') },
     links: [{ a: 'router', b: M + '01', auto: true, wireless: true }, { a: 'router', b: M + '02', auto: true }, { a: 'router', b: M + '03', auto: true }, { a: 'router', b: M + '04', auto: false, cable: true }] });
-  await sleep(800); await page.evaluate(() => window.__hubMap.sync()); await page.click('#mapTidy'); await sleep(1500); await page.evaluate(() => window.__hubMap.sync()); await sleep(500);
+  await sleep(800); await page.evaluate(() => window.__hubMap.sync()); await page.evaluate(() => document.getElementById('mapTidy').click()); await sleep(1500); await page.evaluate(() => window.__hubMap.sync()); await sleep(500);
   const read = async (key) => {
     const p = await page.evaluate((k) => window.__hubMap.screenOf(k), key);
     await page.mouse.click(p.x, p.y); await sleep(400);
@@ -51,7 +51,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(300);
   const up = await page.evaluate((M) => window.hubNetmap.exportData().devices[M + '05'].uplinkSpeed, M);
   check('a polled switch records the speed of its uplink port toward the router', up === 10000, String(up));
-  await page.click('#mapTidy'); await sleep(900);
+  await page.evaluate(() => document.getElementById('mapTidy').click()); await sleep(900);
   const t5 = await read(M + '05');
   check('switch pane shows the uplink speed', /Uplink speed 10 Gbps/.test(t5), t5.slice(0, 300));
   const exp = await page.evaluate(() => JSON.stringify(window.hubNetmap.exportData()));

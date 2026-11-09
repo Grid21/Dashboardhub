@@ -53,7 +53,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       { mac: M + '03', ip: '10.7.0.23', viaPort: 'Gi2', speed: 1000, wireless: false, via: 'switch port Gi2', viaDeviceIp: '10.7.0.2' },
       { mac: 'aa:aa:aa:00:00:01', ip: '10.7.0.1', viaPort: 'Gi6', speed: 1000, wireless: false, via: 'switch port Gi6', viaDeviceIp: '10.7.0.2' }], gear: [] };
   await page.evaluate((r) => window.hubNetmap.applyConnector(r), res); await sleep(500);
-  await page.evaluate(() => window.__hubMap.sync()); await page.click('#mapTidy'); await sleep(1300); await page.evaluate(() => window.__hubMap.sync()); await sleep(300);
+  await page.evaluate(() => window.__hubMap.sync()); await page.evaluate(() => document.getElementById('mapTidy').click()); await sleep(1300); await page.evaluate(() => window.__hubMap.sync()); await sleep(300);
   const pick = async (key) => { const p = await page.evaluate((k) => window.__hubMap.screenOf(k), key); await page.mouse.click(p.x, p.y); await sleep(500); };
   console.log('  (debug) portTable after tidy:', JSON.stringify(await page.evaluate((M) => window.hubNetmap.exportData().devices[M + '10'].portTable, M)));
   await pick(M + '10');

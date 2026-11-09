@@ -24,7 +24,7 @@ esac
   const page = await app.firstWindow(); await page.setViewportSize({ width: 1400, height: 900 });
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
   await page.waitForSelector('#tabMap'); await page.click('#tabMap'); await sleep(500);
-  await page.click('#mapConnBtn'); await sleep(600);
+  await page.evaluate(() => document.getElementById('mapConnBtn').click()); await sleep(600);
   const types = await page.evaluate(() => [...document.getElementById('connType').options].map((o) => o.value + '|' + o.textContent));
   check('"SSH" is in the list of connection types', types.some((t) => /^ssh\|.*SSH/.test(t)), JSON.stringify(types.slice(-3)));
   await page.selectOption('#connType', 'ssh'); await sleep(200);

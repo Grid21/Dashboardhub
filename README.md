@@ -42,12 +42,14 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 ### 1. Live 3D network map
 - Scans your network (ping, common-port checks and the ARP table) and draws every machine in an interactive 3D map, with your router in the middle.
 - **Three scan depths**: quick (about 15 seconds), thorough, and a quiet background scan.
-- **Live update**: the map keeps watching and shows machines joining, leaving and coming back. Intervals run from 15 seconds to 30 minutes.
+- **Live update**: the map keeps watching and shows machines joining, leaving and coming back. Intervals run from 15 seconds to 30 minutes. A green dot says what it is doing: "Auto scan on", "Auto scan in progress..." while it blinks, then "Last auto scan" with the time.
 - **Smart identification**: guesses the type of every machine (router, switch, Windows, Linux, Apple, Android, smart-home device, game console, printer, network gear) and shows the reasons for the guess. You can override it.
 - **Maker lookup**: names the manufacturer from the hardware address.
 - **Alerts**: in-app notices or desktop notifications when something new appears, leaves or returns, and they keep working while the app is hidden in the tray.
 - **Drawing tools**: add switches and your own machines, draw cables, group and label machines, add VLAN names, tidy the layout, and use a top-down view.
-- **Device list**: search, filter and select several machines to change their type, connection, group or VLAN in one go, or to wake them up.
+- **Device list**: search, filter and select several machines to change their type, connection, group or VLAN in one go, or to wake them up. A machine in a group shows "Group: name" under it, and the group name box keeps what you type while the map updates.
+- **Tidy toolbar**: Router & switch links, Add switch, Draw physical cable, Draw lines, Top view, Reset view and Tidy up live in one "Map layout and hardware" dropdown. Alerts sit next to Live update, and the scan message and live status share the second row, so nothing jumps around after a scan.
+- **Never lose your map**: the map can't be pushed off screen or zoomed out so far that it disappears; Reset view and Top view always bring it back.
 - Your map and layout save automatically.
 
 ### 2. Router, switch and controller connections
@@ -93,6 +95,7 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 - Works with the **self-signed certificates** most home-lab tools use.
 - **Full screen for any panel**: a Maximize button makes a panel fill the whole window to work in it, with an Exit full screen button (or Esc) to go back. The page inside is not reloaded.
 - Search inside a panel with Ctrl+F, reload everything with one click.
+- **Panels fix themselves**: a panel that can't load or crashes reloads on its own (waiting a little longer each time, then once a minute) and says so. Turn it off in Settings ("Reload a panel by itself when it fails").
 
 ### 9. Encrypted notes and SSH shortcuts
 - **Notes per panel and per server**, encrypted with your operating system's secure storage.

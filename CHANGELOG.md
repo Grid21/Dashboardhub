@@ -2,6 +2,17 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.10.89
+- NEW (early): Network boot (PXE). Settings -> "Network boot (PXE)..." boots another computer from this one over the network cable. Off until you press Start. It only answers the MAC addresses you list (or "any computer" if you tick it), never hands out addresses, and its menu never installs or erases anything. Offers Ubuntu/Debian-style live ISOs you add, other ISOs in a generic way, and the netboot.xyz menu.
+- Needs a cable connection and administrator rights (Windows "Run as administrator", or sudo on Linux). Tested with simulated network boots; not yet on real network-boot hardware.
+- About window lists the ports network boot uses (UDP 67, 4011, 69, TCP 8088).
+
+## 1.10.88
+- The green dot next to the map toolbar now always has words with it: "Auto scan on: every 15 seconds" when waiting, "Auto scan in progress..." while it blinks, and "Last auto scan: 07:53:22 PM" when done. Hover over the dot for a plain explanation. (Replaces the bare "checked 07:53:22 PM".)
+
+## 1.10.87
+- Network Map toolbar tidied: Alerts now sits next to Live update on the first row (no gap), and "Map layout and hardware", Show offline, Move groups together, Group circles and Show services start the second row, followed by the scan message and the "checked" time. The scan message no longer sits in the first row, so the first row can't jump after a scan.
+
 ## 1.10.86
 - Fixed: the Network Map toolbar sat in a different place before the first scan than after it (Alerts, Live update and the checked-time label jumped when "Done. Found N machines." appeared). The scan message now keeps a fixed-size slot, so the toolbar looks the same before and after. Long messages are cut with "..." and show in full when you hover over them.
 

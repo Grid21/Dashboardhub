@@ -71,6 +71,16 @@ contextBridge.exposeInMainWorld('sshApi', {
   connect: (server) => ipcRenderer.invoke('ssh:connect', server)
 });
 
+contextBridge.exposeInMainWorld('pxeApi', {
+  status: () => ipcRenderer.invoke('pxe:status'),
+  start: (ip) => ipcRenderer.invoke('pxe:start', { ip: String(ip || '') }),
+  stop: () => ipcRenderer.invoke('pxe:stop'),
+  allow: (macs, any) => ipcRenderer.invoke('pxe:allow', { macs: Array.isArray(macs) ? macs.slice(0, 50).map(String) : [], any: any === true }),
+  addIso: () => ipcRenderer.invoke('pxe:addIso'),
+  removeIso: (id) => ipcRenderer.invoke('pxe:removeIso', String(id || '')),
+  renameIso: (id, name) => ipcRenderer.invoke('pxe:renameIso', String(id || ''), String(name || ''))
+});
+
 contextBridge.exposeInMainWorld('toolsApi', {
   unpack: () => ipcRenderer.invoke('tools:unpack'),
   packPick: () => ipcRenderer.invoke('tools:packPick'),

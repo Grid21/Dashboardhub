@@ -46,6 +46,7 @@
           <button type="button" id="profileRemove" role="menuitem">Remove profile</button>
           <div class="profile-menu-sep"></div>
           <button type="button" id="bmcMenuBtn" role="menuitem" title="Status and power control for servers with iLO, iDRAC or another BMC">Server management (iLO / iDRAC)...</button>
+          <button type="button" id="pxeMenuBtn" role="menuitem" title="Boot another computer from this one over the network (PXE): live and rescue discs, no USB stick needed">Network boot (PXE)...</button>
           <button type="button" id="toolsMenuBtn" role="menuitem" title="Unpack a .hubupdate file into its source files, or pack a folder back into a .hubupdate file">Update file tools (unpack / pack)...</button>
           <button type="button" id="securityMenuBtn" role="menuitem" title="Choose what panels may do, and limit scanning, router connections and SNMP">Security settings...</button>
           <button type="button" id="backupBtn" role="menuitem" title="Export or import your panels, servers, notes and network profiles">Backup...</button>
@@ -113,28 +114,29 @@
       </label>
       <button id="mapScan" class="primary" type="button">Scan network</button>
       <button id="mapStop" class="hidden" type="button">Stop</button>
-      <span id="mapStatus" class="map-status"></span>
-      <label>Live update
-        <select id="mapLive" title="Quietly checks for machines joining and leaving, without interrupting you">
-          <option value="0">Off</option>
-          <option value="15">Every 15 seconds</option>
-          <option value="30">Every 30 seconds</option>
-          <option value="60">Every minute</option>
-          <option value="120">Every 2 minutes</option>
-          <option value="300">Every 5 minutes</option>
-          <option value="600">Every 10 minutes</option>
-          <option value="1800">Every 30 minutes</option>
-        </select>
-      </label>
-      <label>Alerts
-        <select id="mapAlerts" title="Get told when a machine joins or leaves your network">
-          <option value="off">Off</option>
-          <option value="app">In the app</option>
-          <option value="desktop">App + desktop notice</option>
-        </select>
-      </label>
-      <span id="mapLiveDot" class="live-dot" title=""></span><span id="mapLiveText" class="map-status"></span>
-      <span class="spacer"></span>
+      <div class="map-live-group">
+        <label>Live update
+          <select id="mapLive" title="Quietly checks for machines joining and leaving, without interrupting you">
+            <option value="0">Off</option>
+            <option value="15">Every 15 seconds</option>
+            <option value="30">Every 30 seconds</option>
+            <option value="60">Every minute</option>
+            <option value="120">Every 2 minutes</option>
+            <option value="300">Every 5 minutes</option>
+            <option value="600">Every 10 minutes</option>
+            <option value="1800">Every 30 minutes</option>
+          </select>
+        </label>
+        <label>Alerts
+          <select id="mapAlerts" title="Get told when a machine joins or leaves your network">
+            <option value="off">Off</option>
+            <option value="app">In the app</option>
+            <option value="desktop">App + desktop notice</option>
+          </select>
+        </label>
+
+      </div>
+      <span class="map-break"></span>
       <div class="map-menu-wrap">
         <button id="mapMenuBtn" type="button" aria-haspopup="true" aria-expanded="false" title="Router links, switches, cables, lines and camera views">Map layout and hardware &#9662;</button>
         <div id="mapMenu" class="profile-menu map-menu hidden" role="menu" aria-label="Map layout and hardware">
@@ -151,6 +153,8 @@
       <label class="check-inline" title="Machines in the same group (set in the machine list) move together when you drag one. Ctrl+drag moves just one."><input type="checkbox" id="mapGroupMove" checked> Move groups together</label>
       <label class="check-inline" title="Draw a coloured circle and name around each group of machines"><input type="checkbox" id="mapGroupCircles" checked> Group circles</label>
       <label class="check-inline" title="Show the services (web apps, Docker containers, VPNs...) found on each machine as small boxes around it"><input type="checkbox" id="mapServices"> Show services</label>
+      <span id="mapStatus" class="map-status"></span>
+      <span class="map-live-info"><span id="mapLiveDot" class="live-dot" title=""></span><span id="mapLiveText" class="map-status"></span></span>
     </div>
     <div class="map-progress hidden" id="mapProgress"><div id="mapProgressBar"></div></div>
     <div class="map-main">
@@ -354,6 +358,39 @@
     <div class="dialog-buttons"><button type="button" id="aboutClose" class="primary">Close</button></div>
   </dialog>
 
+  <dialog id="pxeDialog" class="wide">
+    <h3>Network boot (PXE)</h3>
+    <p class="hint">Starts another computer from <b>this</b> one, over the network cable, with no USB stick. Choose a disc image (ISO) or the netboot.xyz menu on that computer's boot screen.
+       This is <b>off</b> until you press Start, and it stops when you close Dashboard Hub. It only answers the computers you list below, it never changes your router's settings,
+       and the menu itself never installs or erases anything: a disc that offers an installer will ask you first.</p>
+    <h4>1. Which computer may network boot?</h4>
+    <p class="hint">Enter its MAC address (shown on the Network Map when you click it, or in its BIOS boot screen). Other computers on your network are left alone.</p>
+    <div class="pxe-row">
+      <input id="pxeMacInput" type="text" placeholder="aa:bb:cc:11:22:33" spellcheck="false" autocomplete="off" maxlength="40">
+      <button type="button" id="pxeMacAdd">Add</button>
+      <select id="pxeMacPick" title="Pick a machine your map already knows"><option value="">or pick from your map...</option></select>
+    </div>
+    <div id="pxeMacList" class="pxe-list"></div>
+    <label class="check-inline"><input type="checkbox" id="pxeAny"> Answer <b>any</b> computer that asks (not recommended: it can interfere with other computers' network boot)</label>
+    <h4>2. Network connection to use</h4>
+    <select id="pxeIp" title="The connection of this computer that the booting computer is plugged into"></select>
+    <p class="hint">Use a cable: network boot does not work over Wi-Fi. The booting computer must be on the same network as this one.</p>
+    <h4>3. Disc images to offer</h4>
+    <div id="pxeIsoList" class="pxe-list"></div>
+    <div class="dialog-buttons left"><button type="button" id="pxeIsoAdd">Add an ISO file...</button></div>
+    <p class="hint">Ubuntu-style and Debian live discs start directly. Other ISO files are tried in a generic way and may not work on every computer. The menu also has <b>netboot.xyz</b>: many live, rescue and installer images, downloaded by the booting computer, so it needs internet.
+       While this is running, other computers on your network can also see the menu and fetch the ISO files you added.</p>
+    <div class="dialog-buttons left">
+      <button type="button" id="pxeStart" class="primary">Start network boot</button>
+      <button type="button" id="pxeStop" class="hidden">Stop</button>
+      <span id="pxeState" class="notes-msg"></span>
+    </div>
+    <p id="pxeMsg" class="notes-msg"></p>
+    <h4>What is happening</h4>
+    <div id="pxeLog" class="pxe-log" aria-live="polite"></div>
+    <div class="dialog-buttons"><span class="spacer"></span><button type="button" id="pxeClose">Close</button></div>
+  </dialog>
+
   <dialog id="toolsDialog" class="wide">
     <h3>Update file tools</h3>
     <p class="hint">For people who want to look inside an update, change it, or make their own. Unpack turns a <code>.hubupdate</code> file into a folder of
@@ -468,6 +505,7 @@
   <script src="bandwidth-ui.js"></script>
   <script src="updates.js"></script>
   <script src="about-ui.js"></script>
+  <script src="pxe-ui.js"></script>
   <script src="security-ui.js"></script>
   <script src="tools-ui.js"></script>
   <script src="updater-ui.js"></script>

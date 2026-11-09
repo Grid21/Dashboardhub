@@ -2203,7 +2203,8 @@
       if (!bg || !sideIsBusy()) renderSide();
       if (bg) {
         setLiveBusy(false);
-        setLiveText('checked ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        liveLast = 'Last auto scan: ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setLiveText(liveLast);
       } else {
         if (m.error) setStatus('The scan stopped: ' + m.error, true);
         else if (m.canceled && !pendingManual) setStatus('Scan stopped. ' + (devices().length - 1) + ' machines on the map.');
@@ -2218,12 +2219,22 @@
 
   // ---------- quiet live updates ----------
   function setLiveText(t) { if (els.liveText) els.liveText.textContent = t || ''; }
-  function setLiveBusy(on) { if (els.liveDot) els.liveDot.classList.toggle('busy', !!on); }
+  let liveLast = '';   // when the last automatic check finished
+  function setLiveBusy(on) {
+    if (els.liveDot) els.liveDot.classList.toggle('busy', !!on);
+    if (on) setLiveText('Auto scan in progress...');
+    else if (net && net.autoSeconds > 0 && els.liveText && els.liveText.textContent === 'Auto scan in progress...') setLiveText(liveLast || liveIdleText());   // a check that ended without finishing
+  }
+  function liveIdleText() {
+    const o = els.live && els.live.selectedOptions && els.live.selectedOptions[0];
+    return 'Auto scan on' + (o ? ': ' + o.textContent.toLowerCase() : '');
+  }
   function updateLiveUi() {
     const on = net.autoSeconds > 0;
     if (els.live) els.live.value = String(net.autoSeconds);
-    if (els.liveDot) { els.liveDot.classList.toggle('off', !on); els.liveDot.title = on ? 'Live update is on: the map quietly checks for machines joining and leaving.' : 'Live update is off.'; }
-    if (!on) setLiveText('');
+    if (els.liveDot) { els.liveDot.classList.toggle('off', !on); els.liveDot.title = on ? 'The green dot means Live update is on: the map quietly re-scans now and then to see machines joining and leaving. It blinks while a check is running.' : 'Live update is off.'; }
+    if (!on) { setLiveText(''); liveLast = ''; }
+    else if (els.liveText && (!els.liveText.textContent || /^Auto scan on/.test(els.liveText.textContent) || /^starts after/.test(els.liveText.textContent))) { if (net.scannedOnce) setLiveText(liveLast || liveIdleText()); }
   }
   function canLive() {
     return !!(window.netApi && net.autoSeconds > 0 && net.scannedOnce && net.cidr && scanKind === null && (!document.hidden || window.hubBackground === true) &&

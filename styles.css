@@ -522,10 +522,28 @@ body.window-hidden *, body.window-hidden *::before, body.window-hidden *::after 
 /* "Map layout and hardware" dropdown */
 .map-menu-wrap { position: relative; }
 .map-menu-wrap > button.on { background: #35445a; border-color: #5b8dd6; }
-.map-menu { left: auto; right: 0; min-width: 250px; }
+.map-menu { left: 0; right: auto; min-width: 250px; }
 .map-menu button.on { background: #35445a; }
 
 .ml-grouptag { font-size: 11px; color: #7fb0ff; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* the scan message keeps its place, so the toolbar looks the same before and after the first scan */
 #mapStatus { display: inline-block; width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+
+/* two toolbar rows: scan controls (with Live update and Alerts) on the first, map controls on the second */
+.map-break { flex-basis: 100%; height: 0; margin: -4px 0; }
+.map-live-group { display: flex; flex-wrap: nowrap; align-items: center; gap: 12px; }
+.map-live-info { display: inline-flex; align-items: center; gap: 6px; }
+
+#mapStatus { width: auto; max-width: 420px; }
+
+/* Network boot window */
+.pxe-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pxe-row input[type=text] { width: 200px; }
+.pxe-list { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.pxe-item { display: flex; gap: 8px; align-items: center; background: #1b2433; border: 1px solid #2c3a52; border-radius: 6px; padding: 4px 8px; }
+.pxe-item .pxe-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pxe-item .pxe-sub { color: #8a97ad; font-size: 12px; }
+.pxe-item.missing .pxe-name { color: #f59e0b; }
+.pxe-log { background: #0e1420; border: 1px solid #2c3a52; border-radius: 6px; padding: 6px 8px; min-height: 60px; max-height: 150px; overflow: auto; font-size: 12px; color: #b7c2d6; white-space: pre-wrap; }
+#pxeDialog label.check-inline { display: flex; flex-direction: row; align-items: center; gap: 8px; }

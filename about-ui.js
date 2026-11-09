@@ -16,6 +16,7 @@
     ['Thorough scan', 'The quick-scan ports plus TCP 1 to 1024'],
     ['SNMP and HPE switches', 'UDP 161'],
     ['DNS check', 'UDP and TCP 53'],
+    ['Network boot (PXE), only while you press Start in its window', 'UDP 67 and 4011 (boot information), UDP 69 (TFTP), TCP 8088 (menu and ISO files), on the local network'],
     ['Wake-on-LAN', 'UDP broadcast, ports 9 and 7'],
     ['UniFi, MikroTik, OPNsense, Cisco, Aruba', 'TCP 443'],
     ['OpenWrt, ASUS', 'TCP 80'],

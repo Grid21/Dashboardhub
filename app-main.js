@@ -305,6 +305,30 @@ let armedUpdateFile = '', armedUntil = 0;       // a downloaded update waiting t
   };
 })();
 
+// ---------- Network boot (PXE): boot another computer from this one. Off until Start is pressed; stops when the app quits ----------
+const pxeLib = require('./pxe');
+const pxeMod = pxeLib.create({ dataDir: app.getPath('userData') });
+ipcMain.handle('pxe:status', (event) => { checkSender(event); try { return Object.assign({ ok: true }, pxeMod.status()); } catch (e) { return { ok: false, error: 'Could not read the network boot state.' }; } });
+ipcMain.handle('pxe:start', async (event, o) => { checkSender(event); try { return await pxeMod.start({ ip: String(o && o.ip || '') }); } catch (e) { return { ok: false, error: 'Network boot could not start (' + (e && e.message || 'unknown') + ').' }; } });
+ipcMain.handle('pxe:stop', async (event) => { checkSender(event); try { return await pxeMod.stop(); } catch (e) { return { ok: false }; } });
+ipcMain.handle('pxe:allow', (event, o) => {
+  checkSender(event);
+  const macs = Array.isArray(o && o.macs) ? o.macs.slice(0, 50).map((m) => String(m).slice(0, 40)) : [];
+  return pxeMod.setAllow({ macs, any: !!(o && o.any === true) });
+});
+ipcMain.handle('pxe:addIso', async (event) => {
+  checkSender(event);
+  try {
+    const pick = await dialog.showOpenDialog(mainWindow, { title: 'Choose an ISO file to offer over the network', defaultPath: lastFolder('pxeIso', 'downloads'), properties: ['openFile'], filters: [{ name: 'ISO disc image', extensions: ['iso'] }] });
+    if (pick.canceled || !pick.filePaths || !pick.filePaths[0]) return { ok: false, canceled: true };
+    rememberFolder('pxeIso', pick.filePaths[0]);
+    return pxeMod.addIso(pick.filePaths[0]);
+  } catch (e) { return { ok: false, error: 'That file could not be added.' }; }
+});
+ipcMain.handle('pxe:removeIso', (event, id) => { checkSender(event); return pxeMod.removeIso(String(id || '')); });
+ipcMain.handle('pxe:renameIso', (event, id, name) => { checkSender(event); return pxeMod.renameIso(String(id || ''), String(name || '').slice(0, 80)); });
+app.on('before-quit', () => { try { pxeMod.stop(true); } catch (e) { /* closing anyway */ } });
+
 // ---------- "Update file tools": unpack (decompile) and pack (compile) .hubupdate files ----------
 const hubTools = require('./hubupdate-tools');
 let lastToolsOutput = '';     // the last folder or file the tools made, for the "Show it" button

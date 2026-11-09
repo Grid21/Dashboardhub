@@ -82,6 +82,12 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 - Wake one machine or many from the map or the device list.
 - Sends the wake signal out of every network card, then watches the map to confirm it woke up. Slow starters get time to boot.
 
+### 7b. Network boot (PXE) — new, early
+- Boot another computer from this one over the network cable, with no USB stick: Settings → "Network boot (PXE)...".
+- Off until you press Start. It only answers the computers (MAC addresses) you list, never hands out addresses (your router's DHCP stays in charge), and the menu itself never installs or erases anything.
+- Offers Ubuntu/Debian-style live ISOs you add, other ISOs in a generic way, and the netboot.xyz menu (live, rescue and installer images; the booting computer needs internet).
+- Early feature: tested with simulated network boots and a real app, but not yet on real network-boot hardware. Needs administrator rights on Windows (or `sudo` on Linux) because boot ports are protected.
+
 ### 8. Web dashboard panels
 - Put all your web tools (router pages, NAS, Proxmox, Home Assistant, Grafana and more) in panels in one place, each in its own isolated web view.
 - Works with the **self-signed certificates** most home-lab tools use.
@@ -151,6 +157,7 @@ We'd rather you hear this from us first:
 - **Routers and switches only share what they choose to.** An unmanaged switch can't report its ports. Many consumer routers don't report link speeds, port details or traffic per device. When that happens, Dashboard Hub says so instead of guessing.
 - **Per-device bandwidth** isn't available from most gear, so the Bandwidth Monitor shows traffic per router, port or network card.
 - **Operating systems**: developed and tested on Windows and Linux. macOS code paths exist but have had little real-world testing.
+- **Network boot (PXE) is new.** The protocol parts are tested against simulated computers, but not yet against real PXE hardware. It needs a cable connection, administrator rights, and a computer whose BIOS can network boot. Secure Boot usually has to be off.
 - Listing a machine's file shares often needs a login. On Linux it also needs the `smbclient` package.
 
 ---

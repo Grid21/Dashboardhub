@@ -570,6 +570,7 @@
     const now = performance.now();
     stepAnimations();
     controls.update();
+    if (keepMapInView()) controls.update();
     const cam = camera.position.x.toFixed(2) + camera.position.y.toFixed(2) + camera.position.z.toFixed(2) + controls.target.x.toFixed(2) + controls.target.y.toFixed(2) + controls.target.z.toFixed(2);
     let busy = cam !== lastCam; lastCam = cam;
     nodes.forEach((x) => { if (x.anim) busy = true; });
@@ -952,6 +953,23 @@
     let m = 10;
     devices().forEach((d) => { if (nodeVisible(d)) m = Math.max(m, Math.hypot(d.pos.x, d.pos.z)); });
     return m;
+  }
+  // The map can be pushed around and zoomed out, but never out of sight: the point the camera looks at stays
+  // inside the area the machines cover (plus a margin), and zooming out stops a sensible distance away.
+  function keepMapInView() {
+    if (!controls || !camera) return false;
+    let minX = 0, maxX = 0, minZ = 0, maxZ = 0;
+    devices().forEach((d) => { if (!nodeVisible(d) || !d.pos) return; if (d.pos.x < minX) minX = d.pos.x; if (d.pos.x > maxX) maxX = d.pos.x; if (d.pos.z < minZ) minZ = d.pos.z; if (d.pos.z > maxZ) maxZ = d.pos.z; });
+    const pad = 12 + 0.1 * Math.max(maxX - minX, maxZ - minZ);
+    const r = maxRadius();
+    controls.maxDistance = Math.min(400, Math.max(70, r * 3.2 + 50));
+    const t = controls.target;
+    const cx = Math.min(maxX + pad, Math.max(minX - pad, t.x)), cz = Math.min(maxZ + pad, Math.max(minZ - pad, t.z));
+    const cy = Math.min(8, Math.max(-8, t.y));
+    if (cx === t.x && cz === t.z && cy === t.y) return false;
+    camera.position.x += cx - t.x; camera.position.y += cy - t.y; camera.position.z += cz - t.z;   // slide the camera with it so nothing jumps
+    t.set(cx, cy, cz);
+    return true;
   }
   function fitView(top) {
     if (!renderer) return;
@@ -1921,7 +1939,7 @@
   let liveTimer = null;
 
   function setStatus(t, warn) {
-    els.status.textContent = t;
+    els.status.textContent = t; els.status.title = t || '';
     els.status.classList.toggle('warn', !!warn);
   }
 
@@ -3187,6 +3205,7 @@
 
   // small helper used by the automatic tests (where on screen is a machine or a line?)
   window.__hubMap = {
+    view: () => ({ tx: controls.target.x, ty: controls.target.y, tz: controls.target.z, dist: camera.position.distanceTo(controls.target), max: controls.maxDistance }),
     groups: function () { return Array.from(groupObjs.entries()).map(([k, o]) => ({ name: k, x: o.mesh.position.x, z: o.mesh.position.z, r: o.mesh.scale.x, ringOpacity: o.ring.material.opacity, fillOpacity: o.mesh.material.opacity, labelH: o.sprite.scale.y, labelW: o.sprite.scale.x, labelOnTop: o.sprite.material.depthTest === false, ringWidth: (1 - o.ring.geometry.parameters.innerRadius) * o.ring.scale.x }));  },
     glInfo: function () { return renderer ? { frames: renderer.info.render.frame, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, software: softwareGl, lost: glLost, running: running, gen: loopGen, pixelRatio: renderer.getPixelRatio(), width: canvas.width, height: canvas.height } : null; },
     screenOf: function (key) {

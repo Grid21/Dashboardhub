@@ -2,6 +2,12 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.10.86
+- Fixed: the Network Map toolbar sat in a different place before the first scan than after it (Alerts, Live update and the checked-time label jumped when "Done. Found N machines." appeared). The scan message now keeps a fixed-size slot, so the toolbar looks the same before and after. Long messages are cut with "..." and show in full when you hover over them.
+
+## 1.10.85
+- Network Map: the map can no longer be pushed out of sight or zoomed out too far. The view stays within the area your machines cover (plus a margin), and zooming out stops at a distance that fits the size of your network. Reset view and Top view work as before.
+
 ## 1.10.84
 - Fixed: the group name (and VLAN) box in the Device list was cleared while you typed, whenever the map updated. What you type, and the cursor, now stay.
 - Device list: a machine that is in a group now shows "Group: name" under it.

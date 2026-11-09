@@ -526,3 +526,6 @@ body.window-hidden *, body.window-hidden *::before, body.window-hidden *::after 
 .map-menu button.on { background: #35445a; }
 
 .ml-grouptag { font-size: 11px; color: #7fb0ff; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* the scan message keeps its place, so the toolbar looks the same before and after the first scan */
+#mapStatus { display: inline-block; width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }

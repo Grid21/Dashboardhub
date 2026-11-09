@@ -111,13 +111,6 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 - **Go back to an earlier version**: Dashboard Hub keeps a checked copy of the versions it ran, and the Updates window lists them with a button to return to any one. You choose how many earlier versions to keep (1 to 10, standard 4), like the backup count in backup programs. There is also a way back to the built-in version.
 - Each file inside is verified with a checksum. A small fixed starter program can always start the app, so a bad update can't leave you locked out.
 
-<img width="1410" height="1115" alt="Linux Servers SSH Dashboard" src="https://github.com/user-attachments/assets/6908f779-4de1-40a1-ae53-f0eefa40fd7b" />
-<img width="750" height="639" alt="About" src="https://github.com/user-attachments/assets/0f839b26-254c-40bf-9db4-83a1e8026655" />
-<img width="398" height="662" alt="Updates" src="https://github.com/user-attachments/assets/0d25849e-59aa-4f5d-b993-e25e1ac353e7" />
-<img width="260" height="772" alt="Settings" src="https://github.com/user-attachments/assets/5861aa4f-fd8d-4c8b-aa64-48b54b21585c" />
-<img width="1672" height="941" alt="network map" src="https://github.com/user-attachments/assets/01b7816e-3a41-452b-ac00-6a90343a6a03" />
-<img width="1672" height="941" alt="Dashboard Panels" src="https://github.com/user-attachments/assets/96010137-4bff-4b0b-b4a3-15e1e332ff5d" />
-
 ---
 
 ## Minor features
@@ -156,6 +149,12 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 
 ### Quality
 - Extensive automated tests cover the scanner, the router and switch connectors, the update system, profiles, the network guard, notifications and the interface. It has been tested on real home-lab hardware as well as on simulated devices (more about that below).
+<img width="1410" height="1115" alt="Linux Servers SSH Dashboard" src="https://github.com/user-attachments/assets/6908f779-4de1-40a1-ae53-f0eefa40fd7b" />
+<img width="750" height="639" alt="About" src="https://github.com/user-attachments/assets/0f839b26-254c-40bf-9db4-83a1e8026655" />
+<img width="398" height="662" alt="Updates" src="https://github.com/user-attachments/assets/0d25849e-59aa-4f5d-b993-e25e1ac353e7" />
+<img width="260" height="772" alt="Settings" src="https://github.com/user-attachments/assets/5861aa4f-fd8d-4c8b-aa64-48b54b21585c" />
+<img width="1672" height="941" alt="network map" src="https://github.com/user-attachments/assets/01b7816e-3a41-452b-ac00-6a90343a6a03" />
+<img width="1672" height="941" alt="Dashboard Panels" src="https://github.com/user-attachments/assets/96010137-4bff-4b0b-b4a3-15e1e332ff5d" />
 
 ---
 

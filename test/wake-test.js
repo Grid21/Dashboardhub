@@ -41,7 +41,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.evaluate((d) => window.hubNetmap.importData(d, true), { router: '10.8.0.1', cidr: '10.8.0.0/24', scannedOnce: true,
     devices: { router: { key: 'router', ip: '10.8.0.1', isRouter: true }, [M + '01']: dev('01', '10.8.0.21', 'Sleeping PC', { online: false }), [M + '02']: dev('02', '10.8.0.22', 'Server') , ['manual:abc']: { key: 'manual:abc', label: 'Manual box', manual: true, online: true, os: { id: 'unknown', label: 'Unknown', confidence: 'low', reasons: [] } } },
     links: [{ a: 'router', b: M + '01', auto: true }, { a: 'router', b: M + '02', auto: true }] });
-  await sleep(500); await page.click('#mapTidy'); await sleep(1000);
+  await sleep(500); await page.evaluate(() => document.getElementById('mapTidy').click()); await sleep(1000);
   await page.evaluate(() => { document.getElementById('mapOffline').checked = true; document.getElementById('mapOffline').dispatchEvent(new Event('change')); }); await sleep(700);
   const read = async (key) => { const q = await page.evaluate((k) => window.__hubMap.screenOf(k), key); await page.mouse.click(q.x, q.y); await sleep(400); };
   await read(M + '01');

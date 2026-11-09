@@ -518,3 +518,11 @@ body.window-hidden *, body.window-hidden *::before, body.window-hidden *::after 
 
 /* the scan progress line keeps its 3 pixels of space while hidden, so starting a scan does not move the map (and rebuild the 3D picture) */
 .map-progress.hidden { display: block !important; visibility: hidden; }
+
+/* "Map layout and hardware" dropdown */
+.map-menu-wrap { position: relative; }
+.map-menu-wrap > button.on { background: #35445a; border-color: #5b8dd6; }
+.map-menu { left: auto; right: 0; min-width: 250px; }
+.map-menu button.on { background: #35445a; }
+
+.ml-grouptag { font-size: 11px; color: #7fb0ff; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -280,6 +280,26 @@ function render() {
       }
     });
 
+    // A panel that fails to load or crashes reloads itself (waits a little longer each time, then once a minute).
+    // Settings -> "Reload a panel by itself when it fails" turns this off.
+    let tries = 0, retryTimer = null, loadFailed = false;
+    wv.addEventListener('did-start-loading', () => { loadFailed = false; });
+    const RETRY_WAITS = [3, 6, 10, 20, 30, 60];
+    const autoRetry = (what) => {
+      loadFailed = true;
+      if (!window.hubPanelAutoReload()) return false;
+      if (retryTimer) return true;
+      const wait = RETRY_WAITS[Math.min(tries, RETRY_WAITS.length - 1)];
+      tries++;
+      status.textContent = what + ' - trying again in ' + wait + ' s';
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        if (!wv.isConnected) return;
+        if (!window.hubPanelAutoReload()) { status.textContent = what + ' - press reload'; return; }
+        try { wv.reload(); } catch (e) { /* not ready: the next failure tries again */ }
+      }, wait * 1000);
+      return true;
+    };
     wv.addEventListener('did-start-loading', () => { status.textContent = 'Loading...'; });
     wv.addEventListener('did-stop-loading', () => {
       if (status.textContent === 'Loading...') status.textContent = '';
@@ -287,14 +307,15 @@ function render() {
     wv.addEventListener('render-process-gone', (e) => {
       const why = e && e.reason;
       if (why === 'clean-exit') return;
-      status.textContent = 'This page stopped working (' + (why || 'crashed') + ') - press reload';
+      if (!autoRetry('This page stopped working (' + (why || 'crashed') + ')')) status.textContent = 'This page stopped working (' + (why || 'crashed') + ') - press reload';
     });
     wv.addEventListener('did-fail-load', (e) => {
       // -3 means "cancelled", which is normal and not a real error
       if (e.isMainFrame && e.errorCode !== -3) {
-        status.textContent = 'Could not load (' + e.errorDescription + ') - check the address, then press reload';
+        if (!autoRetry('Could not load (' + e.errorDescription + ')')) status.textContent = 'Could not load (' + e.errorDescription + ') - check the address, then press reload';
       }
     });
+    wv.addEventListener('did-stop-loading', () => { if (!loadFailed) { tries = 0; if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; } } });
   });
 }
 
@@ -1225,3 +1246,39 @@ if (window.findApi) {
   window.findApi.onOpen((guestId) => { if (!document.body.classList.contains('view-map')) openFindFor(findGuests[guestId] || null); });
   window.findApi.onEscape((guestId) => { const id = findGuests[guestId]; if (id && findBars[id] && findBars[id].isOpen()) findBars[id].close(); });
 }
+
+
+/* "Map layout and hardware" dropdown: opens/closes; picking an item closes it */
+(function () {
+  const btn = document.getElementById('mapMenuBtn');
+  const menu = document.getElementById('mapMenu');
+  if (!btn || !menu) return;
+  const close = () => { menu.classList.add('hidden'); btn.setAttribute('aria-expanded', 'false'); };
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    const open = menu.classList.contains('hidden');
+    menu.classList.toggle('hidden', !open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  menu.addEventListener('click', e => { e.stopPropagation(); if (e.target && e.target.tagName === 'BUTTON') setTimeout(close, 0); });
+  document.addEventListener('click', e => { if (!menu.contains(e.target) && e.target !== btn) close(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  // light up the dropdown while "Draw lines" / "Draw physical cable" is switched on
+  const mark = () => btn.classList.toggle('on', !!menu.querySelector('button.on'));
+  const mo = new MutationObserver(mark);
+  menu.querySelectorAll('button').forEach(b => mo.observe(b, { attributes: true, attributeFilter: ['class'] }));
+})();
+
+
+/* Panels reload themselves when they fail (on unless switched off in Settings) */
+window.hubPanelAutoReload = function () {
+  try { return localStorage.getItem('hubPanelAutoReload') !== 'off'; } catch (e) { return true; }
+};
+(function () {
+  const chk = document.getElementById('panelAutoCheck');
+  if (!chk) return;
+  chk.checked = window.hubPanelAutoReload();
+  chk.addEventListener('change', () => {
+    try { localStorage.setItem('hubPanelAutoReload', chk.checked ? 'on' : 'off'); } catch (e) { /* lasts until the app closes */ }
+  });
+})();

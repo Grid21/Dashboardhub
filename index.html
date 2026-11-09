@@ -56,6 +56,7 @@
           <div class="menu-note" id="gpuHint"></div>
           <button type="button" id="gpuRestart" role="menuitem" hidden>Restart now to apply</button>
           <label class="menu-check" title="The green lines on the network map fade gently in and out, like link lights on a switch. Untick for steady lines."><input type="checkbox" id="pulseCheck" checked> Gently blink the network lines on the map</label>
+          <label class="menu-check" title="When a panel cannot load or its page crashes, Dashboard Hub reloads it by itself (waiting a little longer each time). Untick to reload by hand."><input type="checkbox" id="panelAutoCheck" checked> Reload a panel by itself when it fails</label>
           <label class="menu-check" title="Once in a while, ask GitHub whether a newer Dashboard Hub exists. Nothing is installed unless you click Install."><input type="checkbox" id="updAuto"> Check for new versions automatically (contacts GitHub)</label>
           <button type="button" id="updCheckNow" role="menuitem">Check for updates now</button>
           <div class="menu-note" id="updHint"></div>
@@ -134,13 +135,18 @@
       </label>
       <span id="mapLiveDot" class="live-dot" title=""></span><span id="mapLiveText" class="map-status"></span>
       <span class="spacer"></span>
-      <button id="mapConnBtn" type="button" title="Connect to your router, switch or controller to see exactly which devices it knows, and whether each is on Wi-Fi or cable">Router &amp; switch links</button>
-      <button id="mapAddSwitch" type="button" title="Put a switch on the map (switches usually cannot be found by scanning)">Add switch</button>
-      <button id="mapCable" type="button" title="For a switch that cannot be found by scanning (an unmanaged switch): click one machine, then the other, to draw the real cable between them. The map never changes or removes a cable you draw.">Draw physical cable</button>
-      <button id="mapConnect" type="button" title="Click one machine, then another, to draw a line between them. Click the same pair again to remove the line.">Draw lines</button>
-      <button id="mapTop" type="button" title="Look straight down on the map">Top view</button>
-      <button id="mapReset" type="button" title="Back to the starting camera angle">Reset view</button>
-      <button id="mapTidy" type="button" title="Put every machine back in a neat spiral around the router">Tidy up</button>
+      <div class="map-menu-wrap">
+        <button id="mapMenuBtn" type="button" aria-haspopup="true" aria-expanded="false" title="Router links, switches, cables, lines and camera views">Map layout and hardware &#9662;</button>
+        <div id="mapMenu" class="profile-menu map-menu hidden" role="menu" aria-label="Map layout and hardware">
+          <button id="mapConnBtn" type="button" title="Connect to your router, switch or controller to see exactly which devices it knows, and whether each is on Wi-Fi or cable">Router &amp; switch links</button>
+          <button id="mapAddSwitch" type="button" title="Put a switch on the map (switches usually cannot be found by scanning)">Add switch</button>
+          <button id="mapCable" type="button" title="For a switch that cannot be found by scanning (an unmanaged switch): click one machine, then the other, to draw the real cable between them. The map never changes or removes a cable you draw.">Draw physical cable</button>
+          <button id="mapConnect" type="button" title="Click one machine, then another, to draw a line between them. Click the same pair again to remove the line.">Draw lines</button>
+          <button id="mapTop" type="button" title="Look straight down on the map">Top view</button>
+          <button id="mapReset" type="button" title="Back to the starting camera angle">Reset view</button>
+          <button id="mapTidy" type="button" title="Put every machine back in a neat spiral around the router">Tidy up</button>
+        </div>
+      </div>
       <label class="check-inline"><input type="checkbox" id="mapOffline" checked> Show offline</label>
       <label class="check-inline" title="Machines in the same group (set in the machine list) move together when you drag one. Ctrl+drag moves just one."><input type="checkbox" id="mapGroupMove" checked> Move groups together</label>
       <label class="check-inline" title="Draw a coloured circle and name around each group of machines"><input type="checkbox" id="mapGroupCircles" checked> Group circles</label>

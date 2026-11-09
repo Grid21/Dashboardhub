@@ -2544,6 +2544,7 @@
         const main = el('div', 'ml-main');
         main.appendChild(el('div', 'ml-name', title(d)));
         main.appendChild(el('div', 'ml-sub', [d.ip, OS_NAMES[effectiveOs(d)], effectiveOs(d) === 'switch' ? [d.info.brand, d.info.ports ? d.info.ports + ' ports' : ''].filter(Boolean).join(' ') : '', d.vlan, d.online === false ? 'offline' : ''].filter(Boolean).join('  ·  ')));
+        if (d.group) main.appendChild(el('div', 'ml-grouptag', 'Group: ' + d.group));
         row.appendChild(main);
         const ls = deviceLines(d);
         if (ls.length) row.appendChild(el('span', 'ml-link', ls.some(isWireless) ? 'wireless' : 'wired'));
@@ -2556,7 +2557,25 @@
     renderBulk();
   }
 
+  // The bulk box is rebuilt whenever the map updates; keep what the person is typing (text, cursor, focus)
   function renderBulk() {
+    const keep = {}; let focusId = null;
+    ['mapBulkGroup', 'mapBulkVlan'].forEach((id) => {
+      const i = document.getElementById(id);
+      if (i && lsBulk.contains(i)) {
+        keep[id] = { v: i.value, s: i.selectionStart, e: i.selectionEnd };
+        if (document.activeElement === i) focusId = id;
+      }
+    });
+    renderBulkNow();
+    Object.keys(keep).forEach((id) => {
+      const i = document.getElementById(id);
+      if (!i || !keep[id].v) return;
+      i.value = keep[id].v;
+      if (id === focusId) { i.focus(); try { i.setSelectionRange(keep[id].s, keep[id].e); } catch (e) { /* ignore */ } }
+    });
+  }
+  function renderBulkNow() {
     lsBulk.textContent = '';
     const n = listSel.size;
     if (!n) {

@@ -29,12 +29,13 @@ make(tmp + '/plain.iso', [('readme/hello.txt', tmp + '/k', 'readme/HELLO.TXT')])
 `, tmp]);
 
 // ---- DHCP packet like a network card's boot ROM sends
-function discover(mac, arch, type, ipxe) {
-  const b = Buffer.alloc(240); b[0] = 1; b[1] = 1; b[2] = 6; crypto.randomBytes(4).copy(b, 4);
+function discover(mac, arch, type, ipxe, feats, xid) {
+  const b = Buffer.alloc(240); b[0] = 1; b[1] = 1; b[2] = 6; (xid || crypto.randomBytes(4)).copy(b, 4);
   Buffer.from(mac.split(':').map((x) => parseInt(x, 16))).copy(b, 28);
   Buffer.from([0x63, 0x82, 0x53, 0x63]).copy(b, 236);
   const o = [Buffer.from([53, 1, type]), Buffer.from([60, 9]), Buffer.from('PXEClient'), Buffer.from([93, 2, 0, arch])];
   if (ipxe) o.push(Buffer.from([77, 4]), Buffer.from('iPXE'));
+  if (feats) o.push(Buffer.from([175, feats.length * 3]), Buffer.concat(feats.map((f) => Buffer.from([f, 1, 1]))));
   o.push(Buffer.from([255]));
   return Buffer.concat([b, ...o]);
 }
@@ -46,8 +47,8 @@ const reply = (packet, port, toPort, mac) => new Promise((resolve) => {
     c.close(); resolve(null);
   });
 });
-async function ask(mac, arch, type, toPort, ipxe) {
-  const pkt = discover(mac, arch, type, ipxe);
+async function ask(mac, arch, type, toPort, ipxe, feats, xid) {
+  const pkt = discover(mac, arch, type, ipxe, feats, xid);
   const c = dgram.createSocket('udp4');
   const got = new Promise((resolve) => { c.on('message', (m, ri) => resolve({ m, ri })); setTimeout(() => resolve(null), 600); });
   await new Promise((r) => c.bind(0, '127.0.0.1', r));
@@ -71,8 +72,8 @@ function optOf(m, code) { let p = 240; while (p < m.length) { const c = m[p++]; 
   check('MACs are tidied up, duplicates and nonsense dropped', JSON.stringify(mod.status().allow.macs) === JSON.stringify([MAC]) && sa.bad.length === 1, JSON.stringify(mod.status().allow));
   r = await mod.start({ ip: '127.0.0.1' }); check('server starts once a computer is listed', r.ok, JSON.stringify(r));
 
-  async function dhcp(mac, arch, type, port, ipxe) {
-    const t = await ask(mac, arch, type, port, ipxe); holder.port = t.REPLY_PORT; t.send();
+  async function dhcp(mac, arch, type, port, ipxe, feats, xid) {
+    const t = await ask(mac, arch, type, port, ipxe, feats, xid); holder.port = t.REPLY_PORT; t.send();
     const g = await t.got; t.c.close(); return g;
   }
   // PXE first question (port 67)
@@ -82,10 +83,23 @@ function optOf(m, code) { let p = 240; while (p < m.length) { const c = m[p++]; 
   check('  offer never hands out an address (yiaddr 0.0.0.0)', g && g.m.readUInt32BE(16) === 0);
   check('  offer points at this computer (siaddr)', g && g.m.readUInt32BE(20) === 0x7f000001);
   g = await dhcp(MAC, 7, 1, P.dhcp);
-  check('UEFI computer gets ipxe.efi', g && g.m.toString('latin1', 108, 116) === 'ipxe.efi');
-  g = await dhcp(MAC, 9, 1, P.dhcp); check('UEFI (code 9) too', g && g.m.toString('latin1', 108, 116) === 'ipxe.efi');
+  check('UEFI computer gets snponly.efi (uses the card the firmware already opened)', g && g.m.toString('latin1', 108, 119) === 'snponly.efi', g && g.m.toString('latin1', 108, 125));
+  g = await dhcp(MAC, 9, 1, P.dhcp); check('UEFI (code 9) too', g && g.m.toString('latin1', 108, 119) === 'snponly.efi');
+  g = await dhcp(MAC, 0, 1, P.dhcp, true, [0x10, 0x13, 0x15, 0x17]);
+  check('an iPXE that CAN download over the web is sent to the menu over the web', g && /^http:\/\/127\.0\.0\.1:18088\/boot\.ipxe/.test(g.m.toString('latin1', 108, 150)), g && g.m.toString('latin1', 108, 150));
+  g = await dhcp(MAC, 0, 1, P.dhcp, true, [0x10, 0x15, 0x17]);
+  check('an iPXE that CANNOT (like VirtualBox\'s built-in ROM) is first sent our fuller boot loader', g && g.m.toString('latin1', 108, 121) === 'undionly.kpxe', g && g.m.toString('latin1', 108, 150));
+  g = await dhcp(MAC, 7, 1, P.dhcp, true, [0x10, 0x15, 0x17]);
+  check('...and on UEFI, snponly.efi', g && g.m.toString('latin1', 108, 119) === 'snponly.efi');
   g = await dhcp(MAC, 0, 1, P.dhcp, true);
-  check('a computer already running iPXE is sent to the menu over the web', g && /^http:\/\/127\.0\.0\.1:18088\/boot\.ipxe/.test(g.m.toString('latin1', 108, 150)), g && g.m.toString('latin1', 108, 150));
+  check('an iPXE that lists no features at all is treated as one that cannot', g && g.m.toString('latin1', 108, 121) === 'undionly.kpxe');
+  check('the log explains the extra step', mod.status().log.some((l) => /built-in boot ROM cannot download over the web/.test(l.msg)));
+  // a loader that keeps coming back is not served forever
+  const LOOP = 'aa:bb:cc:11:22:33'; let last = null;
+  for (let i = 0; i < 7; i++) last = await dhcp(LOOP, 0, 1, P.dhcp, true, [0x10], Buffer.from([9, 9, 9, i]));
+  check('a boot loader that keeps coming back without web support is left alone after a few tries', last === null);
+  check('...and the log says why', mod.status().log.some((l) => /keeps coming back/.test(l.msg)));
+  await mod.stop(); r = await mod.start({ ip: '127.0.0.1' }); check('restarting clears that', r.ok);
   g = await dhcp(MAC, 0, 3, P.pxe);
   check('follow-up question on port 4011 gets an acknowledgement', g && optOf(g.m, 53)[0] === 5);
   g = await dhcp(MAC, 0, 3, P.dhcp); check('a "request" on port 67 is left to the real DHCP server', g === null);
@@ -100,7 +114,7 @@ function optOf(m, code) { let p = 240; while (p < m.length) { const c = m[p++]; 
 
   // ---- TFTP
   const j = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vendor', 'ipxe-files.json'), 'utf8'));
-  const want = { 'undionly.kpxe': Buffer.from(j.undionly, 'base64'), 'ipxe.efi': Buffer.from(j.efi, 'base64') };
+  const want = { 'undionly.kpxe': Buffer.from(j.undionly, 'base64'), 'ipxe.efi': Buffer.from(j.efi, 'base64'), 'snponly.efi': Buffer.from(j.snponly, 'base64') };
   function tftpGet(name, blksize, opcode) {
     return new Promise((resolve) => {
       const c = dgram.createSocket('udp4'); const chunks = []; let peer = null, size = null, blk = 512, expect = 1, done = false;
@@ -123,7 +137,11 @@ function optOf(m, code) { let p = 240; while (p < m.length) { const c = m[p++]; 
   check('TFTP: undionly.kpxe arrives complete (with block-size option)', t.data && sha(t.data) === sha(want['undionly.kpxe']), t.error || t.timeout);
   check('  and the size it announced is right', t.size === want['undionly.kpxe'].length);
   t = await tftpGet('ipxe.efi'); check('TFTP: ipxe.efi arrives complete (plain, 512-byte blocks)', t.data && sha(t.data) === sha(want['ipxe.efi']), t.error || t.timeout);
+  t = await tftpGet('snponly.efi'); check('TFTP: snponly.efi arrives complete', t.data && sha(t.data) === sha(want['snponly.efi']), t.error || t.timeout);
   t = await tftpGet('../../etc/passwd'); check('TFTP: a path outside is refused', t.error === 'File not found' || t.code === 1, JSON.stringify(t).slice(0, 80));
+  t = await tftpGet('autoexec.ipxe'); const ax = t.data ? t.data.toString() : '';
+  check('TFTP: autoexec.ipxe points iPXE straight at the menu', ax.startsWith('#!ipxe') && ax.includes('chain http://127.0.0.1:18088/boot.ipxe'), ax || JSON.stringify(t).slice(0, 80));
+  t = await tftpGet('/autoexec.ipxe'); check('TFTP: also when asked with a leading slash (iPXE does both)', t.data && t.data.toString() === ax);
   t = await tftpGet('boot.ipxe'); check('TFTP: files that are not boot loaders are refused', !!t.error);
   t = await tftpGet('undionly.kpxe', 0, 2); check('TFTP: uploading is refused', !!t.error && t.code === 4, JSON.stringify(t).slice(0, 80));
 
@@ -140,19 +158,35 @@ function optOf(m, code) { let p = 240; while (p < m.length) { const c = m[p++]; 
   check('web: boot menu starts with #!ipxe', h.status === 200 && script.startsWith('#!ipxe'));
   check('  menu lists the Ubuntu ISO, netboot.xyz, a local-disk fallback', /ubuntu-test|TESTDISC/i.test(script) && /netboot\.xyz/.test(script) && /local/.test(script));
   check('  menu starts the live disc with kernel + initrd lines', script.includes('kernel ${base}/iso/' + one.id + '/f/casper/vmlinuz') && script.includes('set base http://127.0.0.1:18088') && /initrd .*\/f\/casper\/initrd/.test(script) && /boot=casper/.test(script));
+  check('  the Ubuntu line passes an ISO address ending in .iso (Ubuntu ignores url= otherwise)', script.includes('ip=dhcp url=${base}/iso/' + one.id + '/image.iso ') && !/netboot=url/.test(script));
   check('  menu says nothing is installed or erased by itself', /nothing is installed or erased/.test(script));
-  check('  menu falls back to the local disk by itself', /choose --default local --timeout/.test(script));
+  check('  menu falls back to the local disk by itself', /set dflt local/.test(script) && /set tmo 20000/.test(script) && /choose --default \$\{dflt\} --timeout \$\{tmo\}/.test(script));
   h = await get('/iso/' + one.id + '/f/casper/vmlinuz'); check('web: kernel is read straight out of the ISO, byte for byte', h.status === 200 && h.body.equals(KERNEL), h.status + ' ' + h.body.length);
   h = await get('/iso/' + one.id + '/f/casper/initrd'); check('web: initrd too', h.status === 200 && h.body.equals(INITRD));
   h = await get('/iso/' + one.id + '/f/casper/initrd', { Range: 'bytes=100-199' }); check('web: a byte range works (206, exact bytes)', h.status === 206 && h.body.equals(INITRD.subarray(100, 200)) && /bytes 100-199\//.test(h.headers['content-range']));
   h = await get('/iso/' + one.id + '/f/casper/initrd', { Range: 'bytes=-50' }); check('web: "last 50 bytes" works', h.status === 206 && h.body.equals(INITRD.subarray(INITRD.length - 50)));
   h = await get('/iso/' + one.id + '/f/casper/initrd', { Range: 'bytes=99999999-' }); check('web: a range past the end gets 416', h.status === 416);
   h = await get('/iso/' + one.id + '/f/casper/initrd', null, 'HEAD'); check('web: HEAD gives the length and no body', h.status === 200 && Number(h.headers['content-length']) === INITRD.length && h.body.length === 0);
+  h = await get('/iso/' + one.id + '/image.iso'); check('web: the .iso address Ubuntu needs serves the whole ISO', h.status === 200 && h.body.equals(fs.readFileSync(isoFile)));
   h = await get('/iso/' + one.id + '/iso'); check('web: the whole ISO can be fetched', h.status === 200 && h.body.equals(fs.readFileSync(isoFile)));
   h = await get('/iso/' + one.id + '/f/casper/nothing'); check('web: a missing file in the ISO is 404', h.status === 404);
   h = await get('/iso/zzzzzz/iso'); check('web: an unknown disc is 404', h.status === 404);
   for (const bad of ['/etc/passwd', '/iso/' + one.id + '/f/../../../etc/passwd', '/iso/' + one.id + '/f/%2e%2e/%2e%2e/etc/passwd', '/../pxe.js', '/pxe.js']) { h = await get(bad); check('web: cannot read outside (' + bad.slice(0, 40) + ')', h.status === 404 || h.status === 400, h.status); }
   h = await get('/boot.ipxe', null, 'POST'); check('web: only GET/HEAD are allowed', h.status === 405);
+  // per-computer choice
+  check('a choice for a computer that is not listed is refused', !mod.setChoice('de:ad:be:ef:00:01', 'local').ok);
+  check('a choice that is not offered is refused', !mod.setChoice(MAC, 'rm -rf').ok);
+  check('"start this ISO by itself" is accepted for a listed computer', mod.setChoice(MAC, 'iso:' + one.id).ok);
+  let sc = (await get('/boot.ipxe')).body.toString();
+  check('the menu then picks it by itself after 5 s, only for that computer\'s MAC', sc.includes('iseq ${net0/mac} ' + MAC + ' || goto skip0') && sc.includes('set dflt iso' + one.id) && sc.includes('set tmo 5000') && sc.indexOf('set dflt iso') < sc.indexOf(':menu'), sc.split('\n').slice(0, 9).join('|'));
+  check('failing to start falls back to a calm menu (no endless retry)', /:failed\nset dflt local\nset tmo 60000/.test(sc));
+  mod.setChoice(MAC, 'netbootxyz'); sc = (await get('/boot.ipxe')).body.toString(); check('"netboot.xyz by itself" works', sc.includes('set dflt netbootxyz'));
+  mod.setChoice(MAC, 'local'); sc = (await get('/boot.ipxe')).body.toString(); check('"boot from own disk" works', /set dflt local\nset tmo 5000/.test(sc));
+  mod.setChoice(MAC, 'menu'); sc = (await get('/boot.ipxe')).body.toString(); check('"show the menu" puts it back', !sc.includes('goto skip0'));
+  // removing the chosen ISO forgets the choice
+  const tmpIso = path.join(tmp, 'tmp2.iso'); fs.copyFileSync(isoFile, tmpIso); const t2 = mod.addIso(tmpIso); mod.setChoice(MAC, 'iso:' + t2.id); mod.removeIso(t2.id);
+  check('removing a chosen ISO forgets that choice', !mod.status().allow.choice[MAC] || mod.status().allow.choice[MAC] !== 'iso:' + t2.id);
+  mod.setChoice(MAC, 'iso:' + one.id);
   // rename / remove
   mod.renameIso(one.id, 'My $(rm) {Ubuntu} #1'); h = await get('/boot.ipxe');
   check('menu text is cleaned (no $ { } # that iPXE would act on)', !/My \$|\{Ubuntu\}|#1/.test(h.body.toString().split('\n').filter((l) => /^item iso/.test(l)).join('\n')), h.body.toString().split('\n').filter((l) => /^item iso/.test(l)).join('|'));
@@ -163,6 +197,16 @@ function optOf(m, code) { let p = 240; while (p < m.length) { const c = m[p++]; 
   // settings survive a restart
   await mod.stop();
   const mod2 = pxe.create({ dataDir: tmp, ports: P }); check('the ISO list and your computer list are remembered', mod2.status().isos.length === 2 && mod2.status().allow.macs[0] === MAC);
+  check('the per-computer choice is remembered too', mod2.status().allow.choice[MAC] === 'iso:' + one.id);
+  // self-check
+  const c1 = await mod2.check('127.0.0.1');
+  check('self-check: all green when everything can open', c1.good, JSON.stringify(c1.checks.filter((c) => !c.ok)));
+  const hog2 = dgram.createSocket('udp4'); await new Promise((r) => hog2.bind(P.pxe, r));
+  const c2 = await mod2.check('127.0.0.1');
+  check('self-check: a busy port is reported in plain words', !c2.good && c2.checks.some((c) => !c.ok && /Another program already uses port 14011/.test(c.text)), JSON.stringify(c2.checks.filter((c) => !c.ok)));
+  hog2.close();
+  const c3 = await mod2.check('10.99.99.99'); check('self-check: an address that is not this computer\'s is reported', c3.checks.some((c) => !c.ok && /not one of this computer/.test(c.text)));
+  const c4 = await mod2.check(''); check('self-check: no connection chosen is reported', c4.checks.some((c) => !c.ok && /No network connection/.test(c.text)));
   // stop frees the ports
   const free = await new Promise((resolve) => { const s = dgram.createSocket('udp4'); s.once('error', () => resolve(false)); s.bind(P.tftp, () => { s.close(); resolve(true); }); });
   check('stopping frees the ports', free && (await get('/boot.ipxe')).status === 0);

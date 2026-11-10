@@ -88,6 +88,7 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 - Boot another computer from this one over the network cable, with no USB stick: Settings → "Network boot (PXE)...".
 - Off until you press Start. It only answers the computers (MAC addresses) you list, never hands out addresses (your router's DHCP stays in charge), and the menu itself never installs or erases anything.
 - Offers Ubuntu/Debian-style live ISOs you add, other ISOs in a generic way, and the netboot.xyz menu (live, rescue and installer images; the booting computer needs internet).
+- Each listed computer can have its own default (menu, an ISO, netboot.xyz or its own disk, started by itself after 5 seconds). A "Check my setup" button explains port, address and list problems in plain words, and the window has tips for testing with a VirtualBox VM.
 - Early feature: tested with simulated network boots and a real app, but not yet on real network-boot hardware. Needs administrator rights on Windows (or `sudo` on Linux) because boot ports are protected.
 
 ### 8. Web dashboard panels
@@ -149,12 +150,6 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 
 ### Quality
 - Extensive automated tests cover the scanner, the router and switch connectors, the update system, profiles, the network guard, notifications and the interface. It has been tested on real home-lab hardware as well as on simulated devices (more about that below).
-<img width="1672" height="941" alt="network map" src="https://github.com/user-attachments/assets/01b7816e-3a41-452b-ac00-6a90343a6a03" />
-<img width="1672" height="941" alt="Dashboard Panels" src="https://github.com/user-attachments/assets/96010137-4bff-4b0b-b4a3-15e1e332ff5d" />
-<img width="1410" height="1115" alt="Linux Servers SSH Dashboard" src="https://github.com/user-attachments/assets/6908f779-4de1-40a1-ae53-f0eefa40fd7b" />
-<img width="750" height="639" alt="About" src="https://github.com/user-attachments/assets/0f839b26-254c-40bf-9db4-83a1e8026655" />
-<img width="398" height="662" alt="Updates" src="https://github.com/user-attachments/assets/0d25849e-59aa-4f5d-b993-e25e1ac353e7" />
-<img width="260" height="772" alt="Settings" src="https://github.com/user-attachments/assets/5861aa4f-fd8d-4c8b-aa64-48b54b21585c" />
 
 ---
 

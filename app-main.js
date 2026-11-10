@@ -325,6 +325,8 @@ ipcMain.handle('pxe:addIso', async (event) => {
     return pxeMod.addIso(pick.filePaths[0]);
   } catch (e) { return { ok: false, error: 'That file could not be added.' }; }
 });
+ipcMain.handle('pxe:choice', (event, mac, what) => { checkSender(event); return pxeMod.setChoice(String(mac || '').slice(0, 40), String(what || '').slice(0, 40)); });
+ipcMain.handle('pxe:check', async (event, ip) => { checkSender(event); try { return await pxeMod.check(String(ip || '').slice(0, 40)); } catch (e) { return { ok: false, error: 'The check could not run.' }; } });
 ipcMain.handle('pxe:removeIso', (event, id) => { checkSender(event); return pxeMod.removeIso(String(id || '')); });
 ipcMain.handle('pxe:renameIso', (event, id, name) => { checkSender(event); return pxeMod.renameIso(String(id || ''), String(name || '').slice(0, 80)); });
 app.on('before-quit', () => { try { pxeMod.stop(true); } catch (e) { /* closing anyway */ } });

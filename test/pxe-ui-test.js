@@ -39,6 +39,16 @@ iso.write(t + '/live.iso'); iso.close()`, tmp]);
   const ips = await page.evaluate(() => [...document.querySelectorAll('#pxeIp option')].map((o) => o.value));
   check('network connections are listed to choose from', ips.length >= 1 && /^\d+\.\d+\.\d+\.\d+$/.test(ips[0]), JSON.stringify(ips));
   await page.screenshot({ path: process.env.SHOT || path.join(os.tmpdir(), 'pxe1.png') });
+  // per-computer choice and self-check
+  const opts = await page.evaluate(() => [...document.querySelectorAll('#pxeMacList select option')].map((o) => o.textContent));
+  check('each listed computer has a "what to start by itself" choice, with the ISO in it', opts.length === 4 && /LIVEDISC/.test(opts.join()) && /netboot\.xyz/.test(opts.join()), JSON.stringify(opts));
+  await page.selectOption('#pxeMacList select', 'netbootxyz'); await sleep(400);
+  check('the choice is saved', (await page.evaluate(() => window.pxeApi.status())).allow.choice['aa:bb:cc:11:22:33'] === 'netbootxyz');
+  await page.click('#pxeCheck'); await sleep(1500);
+  const chk = await page.locator('#pxeChecks .pxe-item').allTextContents();
+  check('"Check my setup" lists plain-language results with a verdict', chk.length >= 5 && /Everything looks ready|Fix the red items/.test(chk[chk.length - 1]), JSON.stringify(chk).slice(0, 300));
+  await page.evaluate(() => { document.querySelector('.pxe-tips').open = true; document.getElementById('pxeChecks').scrollIntoView(); }); await page.screenshot({ path: process.env.SHOT2 || path.join(os.tmpdir(), 'pxe2.png') });
+  check('the VirtualBox tips are in the window', /Bridged Adapter/.test(await page.textContent('.pxe-tips')));
   await page.click('#pxeStart'); await sleep(1200);
   const running = await page.evaluate(() => /Running on/.test(document.getElementById('pxeState').textContent));
   check('Start works and says it is running', running, await page.textContent('#pxeMsg'));

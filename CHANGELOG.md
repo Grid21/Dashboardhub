@@ -2,6 +2,39 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.10.98
+- Rocky Linux, AlmaLinux, CentOS, Fedora and RHEL discs are now recognised and started properly. Before, they were started as a "generic ISO", and the installer stopped with "missing inst.stage2 or inst.repo". The menu now tells the installer where its files are (`inst.stage2=...`, and `inst.repo=...` when the disc carries the packages). ISOs added earlier as "generic" are re-checked automatically.
+- New test: test/pxe-rocky-test.js.
+
+## 1.10.97
+- Older (BIOS) network boot: the boot loader now has a small script built in. After it gets an address it follows the menu address from Dashboard Hub, retries up to 6 times if that address has not arrived yet, and falls back to the Dashboard Hub computer's address. This fixes "Nothing to boot: No such file or directory" seen in a VM.
+
+## 1.10.96
+- Fixed the main Linux ISO problem: Ubuntu's boot script only accepts a download address that ENDS IN ".iso" (`url=*.iso`). Ours ended in "/iso", so Ubuntu silently ignored it, which caused "can't open /dev/sr0: No medium found", the hang, and the fallback to downloading from Ubuntu's website. ISOs are now offered at `.../image.iso` and the menu uses `boot=casper ip=dhcp url=.../image.iso`. (Checked against the real casper 26.04 source.)
+- UEFI: computers now get `snponly.efi` (built unchanged from iPXE source), which uses the network card the firmware already opened. The old `ipxe.efi` found no network card in VirtualBox's UEFI mode and stalled right after "autoexec.ipxe... ok". `ipxe.efi` is still available as a fallback.
+
+## 1.10.95
+- Network boot (UEFI): the start-up script now prints what it is doing, tries the menu first with the network settings the computer already has (instead of asking for a new address first, which stalled in VirtualBox's UEFI mode), and only then asks for an address and shows the network status.
+
+## 1.10.94
+- Fixed: Ubuntu live ISO from the network menu now starts the download instead of looking for a CD drive ("can't open /dev/sr0: No medium found"). The menu line now matches the recipe netboot.xyz uses: `root=/dev/ram0 ramdisk_size=... ip=dhcp url=...`, with the ramdisk size set from the ISO's size.
+
+## 1.10.93
+- Fixed: starting an Ubuntu live ISO from the network menu stopped with "wget: bad address ''" / "Unable to find a live file system on the network". The menu line used an old `netboot=url` option that makes Ubuntu ignore the ISO address; it now uses `ip=dhcp url=...` as Ubuntu documents.
+- Network boot window: an Ubuntu-style ISO now shows how much memory the booting computer needs (Ubuntu loads the whole disc into RAM), so a VM is not left with too little.
+
+## 1.10.92
+- Network boot, UEFI: the server now also offers a tiny `autoexec.ipxe` script over TFTP, which iPXE looks for right after it starts. It points iPXE straight at the menu, so the boot no longer depends on a second DHCP exchange (this was stalling in VirtualBox's UEFI mode right after "autoexec.ipxe... Not found"). If the menu can't be reached, iPXE drops to its command line instead of stopping silently. Works for older BIOS mode too.
+- Network boot window: VirtualBox tips now say EFI can be on or off.
+
+## 1.10.91
+- Fixed: network boot failed on VirtualBox and other virtual machines with "Could not start download: Operation not supported". Their built-in boot ROM is iPXE without web download support. The server now detects that and first sends its own full boot loader over TFTP, then the menu. The window log says when it does this. If a boot ROM keeps coming back without web support, the server stops answering it after a few tries and says why, instead of looping.
+
+## 1.10.90
+- Network boot: each listed computer can now have its own default: show the menu, or start an ISO, netboot.xyz or its own disk by itself after 5 seconds (any key opens the menu instead). If something fails to start, the menu waits calmly instead of retrying forever.
+- Network boot: new "Check my setup" button. It checks the chosen connection, the list, the boot files and whether each port can be opened, and explains any problem in plain words.
+- Network boot: built-in tips for testing with a VirtualBox (or similar) virtual machine.
+
 ## 1.10.89
 - NEW (early): Network boot (PXE). Settings -> "Network boot (PXE)..." boots another computer from this one over the network cable. Off until you press Start. It only answers the MAC addresses you list (or "any computer" if you tick it), never hands out addresses, and its menu never installs or erases anything. Offers Ubuntu/Debian-style live ISOs you add, other ISOs in a generic way, and the netboot.xyz menu.
 - Needs a cable connection and administrator rights (Windows "Run as administrator", or sudo on Linux). Tested with simulated network boots; not yet on real network-boot hardware.

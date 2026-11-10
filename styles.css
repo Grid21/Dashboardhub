@@ -547,3 +547,11 @@ body.window-hidden *, body.window-hidden *::before, body.window-hidden *::after 
 .pxe-item.missing .pxe-name { color: #f59e0b; }
 .pxe-log { background: #0e1420; border: 1px solid #2c3a52; border-radius: 6px; padding: 6px 8px; min-height: 60px; max-height: 150px; overflow: auto; font-size: 12px; color: #b7c2d6; white-space: pre-wrap; }
 #pxeDialog label.check-inline { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.pxe-tips { margin: 8px 0; color: #b7c2d6; font-size: 13px; }
+.pxe-tips summary { cursor: pointer; color: #7fb0ff; }
+.pxe-tips ol { margin: 6px 0 0 18px; padding: 0; }
+.pxe-item select { max-width: 260px; }
+.pxe-item.good .pxe-name::before { content: "\2714  "; color: #22c55e; }
+.pxe-item.bad .pxe-name::before { content: "\2716  "; color: #f87171; }
+.pxe-item.bad .pxe-name { white-space: normal; }
+.pxe-item { flex-wrap: wrap; }

@@ -76,6 +76,8 @@ contextBridge.exposeInMainWorld('pxeApi', {
   start: (ip) => ipcRenderer.invoke('pxe:start', { ip: String(ip || '') }),
   stop: () => ipcRenderer.invoke('pxe:stop'),
   allow: (macs, any) => ipcRenderer.invoke('pxe:allow', { macs: Array.isArray(macs) ? macs.slice(0, 50).map(String) : [], any: any === true }),
+  choice: (mac, what) => ipcRenderer.invoke('pxe:choice', String(mac || ''), String(what || '')),
+  check: (ip) => ipcRenderer.invoke('pxe:check', String(ip || '')),
   addIso: () => ipcRenderer.invoke('pxe:addIso'),
   removeIso: (id) => ipcRenderer.invoke('pxe:removeIso', String(id || '')),
   renameIso: (id, name) => ipcRenderer.invoke('pxe:renameIso', String(id || ''), String(name || ''))

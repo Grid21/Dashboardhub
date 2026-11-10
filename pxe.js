@@ -72,11 +72,16 @@ function analyzeIso(file) {
   const iso = openIso(file);
   try {
     const pick = (dir, re) => { const l = iso.entries(dir).filter((e) => !e.dir && re.test(e.name)).sort((a, b) => a.name.length - b.name.length || (a.name < b.name ? -1 : 1)); return l[0] ? dir + '/' + l[0].name : ''; };
-    const info = { label: iso.label, mode: 'sanboot', kernel: '', initrd: '', squash: '' };
+    const info = { label: iso.label, mode: 'sanboot', kernel: '', initrd: '', squash: '', repo: false };
     const ck = pick('/casper', /^vmlinuz/i), ci = pick('/casper', /^initrd/i);
     const lk = pick('/live', /^vmlinuz/i), li = pick('/live', /^initrd/i), ls = pick('/live', /^filesystem\.squashfs$/i);
     if (ck && ci) { info.mode = 'casper'; info.kernel = ck; info.initrd = ci; }
     else if (lk && li && ls) { info.mode = 'debianlive'; info.kernel = lk; info.initrd = li; info.squash = ls; }
+    else {
+      // Red Hat family (Rocky, Alma, CentOS, Fedora, RHEL): the installer wants to know where its install image and packages are
+      const ak = pick('/images/pxeboot', /^vmlinuz$/i), ai = pick('/images/pxeboot', /^initrd\.img$/i);
+      if (ak && ai && iso.find('/images/install.img')) { info.mode = 'anaconda'; info.kernel = ak; info.initrd = ai; info.repo = !!iso.find('/BaseOS') || !!iso.find('/Packages'); }
+    }
     return info;
   } finally { iso.close(); }
 }
@@ -104,6 +109,21 @@ function isPxeClient(d) {
 }
 function clientArch(d) { return d.opts[93] && d.opts[93].length >= 2 ? d.opts[93].readUInt16BE(0) : 0; }
 function isIpxe(d) { return !!(d.opts[77] && d.opts[77].toString('latin1').includes('iPXE')) || !!d.opts[175]; }
+// iPXE lists what it can do inside DHCP option 175 (tag 19 = web/HTTP, 20 = secure web/HTTPS). A boot ROM built into a
+// network card or a virtual machine is often iPXE without those, so it must first be handed our fuller boot loader.
+function ipxeFeatures(d) {
+  const set = new Set();
+  const o = d.opts[175];
+  if (!o) return set;
+  let p = 0;
+  while (p + 2 <= o.length) {
+    const t = o[p], l = o[p + 1];
+    if (p + 2 + l > o.length) break;
+    set.add(t); p += 2 + l;
+  }
+  return set;
+}
+function ipxeCanHttp(d) { return isIpxe(d) && ipxeFeatures(d).has(19); }
 function ipBuf(ip) { return Buffer.from(ip.split('.').map(Number)); }
 function buildReply(req, type, serverIp, bootfile) {
   const b = Buffer.alloc(240);
@@ -188,15 +208,18 @@ function create(opts) {
   const testing = opts.testing || {};              // tests send replies to 127.0.0.1 instead of the network broadcast
   const store = path.join(dataDir, 'pxe.json');
   let isos = [];
-  let allow = { macs: [], any: false };   // which machines may be answered (nothing is answered until you list one)
-  try { const j = JSON.parse(fs.readFileSync(store, 'utf8')); if (j.allow && Array.isArray(j.allow.macs)) allow = { macs: j.allow.macs.map(normMac).filter(Boolean).slice(0, 50), any: j.allow.any === true }; if (Array.isArray(j.isos)) isos = j.isos.filter((x) => x && typeof x.path === 'string' && /^[a-z0-9]{3,12}$/.test(x.id)).slice(0, 40); } catch (e) { /* none yet */ }
-  const save = () => { try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(store, JSON.stringify({ isos, allow }), { mode: 0o600 }); } catch (e) { /* not saved */ } };
+  let allow = { macs: [], any: false };
+  let choice = {};   // per computer: what to start by itself ('menu', 'local', 'netbootxyz' or 'iso:<id>')   // which machines may be answered (nothing is answered until you list one)
+  try { const j = JSON.parse(fs.readFileSync(store, 'utf8')); if (j.allow && Array.isArray(j.allow.macs)) allow = { macs: j.allow.macs.map(normMac).filter(Boolean).slice(0, 50), any: j.allow.any === true }; if (j.choice && typeof j.choice === 'object') Object.keys(j.choice).slice(0, 50).forEach((k) => { const m = normMac(k); if (m && /^(menu|local|netbootxyz|iso:[a-z0-9]{3,12})$/.test(String(j.choice[k]))) choice[m] = String(j.choice[k]); }); if (Array.isArray(j.isos)) isos = j.isos.filter((x) => x && typeof x.path === 'string' && /^[a-z0-9]{3,12}$/.test(x.id)).slice(0, 40); } catch (e) { /* none yet */ }
+  isos.forEach((x) => { if (x.mode === 'sanboot') { try { const i = analyzeIso(x.path); if (i.mode !== 'sanboot') { x.mode = i.mode; x.kernel = i.kernel; x.initrd = i.initrd; x.squash = i.squash; x.repo = i.repo === true; } } catch (e) { /* file missing */ } } });
+  const save = () => { try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(store, JSON.stringify({ isos, allow, choice }), { mode: 0o600 }); } catch (e) { /* not saved */ } };
 
   let running = false, ip = '', loaders = null, servers = {}, httpSrv = null;
   const logLines = [];
   const clients = new Map();                        // ip -> { mac, since, what }
   const seenOnce = new Set();
   const ignored = new Set();
+  const loops = new Map();
   const log = (kind, who, what) => {
     const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     let msg = '';
@@ -218,6 +241,7 @@ function create(opts) {
     if (loaders) return loaders;
     const j = JSON.parse(fs.readFileSync(path.join(__dirname, 'vendor', 'ipxe-files.json'), 'utf8'));
     loaders = { 'undionly.kpxe': Buffer.from(j.undionly, 'base64'), 'ipxe.efi': Buffer.from(j.efi, 'base64') };
+    if (j.snponly) loaders['snponly.efi'] = Buffer.from(j.snponly, 'base64');   // UEFI: uses the network card the firmware already opened
     return loaders;
   }
   const safeText = (s) => String(s || '').replace(/[\u0000-\u001f\u007f$#{}]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
@@ -225,20 +249,29 @@ function create(opts) {
 
   function menuScript() {
     const base = 'http://' + ip + ':' + ports.http;
-    const L = ['#!ipxe', 'set base ' + base, ':menu', 'menu Dashboard Hub network boot', 'item --gap -- Choose what to start on this computer (nothing is installed or erased by this menu itself):'];
     const ok = isos.filter((x) => x.ok !== false);
+    const L = ['#!ipxe', 'set base ' + base, 'set dflt local', 'set tmo 20000'];
+    // a computer you gave its own choice starts that by itself after 5 seconds (any key opens the menu instead)
+    Object.keys(choice).forEach((m, i) => {
+      const c = choice[m];
+      const label = c === 'local' ? 'local' : c === 'netbootxyz' ? 'netbootxyz' : (/^iso:/.test(c) && ok.some((x) => 'iso:' + x.id === c) ? 'iso' + c.slice(4) : '');
+      if (!label || !allow.macs.includes(m)) return;
+      L.push('iseq ${net0/mac} ' + m + ' || goto skip' + i, 'set dflt ' + label, 'set tmo 5000', ':skip' + i);
+    });
+    L.push(':menu', 'menu Dashboard Hub network boot', 'item --gap -- Choose what to start on this computer (nothing is installed or erased by this menu itself):');
     ok.forEach((x) => L.push('item iso' + x.id + ' ' + safeText(x.name) + (x.mode === 'sanboot' ? ' (generic ISO, may not work on every computer)' : '')));
     L.push('item --gap -- ', 'item netbootxyz netboot.xyz: many live, rescue and installer images (this computer needs internet)', 'item shell iPXE command line (advanced)', 'item --default --key d local Boot from this computer\'s own disk (starts by itself after 20 seconds)');
-    L.push('choose --default local --timeout 20000 sel || goto local', 'goto ${sel}');
+    L.push('choose --default ${dflt} --timeout ${tmo} sel || goto local', 'goto ${sel}');
     ok.forEach((x) => {
       const b = '${base}/iso/' + x.id;
       L.push(':iso' + x.id, 'echo Starting ' + safeText(x.name) + ' ...');
-      if (x.mode === 'casper') L.push('kernel ' + b + '/f' + enc(x.kernel) + ' boot=casper netboot=url url=' + b + '/iso ip=dhcp cloud-config-url=/dev/null --- || goto failed', 'initrd ' + b + '/f' + enc(x.initrd) + ' || goto failed', 'boot || goto failed');
+      if (x.mode === 'casper') L.push('kernel ' + b + '/f' + enc(x.kernel) + ' boot=casper ip=dhcp url=' + b + '/image.iso cloud-config-url=/dev/null --- || goto failed', 'initrd ' + b + '/f' + enc(x.initrd) + ' || goto failed', 'boot || goto failed');
       else if (x.mode === 'debianlive') L.push('kernel ' + b + '/f' + enc(x.kernel) + ' boot=live components fetch=' + b + '/f' + enc(x.squash) + ' ip=dhcp || goto failed', 'initrd ' + b + '/f' + enc(x.initrd) + ' || goto failed', 'boot || goto failed');
+      else if (x.mode === 'anaconda') L.push('kernel ' + b + '/f' + enc(x.kernel) + ' inst.stage2=' + b + '/f' + (x.repo ? ' inst.repo=' + b + '/f' : '') + ' ip=dhcp || goto failed', 'initrd ' + b + '/f' + enc(x.initrd) + ' || goto failed', 'boot || goto failed');
       else L.push('sanboot ' + b + '/iso || goto failed');
     });
     L.push(':netbootxyz', 'echo Contacting netboot.xyz ...', 'chain --autofree https://boot.netboot.xyz/menu.ipxe || goto failed', 'goto menu');
-    L.push(':shell', 'shell', 'goto menu', ':failed', 'echo That did not start. Press a key to go back to the menu.', 'prompt --timeout 15000 Press any key', 'goto menu', ':local', 'exit');
+    L.push(':shell', 'shell', 'goto menu', ':failed', 'set dflt local', 'set tmo 60000', 'echo That did not start. Press a key to go back to the menu.', 'prompt --timeout 15000 Press any key', 'goto menu', ':local', 'exit');
     return L.join('\n') + '\n';
   }
 
@@ -265,13 +298,14 @@ function create(opts) {
     let u; try { u = decodeURIComponent((req.url || '/').split('?')[0]); } catch (e) { res.writeHead(400); res.end(); return; }
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); res.end(); return; }
     if (u === '/boot.ipxe') { const s = Buffer.from(menuScript()); res.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Length': s.length }); if (req.method === 'GET') { res.end(s); log('menu', who); } else res.end(); return; }
-    const m = /^\/iso\/([a-z0-9]{3,12})\/(iso|f\/.+)$/.exec(u);
+    const m = /^\/iso\/([a-z0-9]{3,12})\/(iso|image\.iso|f\/.+)$/.exec(u);
     const x = m && isos.find((i) => i.id === m[1] && i.ok !== false);
     if (!x) { res.writeHead(404); res.end(); return; }
     let st; try { st = fs.statSync(x.path); } catch (e) { res.writeHead(404); res.end(); return; }
+    const isIso = m[2] === 'iso' || m[2] === 'image.iso';
     const key = who + x.id + m[2].slice(0, 12);
-    if (m[2] === 'iso' && !seenOnce.has(key)) { seenOnce.add(key); log('iso', who, x.name); }
-    if (m[2] === 'iso') { serveFile(req, res, x.path, 0, st.size, 'application/octet-stream'); return; }
+    if (isIso && !seenOnce.has(key)) { seenOnce.add(key); log('iso', who, x.name); }
+    if (isIso) { serveFile(req, res, x.path, 0, st.size, 'application/octet-stream'); return; }
     let iso; try { iso = openIso(x.path); } catch (e) { res.writeHead(500); res.end(); return; }
     let e; try { e = iso.find(m[2].slice(2)); } finally { iso.close(); }
     if (!e || e.dir) { res.writeHead(404); res.end(); return; }
@@ -291,14 +325,23 @@ function create(opts) {
       if (isProxyPort && mt !== 3) return;                         // port 4011: the follow-up request
       const arch = clientArch(d);
       let file = '';
-      if (isIpxe(d)) file = 'http://' + ip + ':' + ports.http + '/boot.ipxe';
+      const weakIpxe = isIpxe(d) && !ipxeCanHttp(d);                    // iPXE that cannot download over the web yet
+      if (weakIpxe && !isProxyPort) {                                   // seen over and over = our own loader cannot do it either: stop instead of looping
+        const now = Date.now(); const h = (loops.get(d.mac) || []).filter((x) => now - x.t < 90000);
+        const xid = d.xid.toString('hex');
+        if (!h.some((x) => x.xid === xid)) h.push({ t: now, xid });
+        loops.set(d.mac, h);
+        if (h.length >= 5) { if (h.length === 5) log('info', '', d.mac + ' keeps coming back with a boot loader that cannot download over the web, so it was left alone. Try a different network card type in the virtual machine, or boot it from a USB stick.'); return; }
+      }
+      if (ipxeCanHttp(d)) file = 'http://' + ip + ':' + ports.http + '/boot.ipxe';
       else if (arch === 0) file = 'undionly.kpxe';
-      else if (arch === 7 || arch === 9) file = 'ipxe.efi';
+      else if (arch === 7 || arch === 9) file = loaders['snponly.efi'] ? 'snponly.efi' : 'ipxe.efi';
       else { log('info', '', d.mac + ' asked for a boot type this version does not offer (code ' + arch + ').'); return; }
       const reply = buildReply(d, isProxyPort ? 5 : 2, ip, file);
       if (!isProxyPort) {
         log('discover', d.mac, arch === 0 ? 'older BIOS mode' : arch === 7 || arch === 9 ? 'UEFI mode' : 'type ' + arch);
         log('offer', d.mac, file.replace(/^http:\/\/[^/]+\//, ''));
+        if (weakIpxe) log('info', '', d.mac + "'s built-in boot ROM cannot download over the web, so it is sent a fuller boot loader first.");
         const to = testing.replyTo || '255.255.255.255';
         sock.send(reply, testing.replyPort || 68, to, () => { /* best effort */ });
         if (!testing.replyTo && ip) { const p = ip.split('.'); sock.send(reply, 68, p[0] + '.' + p[1] + '.' + p[2] + '.255', () => { /* best effort */ }); }
@@ -330,7 +373,10 @@ function create(opts) {
     try {
       httpSrv = http.createServer(handleHttp);
       await new Promise((resolve, reject) => { httpSrv.once('error', reject); httpSrv.listen(ports.http, '0.0.0.0', resolve); });
-      step = ports.tftp; servers.tftp = await startTftp(ports.tftp, loaders, log); opened.push('tftp');
+      step = ports.tftp; // iPXE looks for "autoexec.ipxe" next to the boot loader it was started from: a tiny script that points it straight at the menu
+      const menuUrl = 'http://' + ip + ':' + ports.http + '/boot.ipxe';
+      const autoexec = Buffer.from(['#!ipxe', 'echo Dashboard Hub network boot: script started', 'echo Getting the menu from ' + menuUrl, 'chain ' + menuUrl + ' && exit', 'echo That did not work with the settings the computer already has. Asking for an address...', 'dhcp || echo (could not get an address)', 'ifstat', 'chain ' + menuUrl + ' || shell', ''].join('\n'));
+      servers.tftp = await startTftp(ports.tftp, Object.assign({}, loaders, { 'autoexec.ipxe': autoexec }), log); opened.push('tftp');
       step = ports.dhcp; servers.dhcp = await bindUdp(ports.dhcp); servers.dhcp.on('message', dhcpHandler(servers.dhcp, false));
       step = ports.pxe; servers.pxe = await bindUdp(ports.pxe); servers.pxe.on('message', dhcpHandler(servers.pxe, true));
     } catch (e) {
@@ -347,7 +393,7 @@ function create(opts) {
     Object.keys(servers).forEach((k) => { try { servers[k].close(); } catch (e) { /* closed */ } });
     servers = {};
     if (httpSrv) { try { httpSrv.close(); if (httpSrv.closeAllConnections) httpSrv.closeAllConnections(); } catch (e) { /* closed */ } httpSrv = null; }
-    clients.clear(); seenOnce.clear(); ignored.clear();
+    clients.clear(); seenOnce.clear(); ignored.clear(); loops.clear();
     if (was && !quiet) log('info', '', 'Network boot server stopped.');
     return { ok: true };
   }
@@ -361,11 +407,11 @@ function create(opts) {
     if (isos.some((x) => x.path === file)) return { ok: false, error: 'That ISO is already in the list.' };
     const id = Math.random().toString(36).slice(2, 8).replace(/[^a-z0-9]/g, 'x');
     const nm = safeText(name) || safeText(info.label) || safeText(path.basename(file, path.extname(file)));
-    isos.push({ id, name: nm, path: file, mode: info.mode, kernel: info.kernel, initrd: info.initrd, squash: info.squash, size: st.size });
+    isos.push({ id, name: nm, path: file, mode: info.mode, kernel: info.kernel, initrd: info.initrd, squash: info.squash, repo: info.repo === true, size: st.size });
     save();
     return { ok: true, id };
   }
-  function removeIso(id) { isos = isos.filter((x) => x.id !== id); save(); return { ok: true }; }
+  function removeIso(id) { isos = isos.filter((x) => x.id !== id); Object.keys(choice).forEach((m) => { if (choice[m] === 'iso:' + id) delete choice[m]; }); save(); return { ok: true }; }
   function renameIso(id, name) { const x = isos.find((i) => i.id === id); if (x && safeText(name)) { x.name = safeText(name); save(); } return { ok: true }; }
 
   function setAllow(o) {
@@ -373,8 +419,37 @@ function create(opts) {
     (Array.isArray(o && o.macs) ? o.macs : []).forEach((m) => { const n = normMac(m); if (n && !macs.includes(n) && macs.length < 50) macs.push(n); });
     const bad = (Array.isArray(o && o.macs) ? o.macs : []).filter((m) => String(m || '').trim() && !normMac(m));
     allow = { macs, any: !!(o && o.any === true) };
+    Object.keys(choice).forEach((m) => { if (!macs.includes(m)) delete choice[m]; });
     ignored.clear(); save();
     return { ok: true, bad: bad.map((x) => String(x).slice(0, 30)) };
+  }
+  function setChoice(mac, what) {
+    const m = normMac(mac); const c = String(what || 'menu');
+    if (!m || !allow.macs.includes(m)) return { ok: false, error: 'That computer is not on your list.' };
+    if (!/^(menu|local|netbootxyz|iso:[a-z0-9]{3,12})$/.test(c)) return { ok: false, error: 'That choice is not offered.' };
+    if (c === 'menu') delete choice[m]; else choice[m] = c;
+    save(); return { ok: true };
+  }
+  // "Check my setup": can the ports be opened, is the address this computer's own, are the boot loaders there?
+  async function check(want) {
+    const out = []; const add = (ok, text) => out.push({ ok, text });
+    const mine = localAddresses().map((a) => a.address);
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(String(want || ''))) add(false, 'No network connection is chosen.');
+    else if (!mine.includes(want) && want !== '127.0.0.1') add(false, 'The chosen address ' + want + ' is not one of this computer\'s own addresses any more. Pick the connection again.');
+    else add(true, 'Using this computer\'s address ' + want + '.');
+    if (!allow.any && !allow.macs.length) add(false, 'No computer is listed yet (add its MAC address).'); else add(true, allow.any ? 'Any computer will be answered.' : allow.macs.length + ' computer(s) listed.');
+    try { loadLoaders(); add(true, 'The boot loader files are present.'); } catch (e) { add(false, 'The boot loader files are missing from this copy of Dashboard Hub.'); }
+    if (running) add(true, 'Network boot is running, so its ports are open.');
+    else {
+      const tryUdp = (port) => new Promise((resolve) => { const k = dgram.createSocket({ type: 'udp4', reuseAddr: true }); k.once('error', (e) => { try { k.close(); } catch (x) { /* closed */ } resolve(e); }); k.bind(port, () => { try { k.close(); } catch (x) { /* closed */ } resolve(null); }); });
+      const tryTcp = (port) => new Promise((resolve) => { const k = http.createServer(); k.once('error', (e) => resolve(e)); k.listen(port, '0.0.0.0', () => k.close(() => resolve(null))); });
+      for (const [port, fn] of [[ports.dhcp, tryUdp], [ports.pxe, tryUdp], [ports.tftp, tryUdp], [ports.http, tryTcp]]) {
+        const e = await fn(port);
+        if (e) add(false, nice(e, port)); else add(true, 'Port ' + port + ' can be opened.');
+      }
+    }
+    if (process.platform === 'win32') add(true, 'Windows may ask to allow Dashboard Hub through the firewall when you press Start. Choose "Private networks".');
+    return { ok: true, checks: out, good: out.every((c) => c.ok) };
   }
   function localAddresses() {
     const out = [];
@@ -385,12 +460,12 @@ function create(opts) {
   function status() {
     isos.forEach((x) => { try { fs.accessSync(x.path, fs.constants.R_OK); x.ok = true; } catch (e) { x.ok = false; } });
     return {
-      running, ip, allow: { macs: allow.macs.slice(), any: allow.any }, ports: { dhcp: ports.dhcp, pxe: ports.pxe, tftp: ports.tftp, http: ports.http }, addresses: localAddresses(),
+      running, ip, allow: { macs: allow.macs.slice(), any: allow.any, choice: Object.assign({}, choice) }, ports: { dhcp: ports.dhcp, pxe: ports.pxe, tftp: ports.tftp, http: ports.http }, addresses: localAddresses(),
       isos: isos.map((x) => ({ id: x.id, name: x.name, path: x.path, mode: x.mode, size: x.size, ok: x.ok !== false })),
       clients: Array.from(clients.entries()).map(([a, c]) => ({ ip: a, last: c.last, t: c.t })), log: logLines.slice(-40)
     };
   }
-  return { start, stop, addIso, removeIso, renameIso, setAllow, status, menuScript, _isos: () => isos };
+  return { start, stop, addIso, removeIso, renameIso, setAllow, setChoice, check, status, menuScript, _isos: () => isos };
 }
 
-module.exports = { create, analyzeIso, openIso, parseDhcp, buildReply, normMac, PORTS };
+module.exports = { create, analyzeIso, openIso, parseDhcp, buildReply, normMac, ipxeFeatures, PORTS };

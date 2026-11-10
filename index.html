@@ -380,6 +380,20 @@
     <div class="dialog-buttons left"><button type="button" id="pxeIsoAdd">Add an ISO file...</button></div>
     <p class="hint">Ubuntu-style and Debian live discs start directly. Other ISO files are tried in a generic way and may not work on every computer. The menu also has <b>netboot.xyz</b>: many live, rescue and installer images, downloaded by the booting computer, so it needs internet.
        While this is running, other computers on your network can also see the menu and fetch the ISO files you added.</p>
+    <details class="pxe-tips">
+      <summary>Testing with a VirtualBox (or similar) virtual machine</summary>
+      <ol>
+        <li>In the VM's Settings &rarr; System, tick <b>Network</b> in the boot order. <b>Enable EFI</b> can be on (modern PC style) or off (older BIOS style); if one does not work, try the other. Secure Boot must be off.</li>
+        <li>In Settings &rarr; Network, choose <b>Bridged Adapter</b> on your cable connection (not NAT; Wi-Fi often fails). Keep the adapter type Intel PRO/1000.</li>
+        <li>Copy the VM's MAC address (Network &rarr; Advanced) into box 1 above, and choose the same connection in box 2.</li>
+        <li>Press <b>Start</b> here, then start the VM. Seeing the "Dashboard Hub network boot" menu means it works.</li>
+        <li>If the VM says "No boot filename received", the answer never arrived: check the MAC, the connection, the bridge and the firewall.</li>
+      </ol>
+    </details>
+    <div class="dialog-buttons left">
+      <button type="button" id="pxeCheck">Check my setup</button>
+    </div>
+    <div id="pxeChecks" class="pxe-list"></div>
     <div class="dialog-buttons left">
       <button type="button" id="pxeStart" class="primary">Start network boot</button>
       <button type="button" id="pxeStop" class="hidden">Stop</button>

@@ -19,6 +19,15 @@
     if (!macs.length) { const e = document.createElement('p'); e.className = 'hint'; e.textContent = 'No computer listed yet.'; box.appendChild(e); }
     macs.forEach((m) => {
       const d = item(m, '');
+      const sel = document.createElement('select'); sel.title = 'What this computer starts by itself (after 5 seconds; any key opens the menu instead)';
+      const opts = [['menu', 'Show the menu (own disk after 20 s)']];
+      ((st && st.isos) || []).filter((x) => x.ok).forEach((x) => opts.push(['iso:' + x.id, 'Start by itself: ' + x.name]));
+      opts.push(['netbootxyz', 'Start by itself: netboot.xyz'], ['local', 'Start by itself: its own disk']);
+      opts.forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); });
+      sel.value = (st && st.allow && st.allow.choice && st.allow.choice[m]) || 'menu';
+      if (sel.value !== ((st && st.allow && st.allow.choice && st.allow.choice[m]) || 'menu')) sel.value = 'menu';
+      sel.addEventListener('change', async () => { const r = await api.choice(m, sel.value); if (r && !r.ok) say(r.error || 'That choice could not be saved.'); });
+      d.appendChild(sel);
       const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Remove'; b.disabled = !!(st && st.running);
       b.addEventListener('click', async () => { macs = macs.filter((x) => x !== m); await save(); renderMacs(); });
       d.appendChild(b); box.appendChild(d);
@@ -56,8 +65,9 @@
     const box = $('pxeIsoList'); box.textContent = '';
     if (!(s.isos || []).length) { const e = document.createElement('p'); e.className = 'hint'; e.textContent = 'No ISO added. You can still use netboot.xyz from the menu.'; box.appendChild(e); }
     (s.isos || []).forEach((x) => {
-      const mode = x.mode === 'casper' ? 'Ubuntu-style live disc' : x.mode === 'debianlive' ? 'Debian-style live disc' : 'generic ISO';
-      const d = item(x.name, x.ok ? mode + ', ' + Math.round(x.size / 1048576) + ' MB' : 'file not found - put it back or remove it', x.ok ? '' : 'missing');
+      const mode = x.mode === 'casper' ? 'Ubuntu-style live disc' : x.mode === 'debianlive' ? 'Debian-style live disc' : x.mode === 'anaconda' ? 'Rocky/Alma/Fedora-style installer' : 'generic ISO';
+      const need = x.mode === 'casper' ? ' (the booting computer needs about ' + Math.ceil(x.size / 1073741824 + 3) + ' GB of memory: Ubuntu loads the whole disc into RAM)' : '';
+      const d = item(x.name, x.ok ? mode + ', ' + Math.round(x.size / 1048576) + ' MB' + need : 'file not found - put it back or remove it', x.ok ? '' : 'missing');
       const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Remove';
       b.addEventListener('click', async () => { await api.removeIso(x.id); refresh(); });
       d.appendChild(b); box.appendChild(d);
@@ -66,6 +76,17 @@
     log.textContent = (s.log || []).map((l) => l.t + '  ' + l.msg).join('\n') || 'Nothing yet.';
     if (atEnd) log.scrollTop = log.scrollHeight;
   }
+  $('pxeCheck').addEventListener('click', async () => {
+    const box = $('pxeChecks'); box.textContent = ''; say('Checking...');
+    try {
+      await save();
+      const r = await api.check($('pxeIp').value);
+      say('');
+      if (!r || !r.checks) { say((r && r.error) || 'The check could not run.'); return; }
+      r.checks.forEach((c) => box.appendChild(item(c.text, '', c.ok ? 'good' : 'bad')));
+      box.appendChild(item(r.good ? 'Everything looks ready. Press Start.' : 'Fix the red items above, then check again.', '', r.good ? 'good' : 'bad'));
+    } catch (e) { say('The check could not run.'); }
+  });
   async function refresh() { try { const s = await api.status(); if (s && s.ok) render(s); } catch (e) { /* closed */ } }
 
   // the menu entry tells you when it is running, even with the window closed

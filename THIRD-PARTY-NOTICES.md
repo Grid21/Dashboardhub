@@ -20,4 +20,4 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 
 ## iPXE (network boot loaders)
-`vendor/ipxe-files.json` contains the iPXE boot loaders (`undionly.kpxe` and `ipxe.efi`) used by the Network boot feature. iPXE (https://ipxe.org) is licensed under GPL-2.0 with the UBDL exception and is included unchanged. Source: https://github.com/ipxe/ipxe
+`vendor/ipxe-files.json` contains the iPXE boot loaders (`undionly.kpxe`, `ipxe.efi` and `snponly.efi`) used by the Network boot feature. iPXE (https://ipxe.org) is licensed under GPL-2.0 with the UBDL exception and is included unchanged. Source: https://github.com/ipxe/ipxe

@@ -14,7 +14,7 @@ const PORTS = { dhcp: 67, pxe: 4011, tftp: 69, http: 8088 };
 // ---------- reading an ISO (ISO 9660 with Rock Ridge long names) ----------
 function readAt(fd, pos, len) { const b = Buffer.alloc(len); const n = fs.readSync(fd, b, 0, len, pos); return n === len ? b : b.subarray(0, n); }
 function cleanName(raw) { return raw.replace(/;\d+$/, '').replace(/\.$/, ''); }
-function parseDir(fd, extent, size) {
+function parseDir(fd, extent, size, joliet) {
   const out = [];
   const buf = readAt(fd, extent * 2048, Math.min(size, 4 * 1024 * 1024));
   let p = 0;
@@ -25,18 +25,19 @@ function parseDir(fd, extent, size) {
     const id = buf.subarray(p + 33, p + 33 + idLen);
     let name;
     if (idLen === 1 && (id[0] === 0 || id[0] === 1)) { p += len; continue; }   // "." and ".."
-    name = cleanName(id.toString('latin1'));
+    if (joliet) { const u = Buffer.from(id); u.swap16(); name = cleanName(u.toString('utf16le')); }
+    else name = cleanName(id.toString('latin1'));
     // Rock Ridge: the real (long, mixed case) name lives in an "NM" entry after the short name
     let su = p + 33 + idLen; if (idLen % 2 === 0) su++;
     const end = p + len;
     let rr = '';
-    while (su + 4 <= end) {
+    while (!joliet && su + 4 <= end) {
       const sig = buf.toString('latin1', su, su + 2), l = buf[su + 2];
       if (l < 4) break;
       if (sig === 'NM' && l > 5) rr += buf.toString('utf8', su + 5, su + l);
       su += l;
     }
-    out.push({ name: rr || name, dir: !!(flags & 2), extent: buf.readUInt32LE(p + 2), size: buf.readUInt32LE(p + 10) });
+    out.push({ name: rr || name, dir: !!(flags & 2), extent: buf.readUInt32LE(p + 2), size: buf.readUInt32LE(p + 10), joliet: joliet === true });
     p += len;
   }
   return out;
@@ -48,21 +49,29 @@ function openIso(file) {
     if (pvd.length < 2048 || pvd.toString('latin1', 1, 6) !== 'CD001') throw new Error('This does not look like an ISO file.');
     const label = pvd.toString('latin1', 40, 72).trim();
     const root = { extent: pvd.readUInt32LE(156 + 2), size: pvd.readUInt32LE(156 + 10) };
+    // Windows discs often have a nearly empty plain tree and the real file list in the "Joliet" extension: find it too
+    let jroot = null;
+    for (let sec = 17; sec < 40 && !jroot; sec++) {
+      const d = readAt(fd, sec * 2048, 2048);
+      if (d.length < 2048 || d.toString('latin1', 1, 6) !== 'CD001' || d[0] === 255) break;
+      if (d[0] === 2 && d[88] === 0x25 && d[89] === 0x2f && '@CE'.includes(String.fromCharCode(d[90]))) jroot = { extent: d.readUInt32LE(156 + 2), size: d.readUInt32LE(156 + 10) };
+    }
     const cache = new Map();
-    const list = (d) => { const k = d.extent; if (!cache.has(k)) cache.set(k, parseDir(fd, d.extent, d.size)); return cache.get(k); };
-    const find = (p) => {
-      let cur = root;
+    const list = (d) => { const k = (d.joliet ? 'j' : 'p') + d.extent; if (!cache.has(k)) cache.set(k, parseDir(fd, d.extent, d.size, d.joliet === true)); return cache.get(k); };
+    const findIn = (start, p) => {
+      let cur = start;
       const parts = String(p).split('/').filter(Boolean);
-      if (!parts.length) return { dir: true, extent: root.extent, size: root.size };
+      if (!parts.length) return { dir: true, extent: start.extent, size: start.size, joliet: start.joliet };
       for (let i = 0; i < parts.length; i++) {
         const e = list(cur).find((x) => x.name.toLowerCase() === parts[i].toLowerCase());
         if (!e) return null;
         if (i === parts.length - 1) return e;
         if (!e.dir) return null;
-        cur = e;
+        cur = Object.assign({}, e, { joliet: start.joliet });
       }
       return null;
     };
+    const find = (p) => findIn(root, p) || (jroot ? findIn(Object.assign({ joliet: true }, jroot), p) : null);
     const entries = (p) => { const d = find(p); return d && d.dir ? list(d) : []; };
     return { fd, label, find, entries, close: () => { try { fs.closeSync(fd); } catch (e) { /* closed */ } } };
   } catch (e) { try { fs.closeSync(fd); } catch (x) { /* closed */ } throw e; }
@@ -77,6 +86,7 @@ function analyzeIso(file) {
     const lk = pick('/live', /^vmlinuz/i), li = pick('/live', /^initrd/i), ls = pick('/live', /^filesystem\.squashfs$/i);
     if (ck && ci) { info.mode = 'casper'; info.kernel = ck; info.initrd = ci; }
     else if (lk && li && ls) { info.mode = 'debianlive'; info.kernel = lk; info.initrd = li; info.squash = ls; }
+    else if (iso.find('/sources/boot.wim') && (iso.find('/setup.exe') || iso.find('/sources/setup.exe'))) { info.mode = 'windows'; info.kernel = '/sources/boot.wim'; }
     else {
       // Red Hat family (Rocky, Alma, CentOS, Fedora, RHEL): the installer wants to know where its install image and packages are
       const ak = pick('/images/pxeboot', /^vmlinuz$/i), ai = pick('/images/pxeboot', /^initrd\.img$/i);
@@ -143,6 +153,25 @@ function kickstartText(a, base, repo) {
   return ['text', 'reboot', repo ? 'url --url=' + base : '# no packages on this disc: the installer picks an online mirror', 'lang en_US.UTF-8', "keyboard --xlayouts='" + a.keyboard + "'", 'timezone ' + a.timezone + ' --utc',
     'network --bootproto=dhcp --hostname=' + a.hostname + ' --activate', 'rootpw --lock', 'user --name=' + a.username + ' --groups=wheel --iscrypted --password=' + a.hash,
     'zerombr', 'clearpart --all --initlabel', 'autopart', 'firstboot --disable', '%packages', '@^minimal-environment', '%end', ''].join('\n');
+}
+
+const WIN_DEFAULT = { unc: '', user: '', bypass: false };
+function cleanWinShare(o) {
+  const t = (v) => String(v == null ? '' : v).trim();
+  const unc = t(o.unc), user = t(o.user), bypass = o.bypass === true;
+  if (unc && !/^\\\\[A-Za-z0-9._-]{1,63}\\[A-Za-z0-9._$-]{1,80}$/.test(unc)) return { error: 'The share address looks like \\\\192.168.1.10\\WinSetup (two backslashes, the PC, a backslash, the share name; no spaces).' };
+  if (user && !/^[A-Za-z0-9._-]{1,32}(\\[A-Za-z0-9._-]{1,32})?$/.test(user)) return { error: 'The Windows user name has letters, numbers, . - or _ (for example MYPC\\hubsetup).' };
+  return { win: { unc, user, bypass } };
+}
+// What the Windows setup program does when it starts on the booting computer: connect to your shared folder, then run Setup from it
+function winShellIni() { return ['[LaunchApps]', '%SYSTEMROOT%\\System32\\wpeinit.exe', '%SYSTEMROOT%\\System32\\cmd.exe, /k %SYSTEMROOT%\\System32\\hubsetup.cmd', ''].join('\r\n'); }
+function winSetupCmd(w) {
+  const L = ['@echo off', 'echo.', 'echo ===== Dashboard Hub: Windows setup =====', 'echo Waiting for the network...', 'set /a n=0', ':waitnet', 'ipconfig | find "IPv4" >nul && goto gotnet', 'set /a n+=1', 'if %n% GEQ 30 goto gotnet', 'ping 127.0.0.1 -n 3 >nul', 'goto waitnet', ':gotnet', 'ipconfig | find "IPv4"'];
+  if (w.bypass) L.push('echo Skipping the Windows 11 hardware checks (as you chose in Dashboard Hub)...', 'reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f >nul', 'reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f >nul', 'reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1 /f >nul', 'reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassCPUCheck /t REG_DWORD /d 1 /f >nul', 'reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassStorageCheck /t REG_DWORD /d 1 /f >nul');
+  L.push(':connect', 'echo.', 'echo Connecting to ' + w.unc + ' as ' + w.user + '. Type that Windows account\'s password when asked (nothing shows while you type).', 'net use Z: ' + w.unc + ' /user:' + w.user + ' *', 'if errorlevel 1 goto failed',
+    'if exist Z:\\autounattend.xml (echo Found autounattend.xml on the share: installing without questions.& Z:\\setup.exe /unattend:Z:\\autounattend.xml) else (Z:\\setup.exe)', 'goto :eof',
+    ':failed', 'echo.', 'echo Could not connect. Check the share name, the user name, the password and that the Windows PC is on.', 'echo Press any key to try again.', 'pause >nul', 'goto connect', '');
+  return L.join('\r\n');
 }
 
 // ---------- DHCP packets ----------
@@ -267,14 +296,16 @@ function create(opts) {
   const testing = opts.testing || {};              // tests send replies to 127.0.0.1 instead of the network broadcast
   const store = path.join(dataDir, 'pxe.json');
   let isos = [];
+  let wimbootBuf = null;
+  let winShare = Object.assign({}, WIN_DEFAULT);
   let answers = null;                               // unattended install answers (the password is kept only as a hash)
   const delivered = new Map();                      // 'mac id' -> time the install answers were fetched (they stay available for 30 minutes)
   let uefiLoader = 'snponly';                       // which UEFI boot loader to hand out: 'snponly' (uses the firmware's network card) or 'ipxe' (iPXE's own card drivers)
   let allow = { macs: [], any: false };
   let choice = {};   // per computer: what to start by itself ('menu', 'local', 'netbootxyz' or 'iso:<id>')   // which machines may be answered (nothing is answered until you list one)
-  try { const j = JSON.parse(fs.readFileSync(store, 'utf8')); if (j.allow && Array.isArray(j.allow.macs)) allow = { macs: j.allow.macs.map(normMac).filter(Boolean).slice(0, 50), any: j.allow.any === true }; if (j.choice && typeof j.choice === 'object') Object.keys(j.choice).slice(0, 50).forEach((k) => { const m = normMac(k); if (m && /^(menu|local|netbootxyz|iso:[a-z0-9]{3,12}(:auto)?)$/.test(String(j.choice[k]))) choice[m] = String(j.choice[k]); }); if (j.answers && typeof j.answers === 'object') { const c = cleanAnswers(Object.assign({}, j.answers, { password: '' }), j.answers); if (c.answers) answers = c.answers; } if (j.uefiLoader === 'ipxe' || j.uefiLoader === 'snponly') uefiLoader = j.uefiLoader; if (Array.isArray(j.isos)) isos = j.isos.filter((x) => x && typeof x.path === 'string' && /^[a-z0-9]{3,12}$/.test(x.id)).slice(0, 40); } catch (e) { /* none yet */ }
+  try { const j = JSON.parse(fs.readFileSync(store, 'utf8')); if (j.allow && Array.isArray(j.allow.macs)) allow = { macs: j.allow.macs.map(normMac).filter(Boolean).slice(0, 50), any: j.allow.any === true }; if (j.choice && typeof j.choice === 'object') Object.keys(j.choice).slice(0, 50).forEach((k) => { const m = normMac(k); if (m && /^(menu|local|netbootxyz|iso:[a-z0-9]{3,12}(:auto)?)$/.test(String(j.choice[k]))) choice[m] = String(j.choice[k]); }); if (j.answers && typeof j.answers === 'object') { const c = cleanAnswers(Object.assign({}, j.answers, { password: '' }), j.answers); if (c.answers) answers = c.answers; } if (j.winShare && typeof j.winShare === 'object') { const c = cleanWinShare(j.winShare); if (c.win) winShare = c.win; } if (j.uefiLoader === 'ipxe' || j.uefiLoader === 'snponly') uefiLoader = j.uefiLoader; if (Array.isArray(j.isos)) isos = j.isos.filter((x) => x && typeof x.path === 'string' && /^[a-z0-9]{3,12}$/.test(x.id)).slice(0, 40); } catch (e) { /* none yet */ }
   isos.forEach((x) => { if (x.mode === 'sanboot') { try { const i = analyzeIso(x.path); if (i.mode !== 'sanboot') { x.mode = i.mode; x.kernel = i.kernel; x.initrd = i.initrd; x.squash = i.squash; x.repo = i.repo === true; } } catch (e) { /* file missing */ } } });
-  const save = () => { try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(store, JSON.stringify({ isos, allow, choice, uefiLoader, answers }), { mode: 0o600 }); } catch (e) { /* not saved */ } };
+  const save = () => { try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(store, JSON.stringify({ isos, allow, choice, uefiLoader, answers, winShare }), { mode: 0o600 }); } catch (e) { /* not saved */ } };
 
   let running = false, ip = '', loaders = null, servers = {}, httpSrv = null;
   const logLines = [];
@@ -303,6 +334,7 @@ function create(opts) {
     if (loaders) return loaders;
     const j = JSON.parse(fs.readFileSync(path.join(__dirname, 'vendor', 'ipxe-files.json'), 'utf8'));
     loaders = { 'undionly.kpxe': Buffer.from(j.undionly, 'base64'), 'ipxe.efi': Buffer.from(j.efi, 'base64') };
+    wimbootBuf = j.wimboot ? Buffer.from(j.wimboot, 'base64') : null;   // Windows: boots the Windows setup program (wimboot, GPL-2.0-or-later)
     if (j.snponly) loaders['snponly.efi'] = Buffer.from(j.snponly, 'base64');   // UEFI: uses the network card the firmware already opened
     return loaders;
   }
@@ -330,6 +362,7 @@ function create(opts) {
       L.push(':iso' + x.id, 'echo Starting ' + safeText(x.name) + ' ...');
       if (x.mode === 'casper') L.push('kernel ' + b + '/f' + enc(x.kernel) + ' boot=casper ip=dhcp url=' + b + '/image.iso cloud-config-url=/dev/null --- || goto failed', 'initrd ' + b + '/f' + enc(x.initrd) + ' || goto failed', 'boot || goto failed');
       else if (x.mode === 'debianlive') L.push('kernel ' + b + '/f' + enc(x.kernel) + ' boot=live components fetch=' + b + '/f' + enc(x.squash) + ' ip=dhcp || goto failed', 'initrd ' + b + '/f' + enc(x.initrd) + ' || goto failed', 'boot || goto failed');
+      else if (x.mode === 'windows') L.push('kernel ${base}/wimboot', 'initrd ' + b + '/f' + enc(x.kernel) + ' boot.wim || goto failed', 'initrd ${base}/win/' + x.id + '/winpeshl.ini winpeshl.ini || goto failed', 'initrd ${base}/win/' + x.id + '/hubsetup.cmd hubsetup.cmd || goto failed', 'boot || goto failed');
       else if (x.mode === 'anaconda') L.push('kernel ' + b + '/f' + enc(x.kernel) + ' inst.stage2=' + b + '/f' + (x.repo ? ' inst.repo=' + b + '/f' : '') + ' ip=dhcp || goto failed', 'initrd ' + b + '/f' + enc(x.initrd) + ' || goto failed', 'boot || goto failed');
       else L.push('sanboot ' + b + '/iso || goto failed');
     });
@@ -376,6 +409,14 @@ function create(opts) {
     let u; try { u = decodeURIComponent((req.url || '/').split('?')[0]); } catch (e) { res.writeHead(400); res.end(); return; }
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); res.end(); return; }
     if (u === '/boot.ipxe') { const s = Buffer.from(menuScript()); res.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Length': s.length }); if (req.method === 'GET') { res.end(s); log('menu', who); } else res.end(); return; }
+    if (u === '/wimboot' && wimbootBuf) { res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': wimbootBuf.length }); if (req.method === 'GET') res.end(wimbootBuf); else res.end(); return; }
+    const wm = /^\/win\/([a-z0-9]{3,12})\/(winpeshl\.ini|hubsetup\.cmd)$/.exec(u);
+    if (wm) {
+      const xw = isos.find((i) => i.id === wm[1] && i.ok !== false && i.mode === 'windows');
+      if (!xw || !winShare.unc || !winShare.user) { res.writeHead(404); res.end(); return; }
+      const buf = Buffer.from(wm[2] === 'winpeshl.ini' ? winShellIni() : winSetupCmd(winShare), 'latin1');
+      res.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Length': buf.length }); if (req.method === 'GET') res.end(buf); else res.end(); return;
+    }
     const am = /^\/auto\/([a-z0-9]{3,12})\/([0-9a-f]{2}(?:-[0-9a-f]{2}){5})\/(user-data|meta-data|vendor-data|ks\.cfg)$/i.exec(u);
     if (am) {
       const mac = normMac(am[2]), xi = isos.find((i) => i.id === am[1] && i.ok !== false);
@@ -411,6 +452,7 @@ function create(opts) {
     serveFile(req, res, x.path, e.extent * 2048, e.size, 'application/octet-stream', m[2].slice(2), who);
   }
 
+  const asks = new Map();                           // mac -> times it asked in the last 40 s
   function dhcpHandler(sock, isProxyPort) {
     return (msg, ri) => {
       const d = parseDhcp(msg);
@@ -420,7 +462,7 @@ function create(opts) {
         if (mt === 1 && !ignored.has(d.mac)) { ignored.add(d.mac); log('info', '', d.mac + ' asked to network boot, but it is not on your list, so it was ignored.'); }
         return;
       }
-      if (!isProxyPort && mt !== 1) return;                        // port 67: only the first "who is there?" (the real DHCP server does the rest)
+      if (!isProxyPort && mt !== 1 && mt !== 3) return;            // port 67: "who is there?" and the follow-up request that some firmware (Dell, Intel UEFI) broadcasts here instead of to port 4011
       if (isProxyPort && mt !== 3) return;                         // port 4011: the follow-up request
       const arch = clientArch(d);
       let file = '';
@@ -436,7 +478,19 @@ function create(opts) {
       else if (arch === 0) file = 'undionly.kpxe';
       else if (arch === 7 || arch === 9) file = (uefiLoader === 'snponly' && loaders['snponly.efi']) ? 'snponly.efi' : 'ipxe.efi';
       else { log('info', '', d.mac + ' asked for a boot type this version does not offer (code ' + arch + ').'); return; }
-      const reply = buildReply(d, isProxyPort ? 5 : 2, ip, file);
+      const reply = buildReply(d, isProxyPort || mt === 3 ? 5 : 2, ip, file);
+      const note = (k, text) => { const key = d.mac + k + d.xid.toString('hex'); if (!seenOnce.has(key)) { seenOnce.add(key); log('info', '', text); } };
+      if (!isProxyPort && mt === 1) {
+        const now = Date.now(); const h = (asks.get(d.mac) || []).filter((t) => now - t < 40000); h.push(now); asks.set(d.mac, h);
+        if (h.length === 4) log('info', '', d.mac + ' keeps asking but never starts the download, so its firmware may not accept the answer. What it sent: boot type ' + arch + ', ' + ((d.flags[0] & 0x80) ? 'asks for a broadcast reply' : 'no broadcast flag') + ', ' + (d.opts[97] ? 'has' : 'no') + ' machine ID. Answers went out from ' + ip + '. Send this line and a photo of its screen.');
+      }
+      if (!isProxyPort && mt === 3) {
+        note('req67', d.mac + ' sent its follow-up request to the normal DHCP port: answered it too.');
+        const to = testing.replyTo || '255.255.255.255';
+        sock.send(reply, testing.replyPort || 68, to, () => { /* best effort */ });
+        if (!testing.replyTo && ip) { const p = ip.split('.'); sock.send(reply, 68, p[0] + '.' + p[1] + '.' + p[2] + '.255', () => { /* best effort */ }); }
+        return;
+      }
       if (!isProxyPort) {
         log('discover', d.mac, arch === 0 ? 'older BIOS mode' : arch === 7 || arch === 9 ? 'UEFI mode' : 'type ' + arch);
         log('offer', d.mac, file.replace(/^http:\/\/[^/]+\//, ''));
@@ -445,6 +499,7 @@ function create(opts) {
         sock.send(reply, testing.replyPort || 68, to, () => { /* best effort */ });
         if (!testing.replyTo && ip) { const p = ip.split('.'); sock.send(reply, 68, p[0] + '.' + p[1] + '.' + p[2] + '.255', () => { /* best effort */ }); }
       } else {
+        note('req4011', d.mac + ' sent its follow-up request to the boot-file port: answered it.');
         sock.send(reply, ri.port, ri.address, () => { /* best effort */ });
       }
     };
@@ -518,6 +573,11 @@ function create(opts) {
     if (c.error) return { ok: false, error: c.error };
     answers = c.answers; save(); return { ok: true };
   }
+  function setWinShare(o) {
+    const c = cleanWinShare(o || {});
+    if (c.error) return { ok: false, error: c.error };
+    winShare = c.win; save(); return { ok: true };
+  }
   function setUefiLoader(v) { if (v !== 'snponly' && v !== 'ipxe') return { ok: false, error: 'Unknown loader' }; uefiLoader = v; save(); return { ok: true }; }
   function setAllow(o) {
     const macs = [];
@@ -570,12 +630,12 @@ function create(opts) {
   function status() {
     isos.forEach((x) => { try { fs.accessSync(x.path, fs.constants.R_OK); x.ok = true; } catch (e) { x.ok = false; } });
     return {
-      running, ip, uefiLoader, answers: answers ? { username: answers.username, hostname: answers.hostname, timezone: answers.timezone, keyboard: answers.keyboard, hasPassword: true } : null, allow: { macs: allow.macs.slice(), any: allow.any, choice: Object.assign({}, choice) }, ports: { dhcp: ports.dhcp, pxe: ports.pxe, tftp: ports.tftp, http: ports.http }, addresses: localAddresses(),
+      running, ip, uefiLoader, winShare: Object.assign({}, winShare), answers: answers ? { username: answers.username, hostname: answers.hostname, timezone: answers.timezone, keyboard: answers.keyboard, hasPassword: true } : null, allow: { macs: allow.macs.slice(), any: allow.any, choice: Object.assign({}, choice) }, ports: { dhcp: ports.dhcp, pxe: ports.pxe, tftp: ports.tftp, http: ports.http }, addresses: localAddresses(),
       isos: isos.map((x) => ({ id: x.id, name: x.name, path: x.path, mode: x.mode, size: x.size, ok: x.ok !== false })),
       clients: Array.from(clients.entries()).map(([a, c]) => ({ ip: a, last: c.last, t: c.t })), log: logLines.slice(-40)
     };
   }
-  return { start, stop, addIso, removeIso, renameIso, setAllow, setChoice, setUefiLoader, setAnswers, check, status, menuScript, _isos: () => isos };
+  return { start, stop, addIso, removeIso, renameIso, setAllow, setChoice, setUefiLoader, setAnswers, setWinShare, check, status, menuScript, _isos: () => isos };
 }
 
 module.exports = { sha512crypt, create, analyzeIso, openIso, parseDhcp, buildReply, normMac, ipxeFeatures, PORTS };

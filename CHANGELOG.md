@@ -2,6 +2,29 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.13.3
+- UEFI network boot on a Dell Latitude (and other firmware that behaves the same): the follow-up request that this firmware broadcasts to the normal DHCP port (67) is now answered too, the way proxy-DHCP servers such as dnsmasq do. Before, only the first "who is there?" was answered and the follow-up on port 4011, so a computer that sends its follow-up to port 67 asked again and again and never started the download.
+- The Network boot log now notes when a computer sent its follow-up to port 67 or 4011, and after four unanswered asks in 40 seconds it prints the details that matter (boot type, broadcast flag, machine ID, sending address) to make a screenshot useful.
+- Housekeeping: removed example addresses, hardware addresses, device names and disc labels taken from a real test setup from the tests, placeholders and documentation (now neutral samples). Vendor and brand names that appear are only for the devices the program supports.
+
+## 1.13.2
+- Remote view now has its own button in the top bar, right before "Servers", instead of an entry in the Settings menu.
+
+## 1.13.1
+- Remote view: NoMachine is now explained up front. The Add device form for NoMachine shows a notice that NoMachine is separate, free software that is not part of Dashboard Hub and is needed on two computers (this one and the one you want to control), says whether it was found on this computer, and has a "Download NoMachine (official page)" button. If it is missing when you click a device, the tab gives the steps and a "Check again" button. Dashboard Hub deliberately opens NoMachine's own website instead of downloading and installing software by itself.
+- Test: remote-ui-test now has 24 checks.
+
+## 1.13.0
+- New: **Remote view**, a separate window (Settings → "Remote view (KVM, NoMachine)...") for PiKVM, JetKVM, other web KVMs and NoMachine. Devices are saved by name and address; each opens in a tab. Web KVMs show inside the window with their own sign-in (self-signed certificates accepted for the saved devices only); NoMachine starts your installed NoMachine program with the connection filled in. Full screen mode has an Exit button so Esc reaches the remote computer. The window can only open web views for the exact addresses you saved.
+- New files: remote.js, remote.html, remote.css, remote-ui.js, remote-preload.js, remote-open.js. New tests: test/remote-test.js (24 checks), test/remote-ui-test.js (19 checks).
+- Honest limit: tested against simulated devices only (fake PiKVM with a self-signed certificate, fake JetKVM, fake NoMachine player), not real hardware.
+
+## 1.12.0
+- Windows installs (experimental): Windows discs (Windows 10 and 11) are recognised and started with `wimboot` (built unchanged from the official source). The Windows setup program then connects to a shared folder on a Windows PC and runs Setup from there, like a Windows deployment server, so nothing large goes into the booting computer's memory. New "Windows installs (advanced)" block in the Network boot window: share address, Windows account, and a checkbox to skip the Windows 11 hardware checks. The password is typed on the booting computer and never stored. An `autounattend.xml` at the top of the share is used automatically for a no-questions install.
+- ISO reading now understands the "Joliet" file list, which many Windows discs use instead of the plain one.
+- New test: test/pxe-win-test.js (19 checks).
+- Not tested here on a real Windows setup: only the web side and the generated scripts are checked.
+
 ## 1.11.0
 - Unattended installs (Network boot window → "Unattended installs (advanced)"): save a user name, password, computer name, time zone and keyboard layout, then choose "UNATTENDED install, ERASES THE DISK, once" in a listed computer's drop-down. Ubuntu Server style discs get an autoinstall `user-data`; Rocky/Alma/Fedora style discs get a kickstart file. Safety: asks for confirmation, only for computers you listed, never shown in the normal menu, and one-shot (the computer goes back to starting from its own disk as soon as it fetches its answers, so it cannot reinstall in a loop). The password is stored only as a SHA-512 hash (checked against `openssl passwd -6`).
 - New test: test/pxe-auto-test.js (28 checks).

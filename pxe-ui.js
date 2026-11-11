@@ -49,6 +49,11 @@
     } catch (e) { /* the map is optional */ }
     sel.value = keep;
   }
+  function fillWin(s) {
+    const box = $('pxeWin'); if (!box || box.contains(document.activeElement) || !s.winShare) return;
+    if (!$('pxeWinUnc').value) $('pxeWinUnc').value = s.winShare.unc; if (!$('pxeWinUser').value) $('pxeWinUser').value = s.winShare.user;
+    $('pxeWinBypass').checked = !!s.winShare.bypass;
+  }
   function fillAnswers(s) {
     const box = $('pxeAuto'); if (!box || box.contains(document.activeElement)) return;
     const a = s.answers; if (!a) return;
@@ -63,7 +68,7 @@
     $('pxeState').classList.toggle('ok', run);
     ['pxeMacInput', 'pxeMacAdd', 'pxeMacPick', 'pxeAny', 'pxeIp'].forEach((id) => { $(id).disabled = run; });
     if (!loaded) {
-      macs = (s.allow && s.allow.macs || []).slice(); fillAnswers(s); if (s.uefiLoader && document.activeElement !== $('pxeUefi')) $('pxeUefi').value = s.uefiLoader; $('pxeAny').checked = !!(s.allow && s.allow.any);
+      macs = (s.allow && s.allow.macs || []).slice(); fillAnswers(s); fillWin(s); if (s.uefiLoader && document.activeElement !== $('pxeUefi')) $('pxeUefi').value = s.uefiLoader; $('pxeAny').checked = !!(s.allow && s.allow.any);
       const sel = $('pxeIp'); sel.textContent = '';
       (s.addresses || []).forEach((a) => { const o = document.createElement('option'); o.value = a.address; o.textContent = a.name + ' - ' + a.address; sel.appendChild(o); });
       if (!(s.addresses || []).length) { const o = document.createElement('option'); o.value = ''; o.textContent = 'No network connection found'; sel.appendChild(o); }
@@ -74,7 +79,7 @@
     const box = $('pxeIsoList'); box.textContent = '';
     if (!(s.isos || []).length) { const e = document.createElement('p'); e.className = 'hint'; e.textContent = 'No ISO added. You can still use netboot.xyz from the menu.'; box.appendChild(e); }
     (s.isos || []).forEach((x) => {
-      const mode = x.mode === 'casper' ? 'Ubuntu-style live disc' : x.mode === 'debianlive' ? 'Debian-style live disc' : x.mode === 'anaconda' ? 'Rocky/Alma/Fedora-style installer' : 'generic ISO';
+      const mode = x.mode === 'casper' ? 'Ubuntu-style live disc' : x.mode === 'debianlive' ? 'Debian-style live disc' : x.mode === 'anaconda' ? 'Rocky/Alma/Fedora-style installer' : x.mode === 'windows' ? 'Windows installer (needs the shared folder, see above)' : 'generic ISO';
       const need = x.mode === 'casper' ? ' (the booting computer needs about ' + Math.ceil(x.size / 1073741824 + 3) + ' GB of memory: Ubuntu loads the whole disc into RAM)' : '';
       const d = item(x.name, x.ok ? mode + ', ' + Math.round(x.size / 1048576) + ' MB' + need : 'file not found - put it back or remove it', x.ok ? '' : 'missing');
       const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Remove';
@@ -119,6 +124,10 @@
   $('pxeAnSave').addEventListener('click', async () => {
     const r = await api.answers({ username: $('pxeAnUser').value, password: $('pxeAnPass').value, hostname: $('pxeAnHost').value, timezone: $('pxeAnTz').value || 'UTC', keyboard: $('pxeAnKb').value || 'us' });
     if (r && r.ok) { $('pxeAnPass').value = ''; say('Install answers saved. Now pick "UNATTENDED install" in the drop-down of the computer that should use them.'); await refresh(); } else say((r && r.error) || 'The answers could not be saved.');
+  });
+  $('pxeWinSave').addEventListener('click', async () => {
+    const r = await api.winShare({ unc: $('pxeWinUnc').value, user: $('pxeWinUser').value, bypass: $('pxeWinBypass').checked });
+    if (r && r.ok) { say('Windows settings saved.'); await refresh(); } else say((r && r.error) || 'The Windows settings could not be saved.');
   });
   $('pxeUefi').addEventListener('change', async () => { await api.uefi($('pxeUefi').value); say($('pxeUefi').value === 'ipxe' ? 'UEFI computers will now get the alternative loader. Restart the network boot on that computer.' : 'UEFI computers will now get the standard loader.'); });
   $('pxeAny').addEventListener('change', async () => { await save(); say($('pxeAny').checked ? 'Any computer on your network that asks to network boot will be answered.' : ''); });

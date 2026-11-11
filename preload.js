@@ -71,12 +71,17 @@ contextBridge.exposeInMainWorld('sshApi', {
   connect: (server) => ipcRenderer.invoke('ssh:connect', server)
 });
 
+contextBridge.exposeInMainWorld('remoteViewApi', {
+  open: () => ipcRenderer.invoke('remote:open', '')
+});
+
 contextBridge.exposeInMainWorld('pxeApi', {
   status: () => ipcRenderer.invoke('pxe:status'),
   start: (ip) => ipcRenderer.invoke('pxe:start', { ip: String(ip || '') }),
   stop: () => ipcRenderer.invoke('pxe:stop'),
   allow: (macs, any) => ipcRenderer.invoke('pxe:allow', { macs: Array.isArray(macs) ? macs.slice(0, 50).map(String) : [], any: any === true }),
   answers: (o) => ipcRenderer.invoke('pxe:answers', { username: String((o && o.username) || ''), password: String((o && o.password) || ''), hostname: String((o && o.hostname) || ''), timezone: String((o && o.timezone) || ''), keyboard: String((o && o.keyboard) || '') }),
+  winShare: (o) => ipcRenderer.invoke('pxe:winshare', { unc: String((o && o.unc) || ''), user: String((o && o.user) || ''), bypass: !!(o && o.bypass) }),
   uefi: (v) => ipcRenderer.invoke('pxe:uefi', String(v || '')),
   choice: (mac, what) => ipcRenderer.invoke('pxe:choice', String(mac || ''), String(what || '')),
   check: (ip) => ipcRenderer.invoke('pxe:check', String(ip || '')),

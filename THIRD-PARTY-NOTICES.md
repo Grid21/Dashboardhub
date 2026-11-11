@@ -21,3 +21,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## iPXE (network boot loaders)
 `vendor/ipxe-files.json` contains the iPXE boot loaders (`undionly.kpxe`, `ipxe.efi` and `snponly.efi`) used by the Network boot feature. iPXE (https://ipxe.org) is licensed under GPL-2.0 with the UBDL exception and is included unchanged. Source: https://github.com/ipxe/ipxe
+
+
+## wimboot
+`vendor/ipxe-files.json` contains `wimboot`, built unchanged from https://github.com/ipxe/wimboot (commit cd3e021), licensed GPL-2.0-or-later. It is served to computers that boot a Windows setup disc through Network boot. Source: the repository above.

@@ -32,6 +32,7 @@
           <option value="full">Full screen</option>
         </select>
       </label>
+      <button id="remoteBtn" title="See and control other computers in a separate window: PiKVM, JetKVM, other web KVMs and NoMachine">Remote view</button>
       <button id="serversBtn" title="Log in to your Linux servers over SSH">&gt;_ Servers</button>
       <div class="profile-control settings-control">
         <button id="settingsBtn" type="button" aria-haspopup="true" title="Network profiles, backup and background running">&#9881; Settings &#9662;</button>
@@ -224,7 +225,7 @@
     <div id="bmcList"></div>
     <h4 id="bmcFormTitle">Add a server</h4>
     <div class="bmc-form">
-      <label>Name <input type="text" id="bmcName" maxlength="60" placeholder="Dad's server"></label>
+      <label>Name <input type="text" id="bmcName" maxlength="60" placeholder="Rack server"></label>
       <label>BMC address <input type="text" id="bmcHost" maxlength="40" placeholder="192.168.1.50"></label>
       <label>Port <input type="text" id="bmcPort" maxlength="5" value="443"></label>
       <label class="check"><input type="checkbox" id="bmcHttps" checked> Secure connection (https)</label>
@@ -385,6 +386,18 @@
       </div>
       <div class="dialog-buttons left"><button type="button" id="pxeAnSave">Save answers</button></div>
     </details>
+    <details class="pxe-tips" id="pxeWin">
+      <summary>Windows installs (advanced): Windows setup from a shared folder</summary>
+      <p class="hint">Windows Setup cannot read install files straight from the network, so it connects to a <b>shared folder</b> on a Windows PC (normally this one), like a Windows deployment server does. Nothing is downloaded into the booting computer's memory, so a 4 GB computer is fine.
+        <b>Set up once:</b> (1) double-click the Windows ISO to open it and copy <b>everything</b> in it into a new folder, for example <code>C:\WinSetup</code>; (2) right-click the folder &rarr; Properties &rarr; Sharing &rarr; Advanced Sharing &rarr; tick "Share this folder" &rarr; Permissions: give a Windows account that has a <b>password</b> "Read"; (3) enter the share address and that account below. The password is typed on the booting computer, so it is never stored here.
+        To install without questions, also put an <code>autounattend.xml</code> file in the folder's top level: it is used automatically. Windows 11 will refuse old computers unless you tick the box.</p>
+      <div class="pxe-answers">
+        <label>Share address <input id="pxeWinUnc" type="text" maxlength="160" placeholder="\\192.168.1.10\WinSetup" spellcheck="false" autocomplete="off"></label>
+        <label>Windows account on that PC <input id="pxeWinUser" type="text" maxlength="70" placeholder="MYPC\hubsetup" spellcheck="false" autocomplete="off"></label>
+      </div>
+      <label class="check-inline"><input type="checkbox" id="pxeWinBypass"> Skip the Windows 11 hardware checks (TPM, Secure Boot, memory, processor): needed for old computers</label>
+      <div class="dialog-buttons left"><button type="button" id="pxeWinSave">Save Windows settings</button></div>
+    </details>
     <h4>2. Network connection to use</h4>
     <select id="pxeIp" title="The connection of this computer that the booting computer is plugged into"></select>
     <p class="hint">Use a cable: network boot does not work over Wi-Fi. The booting computer must be on the same network as this one.</p>
@@ -533,6 +546,7 @@
   <script src="updates.js"></script>
   <script src="about-ui.js"></script>
   <script src="pxe-ui.js"></script>
+  <script src="remote-open.js"></script>
   <script src="security-ui.js"></script>
   <script src="tools-ui.js"></script>
   <script src="updater-ui.js"></script>

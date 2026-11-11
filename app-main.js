@@ -23,6 +23,10 @@ try {
 } catch (e) { /* no settings yet: the graphics card stays on */ }
 if (!gpuWanted) { try { app.disableHardwareAcceleration(); } catch (e) { /* too late; ignored */ } }
 
+const remoteLib = require('./remote');
+const remoteHosts = new Set();         // addresses of the devices in Remote view (self-signed certificates are accepted for these)
+let remoteDevices = null;
+let remoteWin = null;
 const panelHosts = new Set();          // hosts of the panels you added (sent by the window)
 function hostOf(u) { try { return new URL(u).hostname.replace(/^\[|\]$/g, '').toLowerCase(); } catch (e) { return ''; } }
 function isLanHost(h) {
@@ -32,7 +36,7 @@ function isLanHost(h) {
   if (!h.includes('.') && !h.includes(':')) return true;                                   // a bare name like "nas"
   return /\.(local|lan|home|internal|localdomain|home\.arpa)$/.test(h);
 }
-function trustedHost(u) { const h = hostOf(u); return isLanHost(h) || panelHosts.has(h); }
+function trustedHost(u) { const h = hostOf(u); return isLanHost(h) || panelHosts.has(h) || remoteHosts.has(h); }
 app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
   event.preventDefault();
   callback(security.get().certs === 'strict' ? false : trustedHost(url));
@@ -44,6 +48,75 @@ ipcMain.handle('panels:hosts', (event, urls) => {
   urls.slice(0, 500).forEach((u) => { if (typeof u === 'string' && /^https?:\/\//i.test(u)) { const h = hostOf(u); if (h) panelHosts.add(h); } });
   return { ok: true };
 });
+
+// ---------- Remote view (PiKVM, JetKVM, other web KVMs, NoMachine) ----------
+function remoteFile() { return path.join(app.getPath('userData'), 'remote-devices.json'); }
+function remoteList() {
+  if (!remoteDevices) { remoteDevices = remoteLib.load(remoteFile()); }
+  remoteHosts.clear(); remoteDevices.forEach((d) => { if (d.type !== 'nomachine') remoteHosts.add(d.host); });
+  return remoteDevices;
+}
+function remoteSender(event) { if (!remoteWin || remoteWin.isDestroyed() || event.sender !== remoteWin.webContents) throw new Error('Not allowed'); }
+function openRemoteWindow(openId) {
+  remoteList();
+  if (remoteWin && !remoteWin.isDestroyed()) { if (remoteWin.isMinimized()) remoteWin.restore(); remoteWin.show(); remoteWin.focus(); return; }
+  remoteWin = new BrowserWindow({
+    width: 1280, height: 860, minWidth: 720, minHeight: 480, backgroundColor: '#14171c', title: 'Dashboard Hub - Remote view', autoHideMenuBar: true,
+    webPreferences: { webviewTag: true, nodeIntegration: false, contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'remote-preload.js') }
+  });
+  const wc = remoteWin.webContents;
+  wc.setWindowOpenHandler(() => ({ action: 'deny' }));
+  wc.on('will-navigate', (e, url) => { if (!/^file:/i.test(url)) e.preventDefault(); });
+  wc.on('will-attach-webview', (e, webPreferences, params) => {
+    delete webPreferences.preload; delete webPreferences.preloadURL;
+    webPreferences.nodeIntegration = false; webPreferences.nodeIntegrationInSubFrames = false; webPreferences.contextIsolation = true; webPreferences.webSecurity = true;
+    webPreferences.allowRunningInsecureContent = false; webPreferences.enableBlinkFeatures = ''; webPreferences.sandbox = true;
+    // only the exact devices you saved, in their own storage area
+    const ok = /^https?:\/\//i.test(String(params.src || '')) && params.partition === 'persist:remote' && remoteHosts.has(hostOf(params.src));
+    if (!ok) e.preventDefault();
+  });
+  wc.on('did-attach-webview', (e, guest) => { guest.setWindowOpenHandler(() => ({ action: 'deny' })); });
+  try {
+    const { session } = require('electron');
+    session.fromPartition('persist:remote').setPermissionRequestHandler((contents, permission, callback, details) => {
+      if (['fullscreen', 'pointerLock', 'clipboard-sanitized-write', 'keyboardLock'].includes(permission)) return callback(true);
+      callback(permission === 'clipboard-read' && security.get().allowClipboard && remoteHosts.has(hostOf((details && details.requestingUrl) || '')));
+    });
+  } catch (e) { /* defaults then apply */ }
+  remoteWin.loadFile(path.join(__dirname, 'remote.html'), openId && /^[a-z0-9]{3,12}$/.test(openId) ? { query: { open: openId } } : undefined);
+  remoteWin.on('closed', () => { remoteWin = null; });
+}
+ipcMain.handle('remote:open', (event, id) => { checkSender(event); openRemoteWindow(String(id || '')); return { ok: true }; });
+ipcMain.handle('remote:list', (event) => { remoteSender(event); return { ok: true, devices: remoteList() }; });
+ipcMain.handle('remote:save', (event, list) => {
+  remoteSender(event);
+  if (!Array.isArray(list)) return { ok: false, error: 'Bad list.' };
+  const old = remoteList();
+  for (const d of list.slice(0, 100)) {                                  // tell the user exactly which entry is wrong
+    const c = remoteLib.cleanDevice(d, d && old.find((x) => x.id === d.id));
+    if (c.error) return { ok: false, error: c.error };
+  }
+  remoteDevices = remoteLib.cleanList(list.map((d) => Object.assign({}, d, { id: d && old.find((x) => x.id === d.id) ? d.id : '' })));
+  try { remoteLib.save(remoteFile(), remoteDevices); } catch (e) { return { ok: false, error: 'The list could not be saved.' }; }
+  remoteList();
+  return { ok: true, devices: remoteDevices };
+});
+ipcMain.handle('remote:nx', async (event, id) => {
+  remoteSender(event);
+  const dev = remoteList().find((d) => d.id === id);
+  if (!dev) return { ok: false, error: 'Unknown device.' };
+  return remoteLib.launchNx(dev, { platform: process.platform, env: process.env, spawn, dir: path.join(app.getPath('userData'), 'remote') });
+});
+ipcMain.handle('remote:external', (event, id) => {
+  remoteSender(event);
+  const dev = remoteList().find((d) => d.id === id);
+  const url = dev ? remoteLib.webUrl(dev) : '';
+  if (!url) return { ok: false };
+  shell.openExternal(url); return { ok: true };
+});
+ipcMain.handle('remote:nxstatus', (event) => { remoteSender(event); const exe = remoteLib.findNxplayer(process.platform, process.env, fs.existsSync); return { ok: true, installed: !!exe }; });
+ipcMain.handle('remote:nxdownload', (event) => { remoteSender(event); shell.openExternal('https://www.nomachine.com/download'); return { ok: true }; });
+ipcMain.handle('remote:fullscreen', (event, on) => { remoteSender(event); try { remoteWin.setFullScreen(on === true); } catch (e) { /* ignore */ } return { ok: true }; });
 
 let mainWindow = null;
 
@@ -326,6 +399,7 @@ ipcMain.handle('pxe:addIso', async (event) => {
   } catch (e) { return { ok: false, error: 'That file could not be added.' }; }
 });
 ipcMain.handle('pxe:answers', (event, o) => { checkSender(event); o = o || {}; return pxeMod.setAnswers({ username: String(o.username || '').slice(0, 40), password: String(o.password || '').slice(0, 130), hostname: String(o.hostname || '').slice(0, 40), timezone: String(o.timezone || '').slice(0, 42), keyboard: String(o.keyboard || '').slice(0, 12) }); });
+ipcMain.handle('pxe:winshare', (event, o) => { checkSender(event); o = o || {}; return pxeMod.setWinShare({ unc: String(o.unc || '').slice(0, 160), user: String(o.user || '').slice(0, 70), bypass: o.bypass === true }); });
 ipcMain.handle('pxe:uefi', (event, v) => { checkSender(event); return pxeMod.setUefiLoader(String(v || '')); });
 ipcMain.handle('pxe:choice', (event, mac, what) => { checkSender(event); return pxeMod.setChoice(String(mac || '').slice(0, 40), String(what || '').slice(0, 40)); });
 ipcMain.handle('pxe:check', async (event, ip) => { checkSender(event); try { return await pxeMod.check(String(ip || '').slice(0, 40)); } catch (e) { return { ok: false, error: 'The check could not run.' }; } });

@@ -60,6 +60,19 @@
     if (!$('pxeAnUser').value) $('pxeAnUser').value = a.username; if (!$('pxeAnHost').value) $('pxeAnHost').value = a.hostname;
     if (!$('pxeAnTz').value) $('pxeAnTz').value = a.timezone; if (!$('pxeAnKb').value) $('pxeAnKb').value = a.keyboard;
   }
+  let lastSig = '';
+  function renderIsos(s) {
+    const box = $('pxeIsoList'); box.textContent = '';
+    if (!(s.isos || []).length) { const e = document.createElement('p'); e.className = 'hint'; e.textContent = 'No ISO added. You can still use netboot.xyz from the menu.'; box.appendChild(e); }
+    (s.isos || []).forEach((x) => {
+      const mode = x.mode === 'casper' ? 'Ubuntu-style live disc' : x.mode === 'debianlive' ? 'Debian-style live disc' : x.mode === 'anaconda' ? 'Rocky/Alma/Fedora-style installer' : x.mode === 'windows' ? 'Windows installer (needs the shared folder, see above)' : 'generic ISO';
+      const need = x.mode === 'casper' ? ' (the booting computer needs about ' + Math.ceil(x.size / 1073741824 + 3) + ' GB of memory: Ubuntu loads the whole disc into RAM)' : '';
+      const d = item(x.name, x.ok ? mode + ', ' + Math.round(x.size / 1048576) + ' MB' + need : 'file not found - put it back or remove it', x.ok ? '' : 'missing');
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Remove';
+      b.addEventListener('click', async () => { await api.removeIso(x.id); refresh(); });
+      d.appendChild(b); box.appendChild(d);
+    });
+  }
   function render(s) {
     st = s;
     const run = !!s.running;
@@ -75,17 +88,10 @@
       loaded = true;
     }
     if (run && s.ip) $('pxeIp').value = s.ip;
-    renderMacs();
-    const box = $('pxeIsoList'); box.textContent = '';
-    if (!(s.isos || []).length) { const e = document.createElement('p'); e.className = 'hint'; e.textContent = 'No ISO added. You can still use netboot.xyz from the menu.'; box.appendChild(e); }
-    (s.isos || []).forEach((x) => {
-      const mode = x.mode === 'casper' ? 'Ubuntu-style live disc' : x.mode === 'debianlive' ? 'Debian-style live disc' : x.mode === 'anaconda' ? 'Rocky/Alma/Fedora-style installer' : x.mode === 'windows' ? 'Windows installer (needs the shared folder, see above)' : 'generic ISO';
-      const need = x.mode === 'casper' ? ' (the booting computer needs about ' + Math.ceil(x.size / 1073741824 + 3) + ' GB of memory: Ubuntu loads the whole disc into RAM)' : '';
-      const d = item(x.name, x.ok ? mode + ', ' + Math.round(x.size / 1048576) + ' MB' + need : 'file not found - put it back or remove it', x.ok ? '' : 'missing');
-      const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Remove';
-      b.addEventListener('click', async () => { await api.removeIso(x.id); refresh(); });
-      d.appendChild(b); box.appendChild(d);
-    });
+    // Rebuild the lists only when something changed and nothing in them is being used: rebuilding while a drop-down is open made it close by itself
+    const sig = JSON.stringify([macs, s.allow && s.allow.choice, s.isos, !!s.answers, run]);
+    const ae = document.activeElement, busy = !!(ae && (ae.tagName === 'SELECT' || ae.tagName === 'INPUT') && ($('pxeMacList') || $('pxeIsoList')).parentElement.contains(ae) && ae.closest && (ae.closest('#pxeMacList') || ae.closest('#pxeIsoList')));
+    if (sig !== lastSig && !busy) { lastSig = sig; renderMacs(); renderIsos(s); }
     const log = $('pxeLog'); const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
     log.textContent = (s.log || []).map((l) => l.t + '  ' + l.msg).join('\n') || 'Nothing yet.';
     if (atEnd) log.scrollTop = log.scrollHeight;
@@ -108,7 +114,7 @@
   async function mark() { try { const s = await api.status(); open.textContent = s && s.running ? 'Network boot (PXE) - running...' : label; } catch (e) { /* ignore */ } }
   setInterval(() => { if (!dlg.open && !document.hidden) mark(); }, 5000);
 
-  open.addEventListener('click', async () => { say(''); loaded = false; fillPick(); await refresh(); if (!dlg.open) dlg.showModal(); clearInterval(timer); timer = setInterval(refresh, 1500); });
+  open.addEventListener('click', async () => { say(''); loaded = false; lastSig = ''; fillPick(); await refresh(); if (!dlg.open) dlg.showModal(); clearInterval(timer); timer = setInterval(refresh, 1500); });
   dlg.addEventListener('close', () => { clearInterval(timer); timer = null; mark(); });
   $('pxeClose').addEventListener('click', () => dlg.close());
   $('pxeMacAdd').addEventListener('click', async () => {

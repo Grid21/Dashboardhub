@@ -62,7 +62,7 @@ function optOf(m, code) { let p = 240; while (p < m.length) { const c = m[p++]; 
   const P = { dhcp: 16767, pxe: 14011, tftp: 16969, http: 18088 };
   let REPLY = 0;
   const holder = {};
-  const mod = pxe.create({ dataDir: tmp, ports: P, testing: { replyTo: '127.0.0.1', get replyPort() { return holder.port; } } });
+  const mod = pxe.create({ dataDir: tmp, ports: P, testing: { menuAfter: 99, replyTo: '127.0.0.1', get replyPort() { return holder.port; } } });
   const MAC = 'aa:bb:cc:11:22:33', OTHER = 'aa:bb:cc:99:99:99';
 
   let r = await mod.start({ ip: '127.0.0.1' });

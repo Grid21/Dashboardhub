@@ -213,23 +213,35 @@ function ipxeFeatures(d) {
 }
 function ipxeCanHttp(d) { return isIpxe(d) && ipxeFeatures(d).has(19); }
 function ipBuf(ip) { return Buffer.from(ip.split('.').map(Number)); }
-function buildReply(req, type, serverIp, bootfile) {
+// PXE vendor options (inside DHCP option 43) are small sub-options: code, length, data ... ended by 255
+function pxeSub(buf, code) {
+  if (!buf) return null;
+  for (let p = 0; p + 1 < buf.length;) { const c = buf[p]; if (c === 255) break; if (c === 0) { p++; continue; } const l = buf[p + 1]; if (c === code) return buf.subarray(p + 2, p + 2 + l); p += 2 + l; }
+  return null;
+}
+// extra.menu = boot type number: the classic PXE way. The first answer names no file but offers a one-item boot menu and this
+// server as the boot server; the computer then asks this server (port 4011) for the file. extra.item = that menu item, echoed back.
+function buildReply(req, type, serverIp, bootfile, extra) {
+  extra = extra || {};
   const b = Buffer.alloc(240);
   b[0] = 2; b[1] = 1; b[2] = 6; b[3] = 0;
   req.xid.copy(b, 4); req.flags.copy(b, 10);
   req.ciaddr.copy(b, 12);                          // yiaddr stays 0.0.0.0: the real DHCP server gives the address
   ipBuf(serverIp).copy(b, 20);                     // siaddr: where to fetch the boot file
   req.chaddr.copy(b, 28);
-  Buffer.from(bootfile, 'latin1').copy(b, 108, 0, 127);
+  if (!extra.menu) Buffer.from(bootfile, 'latin1').copy(b, 108, 0, 127);
   MAGIC.copy(b, 236);
   const o = [];
   const add = (code, data) => { o.push(Buffer.from([code, data.length]), data); };
   add(53, Buffer.from([type]));
   add(54, ipBuf(serverIp));
   add(60, Buffer.from('PXEClient'));
-  add(66, Buffer.from(serverIp));
-  add(67, Buffer.from(bootfile));
-  add(43, Buffer.from([6, 1, 8, 255]));            // PXE discovery control: use the boot file from this offer
+  if (!extra.menu) { add(66, Buffer.from(serverIp)); add(67, Buffer.from(bootfile)); }
+  if (extra.menu) {
+    const t = Buffer.from([extra.menu >> 8, extra.menu & 255]), desc = Buffer.from('Dashboard Hub network boot'), prompt = Buffer.from('Dashboard Hub');
+    add(43, Buffer.concat([Buffer.from([6, 1, 7]), Buffer.from([8, 7]), t, Buffer.from([1]), ipBuf(serverIp), Buffer.from([9, 3 + desc.length]), t, Buffer.from([desc.length]), desc, Buffer.from([10, 1 + prompt.length, 0]), prompt, Buffer.from([255])]));
+  } else if (extra.item) add(43, Buffer.concat([Buffer.from([71, extra.item.length]), extra.item, Buffer.from([255])]));
+  else add(43, Buffer.from([6, 1, 8, 255]));       // PXE discovery control: use the boot file from this offer
   if (req.opts[97]) add(97, req.opts[97]);
   o.push(Buffer.from([255]));
   return Buffer.concat([b].concat(o));
@@ -453,6 +465,7 @@ function create(opts) {
   }
 
   const asks = new Map();                           // mac -> times it asked in the last 40 s
+  const menuMacs = new Set();                       // UEFI computers whose firmware ignored the short answer: they get the classic boot-menu answer
   function dhcpHandler(sock, isProxyPort) {
     return (msg, ri) => {
       const d = parseDhcp(msg);
@@ -478,12 +491,20 @@ function create(opts) {
       else if (arch === 0) file = 'undionly.kpxe';
       else if (arch === 7 || arch === 9) file = (uefiLoader === 'snponly' && loaders['snponly.efi']) ? 'snponly.efi' : 'ipxe.efi';
       else { log('info', '', d.mac + ' asked for a boot type this version does not offer (code ' + arch + ').'); return; }
-      const reply = buildReply(d, isProxyPort || mt === 3 ? 5 : 2, ip, file);
-      const note = (k, text) => { const key = d.mac + k + d.xid.toString('hex'); if (!seenOnce.has(key)) { seenOnce.add(key); log('info', '', text); } };
+      const firmwareUefi = (arch === 7 || arch === 9) && !isIpxe(d);                  // the firmware's own PXE, not iPXE
       if (!isProxyPort && mt === 1) {
         const now = Date.now(); const h = (asks.get(d.mac) || []).filter((t) => now - t < 40000); h.push(now); asks.set(d.mac, h);
-        if (h.length === 4) log('info', '', d.mac + ' keeps asking but never starts the download, so its firmware may not accept the answer. What it sent: boot type ' + arch + ', ' + ((d.flags[0] & 0x80) ? 'asks for a broadcast reply' : 'no broadcast flag') + ', ' + (d.opts[97] ? 'has' : 'no') + ' machine ID. Answers went out from ' + ip + '. Send this line and a photo of its screen.');
+        if (h.length === (testing.menuAfter || 3) && firmwareUefi) {
+          h.length = 0; asks.set(d.mac, h);
+          const nowMenu = !menuMacs.has(d.mac); if (nowMenu) menuMacs.add(d.mac); else menuMacs.delete(d.mac);
+          log('info', '', d.mac + ' asked three times without starting the download, so its firmware did not accept the answer. Now trying the ' + (nowMenu ? 'classic boot-menu style' : 'short style') + ' of answer. What it sent: boot type ' + arch + ', ' + ((d.flags[0] & 0x80) ? 'asks for a broadcast reply' : 'no broadcast flag') + ', ' + (d.opts[97] ? 'has' : 'no') + ' machine ID. Answers went out from ' + ip + '. If it keeps failing, send this line and a photo of its screen.');
+        }
       }
+      const useMenu = firmwareUefi && menuMacs.has(d.mac);
+      const item = pxeSub(d.opts[43], 71);                                            // the boot menu item the computer picked
+      if (!isProxyPort && mt === 3 && useMenu && !item) return;                       // that is only its address request to the real DHCP server
+      const reply = (!isProxyPort && mt === 1 && useMenu) ? buildReply(d, 2, ip, file, { menu: arch }) : buildReply(d, isProxyPort || mt === 3 ? 5 : 2, ip, file, useMenu ? { item: item || Buffer.from([arch >> 8, arch & 255, 0, 0]) } : null);
+      const note = (k, text) => { const key = d.mac + k + d.xid.toString('hex'); if (!seenOnce.has(key)) { seenOnce.add(key); log('info', '', text); } };
       if (!isProxyPort && mt === 3) {
         note('req67', d.mac + ' sent its follow-up request to the normal DHCP port: answered it too.');
         const to = testing.replyTo || '255.255.255.255';
@@ -638,4 +659,4 @@ function create(opts) {
   return { start, stop, addIso, removeIso, renameIso, setAllow, setChoice, setUefiLoader, setAnswers, setWinShare, check, status, menuScript, _isos: () => isos };
 }
 
-module.exports = { sha512crypt, create, analyzeIso, openIso, parseDhcp, buildReply, normMac, ipxeFeatures, PORTS };
+module.exports = { sha512crypt, pxeSub, create, analyzeIso, openIso, parseDhcp, buildReply, normMac, ipxeFeatures, PORTS };

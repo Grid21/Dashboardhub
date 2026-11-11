@@ -43,6 +43,13 @@ iso.write(t + '/live.iso'); iso.close()`, tmp]);
   const opts = await page.evaluate(() => [...document.querySelectorAll('#pxeMacList select option')].map((o) => o.textContent));
   check('each listed computer has a "what to start by itself" choice, with the ISO in it', opts.length === 4 && /LIVEDISC/.test(opts.join()) && /netboot\.xyz/.test(opts.join()), JSON.stringify(opts));
   await page.selectOption('#pxeMacList select', 'netbootxyz'); await sleep(400);
+  await sleep(2000);                                                      // the change itself is allowed to redraw once
+  await page.evaluate(() => { window.__sel = document.querySelector('#pxeMacList select'); window.__iso = document.querySelector('#pxeIsoList button'); });
+  await sleep(3600);                                                      // two or more status refreshes
+  check('the lists are not rebuilt by the refresh while nothing changed (so an open drop-down is not closed)', await page.evaluate(() => document.querySelector('#pxeMacList select') === window.__sel && document.querySelector('#pxeIsoList button') === window.__iso));
+  await page.focus('#pxeMacList select'); await sleep(3200);
+  check('...and a focused drop-down keeps its element and its choice', await page.evaluate(() => document.querySelector('#pxeMacList select') === window.__sel && window.__sel.value === 'netbootxyz'));
+  await page.evaluate(() => document.activeElement && document.activeElement.blur());
   check('the choice is saved', (await page.evaluate(() => window.pxeApi.status())).allow.choice['aa:bb:cc:11:22:33'] === 'netbootxyz');
   await page.click('#pxeCheck'); await sleep(1500);
   const chk = await page.locator('#pxeChecks .pxe-item').allTextContents();

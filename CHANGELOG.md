@@ -2,6 +2,11 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.13.4
+- Fixed: the "Start by itself" drop-down next to a computer's hardware address kept closing and losing its choice. The Network boot window redrew its lists on every status refresh (every 1.5 seconds), which closed any open drop-down. The lists are now redrawn only when something actually changed and never while you are using one of them. Two new checks cover this.
+- UEFI firmware that ignores the short answer (a Dell Latitude kept asking over and over, never sending its follow-up request): after three asks in a row without a download, that computer is now answered the classic PXE way instead: the first answer names no file but offers a one-item boot menu and this computer as the boot server, and the file name comes in the answer to the computer's follow-up request on port 4011 (or port 67). If that fails three times too, it switches back, so both styles get tried. Both are explained in the log. BIOS computers and iPXE are never affected. New test: test/pxe-uefi-test.js (13 checks).
+- Honest limit: this is the standard PXE method and is tested here against simulated firmware only; it has not yet been seen working on the Dell.
+
 ## 1.13.3
 - UEFI network boot on a Dell Latitude (and other firmware that behaves the same): the follow-up request that this firmware broadcasts to the normal DHCP port (67) is now answered too, the way proxy-DHCP servers such as dnsmasq do. Before, only the first "who is there?" was answered and the follow-up on port 4011, so a computer that sends its follow-up to port 67 asked again and again and never started the download.
 - The Network boot log now notes when a computer sent its follow-up to port 67 or 4011, and after four unanswered asks in 40 seconds it prints the details that matter (boot type, broadcast flag, machine ID, sending address) to make a screenshot useful.

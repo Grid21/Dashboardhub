@@ -1,7 +1,7 @@
 DASHBOARD HUB - DECOMPILER & RECOMPILER TOOLS
 =============================================
 
-These tools allow you and any human developer to decompile, inspect, edit,
+These tools allow you to decompile, inspect, edit,
 and recompile Dashboard Hub .hubupdate packages.
 
 WINDOWS (DRAG & DROP):

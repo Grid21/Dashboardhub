@@ -22,11 +22,14 @@
       const sel = document.createElement('select'); sel.title = 'What this computer starts by itself (after 5 seconds; any key opens the menu instead)';
       const opts = [['menu', 'Show the menu (own disk after 20 s)']];
       ((st && st.isos) || []).filter((x) => x.ok).forEach((x) => opts.push(['iso:' + x.id, 'Start by itself: ' + x.name]));
+      if (st && st.answers) ((st && st.isos) || []).filter((x) => x.ok && (x.mode === 'casper' || x.mode === 'anaconda')).forEach((x) => opts.push(['iso:' + x.id + ':auto', 'UNATTENDED install, ERASES THE DISK, once: ' + x.name]));
       opts.push(['netbootxyz', 'Start by itself: netboot.xyz'], ['local', 'Start by itself: its own disk']);
       opts.forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); });
       sel.value = (st && st.allow && st.allow.choice && st.allow.choice[m]) || 'menu';
       if (sel.value !== ((st && st.allow && st.allow.choice && st.allow.choice[m]) || 'menu')) sel.value = 'menu';
-      sel.addEventListener('change', async () => { const r = await api.choice(m, sel.value); if (r && !r.ok) say(r.error || 'That choice could not be saved.'); });
+      sel.addEventListener('change', async () => {
+        if (/:auto$/.test(sel.value) && !window.confirm('This will ERASE EVERYTHING on the first disk of ' + m + ' the next time it starts from the network, and install a new system by itself.\n\nIt only happens once. Continue?')) { sel.value = (st && st.allow && st.allow.choice && st.allow.choice[m]) || 'menu'; return; }
+        const r = await api.choice(m, sel.value); if (r && !r.ok) say(r.error || 'That choice could not be saved.'); });
       d.appendChild(sel);
       const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Remove'; b.disabled = !!(st && st.running);
       b.addEventListener('click', async () => { macs = macs.filter((x) => x !== m); await save(); renderMacs(); });
@@ -46,6 +49,12 @@
     } catch (e) { /* the map is optional */ }
     sel.value = keep;
   }
+  function fillAnswers(s) {
+    const box = $('pxeAuto'); if (!box || box.contains(document.activeElement)) return;
+    const a = s.answers; if (!a) return;
+    if (!$('pxeAnUser').value) $('pxeAnUser').value = a.username; if (!$('pxeAnHost').value) $('pxeAnHost').value = a.hostname;
+    if (!$('pxeAnTz').value) $('pxeAnTz').value = a.timezone; if (!$('pxeAnKb').value) $('pxeAnKb').value = a.keyboard;
+  }
   function render(s) {
     st = s;
     const run = !!s.running;
@@ -54,7 +63,7 @@
     $('pxeState').classList.toggle('ok', run);
     ['pxeMacInput', 'pxeMacAdd', 'pxeMacPick', 'pxeAny', 'pxeIp'].forEach((id) => { $(id).disabled = run; });
     if (!loaded) {
-      macs = (s.allow && s.allow.macs || []).slice(); $('pxeAny').checked = !!(s.allow && s.allow.any);
+      macs = (s.allow && s.allow.macs || []).slice(); fillAnswers(s); if (s.uefiLoader && document.activeElement !== $('pxeUefi')) $('pxeUefi').value = s.uefiLoader; $('pxeAny').checked = !!(s.allow && s.allow.any);
       const sel = $('pxeIp'); sel.textContent = '';
       (s.addresses || []).forEach((a) => { const o = document.createElement('option'); o.value = a.address; o.textContent = a.name + ' - ' + a.address; sel.appendChild(o); });
       if (!(s.addresses || []).length) { const o = document.createElement('option'); o.value = ''; o.textContent = 'No network connection found'; sel.appendChild(o); }
@@ -107,6 +116,11 @@
   });
   $('pxeMacInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('pxeMacAdd').click(); } });
   $('pxeMacPick').addEventListener('change', () => { const v = $('pxeMacPick').value; if (v) { $('pxeMacInput').value = v; $('pxeMacAdd').click(); $('pxeMacPick').value = ''; } });
+  $('pxeAnSave').addEventListener('click', async () => {
+    const r = await api.answers({ username: $('pxeAnUser').value, password: $('pxeAnPass').value, hostname: $('pxeAnHost').value, timezone: $('pxeAnTz').value || 'UTC', keyboard: $('pxeAnKb').value || 'us' });
+    if (r && r.ok) { $('pxeAnPass').value = ''; say('Install answers saved. Now pick "UNATTENDED install" in the drop-down of the computer that should use them.'); await refresh(); } else say((r && r.error) || 'The answers could not be saved.');
+  });
+  $('pxeUefi').addEventListener('change', async () => { await api.uefi($('pxeUefi').value); say($('pxeUefi').value === 'ipxe' ? 'UEFI computers will now get the alternative loader. Restart the network boot on that computer.' : 'UEFI computers will now get the standard loader.'); });
   $('pxeAny').addEventListener('change', async () => { await save(); say($('pxeAny').checked ? 'Any computer on your network that asks to network boot will be answered.' : ''); });
   $('pxeIsoAdd').addEventListener('click', async () => {
     say(''); const r = await api.addIso();

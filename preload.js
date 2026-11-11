@@ -76,6 +76,8 @@ contextBridge.exposeInMainWorld('pxeApi', {
   start: (ip) => ipcRenderer.invoke('pxe:start', { ip: String(ip || '') }),
   stop: () => ipcRenderer.invoke('pxe:stop'),
   allow: (macs, any) => ipcRenderer.invoke('pxe:allow', { macs: Array.isArray(macs) ? macs.slice(0, 50).map(String) : [], any: any === true }),
+  answers: (o) => ipcRenderer.invoke('pxe:answers', { username: String((o && o.username) || ''), password: String((o && o.password) || ''), hostname: String((o && o.hostname) || ''), timezone: String((o && o.timezone) || ''), keyboard: String((o && o.keyboard) || '') }),
+  uefi: (v) => ipcRenderer.invoke('pxe:uefi', String(v || '')),
   choice: (mac, what) => ipcRenderer.invoke('pxe:choice', String(mac || ''), String(what || '')),
   check: (ip) => ipcRenderer.invoke('pxe:check', String(ip || '')),
   addIso: () => ipcRenderer.invoke('pxe:addIso'),

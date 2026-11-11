@@ -371,7 +371,20 @@
       <select id="pxeMacPick" title="Pick a machine your map already knows"><option value="">or pick from your map...</option></select>
     </div>
     <div id="pxeMacList" class="pxe-list"></div>
+    <label class="check-inline">UEFI computers get: <select id="pxeUefi"><option value="snponly">Standard loader (uses the computer's own network card)</option><option value="ipxe">Alternative loader (iPXE's own network drivers) - try this if UEFI stalls</option></select></label>
     <label class="check-inline"><input type="checkbox" id="pxeAny"> Answer <b>any</b> computer that asks (not recommended: it can interfere with other computers' network boot)</label>
+    <details class="pxe-tips" id="pxeAuto">
+      <summary>Unattended installs (advanced): answers for Ubuntu Server and Rocky/Alma/Fedora discs</summary>
+      <p class="hint"><b>This erases the whole first disk of the computer you choose it for.</b> Fill these in once, then pick <i>UNATTENDED install</i> in that computer's drop-down above. It runs <b>once</b>: after the installer fetches its answers, that computer goes back to starting from its own disk, so it will not reinstall itself in a loop. Your password is stored only as a scrambled hash.</p>
+      <div class="pxe-answers">
+        <label>User name <input id="pxeAnUser" type="text" maxlength="32" placeholder="admin" spellcheck="false" autocomplete="off"></label>
+        <label>Password <input id="pxeAnPass" type="password" maxlength="128" autocomplete="new-password" placeholder="(saved: leave empty to keep it)"></label>
+        <label>Computer name <input id="pxeAnHost" type="text" maxlength="32" placeholder="server1" spellcheck="false" autocomplete="off"></label>
+        <label>Time zone <input id="pxeAnTz" type="text" maxlength="40" placeholder="America/New_York" spellcheck="false" autocomplete="off"></label>
+        <label>Keyboard <input id="pxeAnKb" type="text" maxlength="10" placeholder="us" spellcheck="false" autocomplete="off"></label>
+      </div>
+      <div class="dialog-buttons left"><button type="button" id="pxeAnSave">Save answers</button></div>
+    </details>
     <h4>2. Network connection to use</h4>
     <select id="pxeIp" title="The connection of this computer that the booting computer is plugged into"></select>
     <p class="hint">Use a cable: network boot does not work over Wi-Fi. The booting computer must be on the same network as this one.</p>

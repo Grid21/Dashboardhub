@@ -86,6 +86,65 @@ function analyzeIso(file) {
   } finally { iso.close(); }
 }
 
+// ---------- unattended install answers ----------
+// SHA-512 password hash ("$6$...", what Linux installers want), so the password itself is never stored or sent
+const CRYPT64 = './0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+function sha512crypt(password, salt, rounds) {
+  const crypto = require('crypto');
+  rounds = rounds || 5000;
+  const pw = Buffer.from(String(password), 'utf8'), sl = Buffer.from(String(salt).slice(0, 16), 'latin1');
+  const h = (parts) => crypto.createHash('sha512').update(Buffer.concat(parts)).digest();
+  const B = h([pw, sl, pw]);
+  const A = [pw, sl];
+  let n = pw.length; while (n > 64) { A.push(B); n -= 64; } A.push(B.subarray(0, n));
+  for (let i = pw.length; i > 0; i >>= 1) A.push(i & 1 ? B : pw);
+  const Ad = h(A);
+  const dp = []; for (let i = 0; i < pw.length; i++) dp.push(pw);
+  const DP = h(dp);
+  const rep = (d, len) => { const o = Buffer.alloc(len); for (let i = 0; i < len; i++) o[i] = d[i % 64]; return o; };
+  const P = rep(DP, pw.length);
+  const ds = []; for (let i = 0; i < 16 + Ad[0]; i++) ds.push(sl);
+  const S = rep(h(ds), sl.length);
+  let C = Ad;
+  for (let i = 0; i < rounds; i++) {
+    const parts = [i & 1 ? P : C];
+    if (i % 3) parts.push(S);
+    if (i % 7) parts.push(P);
+    parts.push(i & 1 ? C : P);
+    C = h(parts);
+  }
+  const order = [[0, 21, 42], [22, 43, 1], [44, 2, 23], [3, 24, 45], [25, 46, 4], [47, 5, 26], [6, 27, 48], [28, 49, 7], [50, 8, 29], [9, 30, 51], [31, 52, 10], [53, 11, 32], [12, 33, 54], [34, 55, 13], [56, 14, 35], [15, 36, 57], [37, 58, 16], [59, 17, 38], [18, 39, 60], [40, 61, 19], [62, 20, 41]];
+  let out = '';
+  const put = (w, k) => { for (let i = 0; i < k; i++) { out += CRYPT64[w & 63]; w >>= 6; } };
+  order.forEach(([a, b, c]) => put((C[a] << 16) | (C[b] << 8) | C[c], 4));
+  put(C[63], 2);
+  return '$6$' + sl.toString('latin1') + '$' + out;
+}
+function cleanAnswers(o, old) {
+  const crypto = require('crypto');
+  const t = (v) => String(v == null ? '' : v).trim();
+  const user = t(o.username), host = t(o.hostname), tz = t(o.timezone), kb = t(o.keyboard).toLowerCase(), pw = String(o.password == null ? '' : o.password);
+  if (!/^[a-z_][a-z0-9_-]{0,31}$/.test(user)) return { error: 'The user name must be lower case letters, numbers, - or _, starting with a letter (for example: admin).' };
+  if (!/^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/i.test(host)) return { error: 'The computer name can only have letters, numbers and - (for example: server1).' };
+  if (!/^[A-Za-z0-9_+\/-]{1,40}$/.test(tz) || /\.\./.test(tz)) return { error: 'The time zone looks like America/New_York or UTC.' };
+  if (!/^[a-z]{2,10}$/.test(kb)) return { error: 'The keyboard layout is a short code such as us, gb or de.' };
+  if (pw.length > 128) return { error: 'The password is too long (128 letters at most).' };
+  let hash = old && old.hash || '';
+  if (pw) { let salt = ''; const r = crypto.randomBytes(16); for (let i = 0; i < 16; i++) salt += CRYPT64[r[i] & 63]; hash = sha512crypt(pw, salt); }
+  if (!hash) return { error: 'Type a password for the new user.' };
+  return { answers: { username: user, hostname: host, timezone: tz, keyboard: kb, hash } };
+}
+function userDataText(a, id) {
+  return ['#cloud-config', 'autoinstall:', '  version: 1', '  locale: en_US.UTF-8', '  keyboard: {layout: ' + a.keyboard + '}', '  timezone: ' + a.timezone,
+    '  identity: {hostname: ' + a.hostname + ', username: ' + a.username + ', password: "' + a.hash + '"}', '  ssh: {install-server: true, allow-pw: true}',
+    '  storage: {layout: {name: direct}}', '  updates: security', '  shutdown: reboot', ''].join('\n');
+}
+function kickstartText(a, base, repo) {
+  return ['text', 'reboot', repo ? 'url --url=' + base : '# no packages on this disc: the installer picks an online mirror', 'lang en_US.UTF-8', "keyboard --xlayouts='" + a.keyboard + "'", 'timezone ' + a.timezone + ' --utc',
+    'network --bootproto=dhcp --hostname=' + a.hostname + ' --activate', 'rootpw --lock', 'user --name=' + a.username + ' --groups=wheel --iscrypted --password=' + a.hash,
+    'zerombr', 'clearpart --all --initlabel', 'autopart', 'firstboot --disable', '%packages', '@^minimal-environment', '%end', ''].join('\n');
+}
+
 // ---------- DHCP packets ----------
 const MAGIC = Buffer.from([0x63, 0x82, 0x53, 0x63]);
 function parseDhcp(msg) {
@@ -208,11 +267,14 @@ function create(opts) {
   const testing = opts.testing || {};              // tests send replies to 127.0.0.1 instead of the network broadcast
   const store = path.join(dataDir, 'pxe.json');
   let isos = [];
+  let answers = null;                               // unattended install answers (the password is kept only as a hash)
+  const delivered = new Map();                      // 'mac id' -> time the install answers were fetched (they stay available for 30 minutes)
+  let uefiLoader = 'snponly';                       // which UEFI boot loader to hand out: 'snponly' (uses the firmware's network card) or 'ipxe' (iPXE's own card drivers)
   let allow = { macs: [], any: false };
   let choice = {};   // per computer: what to start by itself ('menu', 'local', 'netbootxyz' or 'iso:<id>')   // which machines may be answered (nothing is answered until you list one)
-  try { const j = JSON.parse(fs.readFileSync(store, 'utf8')); if (j.allow && Array.isArray(j.allow.macs)) allow = { macs: j.allow.macs.map(normMac).filter(Boolean).slice(0, 50), any: j.allow.any === true }; if (j.choice && typeof j.choice === 'object') Object.keys(j.choice).slice(0, 50).forEach((k) => { const m = normMac(k); if (m && /^(menu|local|netbootxyz|iso:[a-z0-9]{3,12})$/.test(String(j.choice[k]))) choice[m] = String(j.choice[k]); }); if (Array.isArray(j.isos)) isos = j.isos.filter((x) => x && typeof x.path === 'string' && /^[a-z0-9]{3,12}$/.test(x.id)).slice(0, 40); } catch (e) { /* none yet */ }
+  try { const j = JSON.parse(fs.readFileSync(store, 'utf8')); if (j.allow && Array.isArray(j.allow.macs)) allow = { macs: j.allow.macs.map(normMac).filter(Boolean).slice(0, 50), any: j.allow.any === true }; if (j.choice && typeof j.choice === 'object') Object.keys(j.choice).slice(0, 50).forEach((k) => { const m = normMac(k); if (m && /^(menu|local|netbootxyz|iso:[a-z0-9]{3,12}(:auto)?)$/.test(String(j.choice[k]))) choice[m] = String(j.choice[k]); }); if (j.answers && typeof j.answers === 'object') { const c = cleanAnswers(Object.assign({}, j.answers, { password: '' }), j.answers); if (c.answers) answers = c.answers; } if (j.uefiLoader === 'ipxe' || j.uefiLoader === 'snponly') uefiLoader = j.uefiLoader; if (Array.isArray(j.isos)) isos = j.isos.filter((x) => x && typeof x.path === 'string' && /^[a-z0-9]{3,12}$/.test(x.id)).slice(0, 40); } catch (e) { /* none yet */ }
   isos.forEach((x) => { if (x.mode === 'sanboot') { try { const i = analyzeIso(x.path); if (i.mode !== 'sanboot') { x.mode = i.mode; x.kernel = i.kernel; x.initrd = i.initrd; x.squash = i.squash; x.repo = i.repo === true; } } catch (e) { /* file missing */ } } });
-  const save = () => { try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(store, JSON.stringify({ isos, allow, choice }), { mode: 0o600 }); } catch (e) { /* not saved */ } };
+  const save = () => { try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(store, JSON.stringify({ isos, allow, choice, uefiLoader, answers }), { mode: 0o600 }); } catch (e) { /* not saved */ } };
 
   let running = false, ip = '', loaders = null, servers = {}, httpSrv = null;
   const logLines = [];
@@ -247,6 +309,7 @@ function create(opts) {
   const safeText = (s) => String(s || '').replace(/[\u0000-\u001f\u007f$#{}]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
   const enc = (p) => String(p).split('/').map(encodeURIComponent).join('/');
 
+  const autoable = (x) => !!x && (x.mode === 'casper' || x.mode === 'anaconda');
   function menuScript() {
     const base = 'http://' + ip + ':' + ports.http;
     const ok = isos.filter((x) => x.ok !== false);
@@ -254,7 +317,7 @@ function create(opts) {
     // a computer you gave its own choice starts that by itself after 5 seconds (any key opens the menu instead)
     Object.keys(choice).forEach((m, i) => {
       const c = choice[m];
-      const label = c === 'local' ? 'local' : c === 'netbootxyz' ? 'netbootxyz' : (/^iso:/.test(c) && ok.some((x) => 'iso:' + x.id === c) ? 'iso' + c.slice(4) : '');
+      const label = c === 'local' ? 'local' : c === 'netbootxyz' ? 'netbootxyz' : (/^iso:/.test(c) && ok.some((x) => 'iso:' + x.id === c.replace(/:auto$/, '')) && (!/:auto$/.test(c) || (answers && autoable(ok.find((x) => 'iso:' + x.id === c.replace(/:auto$/, ''))))) ? 'iso' + c.slice(4).replace(/:auto$/, 'auto') : '');
       if (!label || !allow.macs.includes(m)) return;
       L.push('iseq ${net0/mac} ' + m + ' || goto skip' + i, 'set dflt ' + label, 'set tmo 5000', ':skip' + i);
     });
@@ -270,12 +333,18 @@ function create(opts) {
       else if (x.mode === 'anaconda') L.push('kernel ' + b + '/f' + enc(x.kernel) + ' inst.stage2=' + b + '/f' + (x.repo ? ' inst.repo=' + b + '/f' : '') + ' ip=dhcp || goto failed', 'initrd ' + b + '/f' + enc(x.initrd) + ' || goto failed', 'boot || goto failed');
       else L.push('sanboot ' + b + '/iso || goto failed');
     });
+    if (answers) ok.filter(autoable).forEach((x) => {   // hidden entries: only a computer you chose "unattended" for starts here, never someone picking from the menu
+      const b = '${base}/iso/' + x.id, au = '${base}/auto/' + x.id + '/${net0/mac:hexhyp}/';
+      L.push(':iso' + x.id + 'auto', 'echo Starting UNATTENDED install of ' + safeText(x.name) + ' ...');
+      if (x.mode === 'casper') L.push('kernel ' + b + '/f' + enc(x.kernel) + ' boot=casper ip=dhcp url=' + b + '/image.iso autoinstall ds=nocloud-net;s=' + au + ' ---  || goto failed', 'initrd ' + b + '/f' + enc(x.initrd) + ' || goto failed', 'boot || goto failed');
+      else L.push('kernel ' + b + '/f' + enc(x.kernel) + ' inst.stage2=' + b + '/f' + (x.repo ? ' inst.repo=' + b + '/f' : '') + ' inst.ks=' + au + 'ks.cfg ip=dhcp || goto failed', 'initrd ' + b + '/f' + enc(x.initrd) + ' || goto failed', 'boot || goto failed');
+    });
     L.push(':netbootxyz', 'echo Contacting netboot.xyz ...', 'chain --autofree https://boot.netboot.xyz/menu.ipxe || goto failed', 'goto menu');
     L.push(':shell', 'shell', 'goto menu', ':failed', 'set dflt local', 'set tmo 60000', 'echo That did not start. Press a key to go back to the menu.', 'prompt --timeout 15000 Press any key', 'goto menu', ':local', 'exit');
     return L.join('\n') + '\n';
   }
 
-  function serveFile(req, res, file, start, length, type) {
+  function serveFile(req, res, file, start, length, type, label, who) {
     const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
     let a = 0, b = length - 1, status = 200;
     if (range && (range[1] || range[2])) {
@@ -289,8 +358,17 @@ function create(opts) {
     res.writeHead(status, h);
     if (req.method === 'HEAD') { res.end(); return; }
     const s = fs.createReadStream(file, { start: start + a, end: start + b });
+    let sent = 0; const t0 = Date.now(); const want = b - a + 1;
+    s.on('data', (c) => { sent += c.length; });
     s.on('error', () => { try { res.destroy(); } catch (e) { /* gone */ } });
-    res.on('close', () => s.destroy());
+    res.on('close', () => {
+      s.destroy();
+      if (!label || want < 1048576) return;                   // only say something about big files (kernel, initrd, install image)
+      const mb = (n) => (n / 1048576).toFixed(1) + ' MB';
+      if (res.writableFinished) log('info', '', who + ' finished downloading ' + label + ' (' + mb(want) + ' in ' + Math.max(1, Math.round((Date.now() - t0) / 1000)) + ' s).');
+      else log('info', '', who + ' stopped downloading ' + label + ' part way (' + mb(sent) + ' of ' + mb(want) + ' sent). If this keeps happening the computer\'s network card or the network is dropping the connection.');
+    });
+    if (label && want >= 1048576) { const k = who + label; if (!seenOnce.has(k)) { seenOnce.add(k); log('info', '', who + ' started downloading ' + label + ' (' + (want / 1048576).toFixed(1) + ' MB).'); } }
     s.pipe(res);
   }
   function handleHttp(req, res) {
@@ -298,6 +376,27 @@ function create(opts) {
     let u; try { u = decodeURIComponent((req.url || '/').split('?')[0]); } catch (e) { res.writeHead(400); res.end(); return; }
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); res.end(); return; }
     if (u === '/boot.ipxe') { const s = Buffer.from(menuScript()); res.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Length': s.length }); if (req.method === 'GET') { res.end(s); log('menu', who); } else res.end(); return; }
+    const am = /^\/auto\/([a-z0-9]{3,12})\/([0-9a-f]{2}(?:-[0-9a-f]{2}){5})\/(user-data|meta-data|vendor-data|ks\.cfg)$/i.exec(u);
+    if (am) {
+      const mac = normMac(am[2]), xi = isos.find((i) => i.id === am[1] && i.ok !== false);
+      const key = mac + ' ' + am[1], when = delivered.get(key);
+      const live = choice[mac] === 'iso:' + am[1] + ':auto', grace = when && Date.now() - when < 30 * 60 * 1000;
+      if (!mac || !xi || !answers || !autoable(xi) || !(live || grace)) { res.writeHead(404); res.end(); return; }
+      const file = am[3];
+      let body = '';
+      if (file === 'user-data') body = xi.mode === 'casper' ? userDataText(answers, xi.id) : '';
+      else if (file === 'meta-data') body = 'instance-id: hub-' + xi.id + '-' + mac.replace(/:/g, '') + '\n';
+      else if (file === 'ks.cfg') body = xi.mode === 'anaconda' ? kickstartText(answers, 'http://' + ip + ':' + ports.http + '/iso/' + xi.id + '/f', xi.repo === true) : '';
+      if (file === 'vendor-data') body = '';
+      if (!body && file !== 'vendor-data') { res.writeHead(404); res.end(); return; }
+      const buf = Buffer.from(body); res.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Length': buf.length });
+      if (req.method === 'GET') res.end(buf); else res.end();
+      if (req.method === 'GET' && (file === 'user-data' || file === 'ks.cfg') && live) {
+        delivered.set(key, Date.now()); choice[mac] = 'local'; save();   // one shot: next time this computer starts from its own disk
+        log('info', '', mac + ' fetched its install answers. It will install by itself now, and from now on it starts from its own disk.');
+      }
+      return;
+    }
     const m = /^\/iso\/([a-z0-9]{3,12})\/(iso|image\.iso|f\/.+)$/.exec(u);
     const x = m && isos.find((i) => i.id === m[1] && i.ok !== false);
     if (!x) { res.writeHead(404); res.end(); return; }
@@ -305,11 +404,11 @@ function create(opts) {
     const isIso = m[2] === 'iso' || m[2] === 'image.iso';
     const key = who + x.id + m[2].slice(0, 12);
     if (isIso && !seenOnce.has(key)) { seenOnce.add(key); log('iso', who, x.name); }
-    if (isIso) { serveFile(req, res, x.path, 0, st.size, 'application/octet-stream'); return; }
+    if (isIso) { serveFile(req, res, x.path, 0, st.size, 'application/octet-stream', null, who); return; }
     let iso; try { iso = openIso(x.path); } catch (e) { res.writeHead(500); res.end(); return; }
     let e; try { e = iso.find(m[2].slice(2)); } finally { iso.close(); }
     if (!e || e.dir) { res.writeHead(404); res.end(); return; }
-    serveFile(req, res, x.path, e.extent * 2048, e.size, 'application/octet-stream');
+    serveFile(req, res, x.path, e.extent * 2048, e.size, 'application/octet-stream', m[2].slice(2), who);
   }
 
   function dhcpHandler(sock, isProxyPort) {
@@ -335,7 +434,7 @@ function create(opts) {
       }
       if (ipxeCanHttp(d)) file = 'http://' + ip + ':' + ports.http + '/boot.ipxe';
       else if (arch === 0) file = 'undionly.kpxe';
-      else if (arch === 7 || arch === 9) file = loaders['snponly.efi'] ? 'snponly.efi' : 'ipxe.efi';
+      else if (arch === 7 || arch === 9) file = (uefiLoader === 'snponly' && loaders['snponly.efi']) ? 'snponly.efi' : 'ipxe.efi';
       else { log('info', '', d.mac + ' asked for a boot type this version does not offer (code ' + arch + ').'); return; }
       const reply = buildReply(d, isProxyPort ? 5 : 2, ip, file);
       if (!isProxyPort) {
@@ -375,7 +474,7 @@ function create(opts) {
       await new Promise((resolve, reject) => { httpSrv.once('error', reject); httpSrv.listen(ports.http, '0.0.0.0', resolve); });
       step = ports.tftp; // iPXE looks for "autoexec.ipxe" next to the boot loader it was started from: a tiny script that points it straight at the menu
       const menuUrl = 'http://' + ip + ':' + ports.http + '/boot.ipxe';
-      const autoexec = Buffer.from(['#!ipxe', 'echo Dashboard Hub network boot: script started', 'echo Getting the menu from ' + menuUrl, 'chain ' + menuUrl + ' && exit', 'echo That did not work with the settings the computer already has. Asking for an address...', 'dhcp || echo (could not get an address)', 'ifstat', 'chain ' + menuUrl + ' || shell', ''].join('\n'));
+      const autoexec = Buffer.from(['#!ipxe', 'echo Dashboard Hub network boot: script started', 'ifstat', 'route', 'echo Getting the menu from ' + menuUrl, 'chain --timeout 15000 ' + menuUrl + ' && exit', 'echo That did not work with the settings the computer already has. Asking for an address...', 'dhcp || echo (could not get an address)', 'ifstat', 'route', 'chain --timeout 15000 ' + menuUrl + ' && exit', 'echo Still no menu. Testing the connection to ' + ip + ' ...', 'ping -c 3 ' + ip + ' || echo (no answer from ' + ip + ': firewall, wrong network or network card problem)', 'chain --timeout 30000 ' + menuUrl + ' || shell', ''].join('\n'));
       servers.tftp = await startTftp(ports.tftp, Object.assign({}, loaders, { 'autoexec.ipxe': autoexec }), log); opened.push('tftp');
       step = ports.dhcp; servers.dhcp = await bindUdp(ports.dhcp); servers.dhcp.on('message', dhcpHandler(servers.dhcp, false));
       step = ports.pxe; servers.pxe = await bindUdp(ports.pxe); servers.pxe.on('message', dhcpHandler(servers.pxe, true));
@@ -411,9 +510,15 @@ function create(opts) {
     save();
     return { ok: true, id };
   }
-  function removeIso(id) { isos = isos.filter((x) => x.id !== id); Object.keys(choice).forEach((m) => { if (choice[m] === 'iso:' + id) delete choice[m]; }); save(); return { ok: true }; }
+  function removeIso(id) { isos = isos.filter((x) => x.id !== id); Object.keys(choice).forEach((m) => { if (choice[m] === 'iso:' + id || choice[m] === 'iso:' + id + ':auto') delete choice[m]; }); save(); return { ok: true }; }
   function renameIso(id, name) { const x = isos.find((i) => i.id === id); if (x && safeText(name)) { x.name = safeText(name); save(); } return { ok: true }; }
 
+  function setAnswers(o) {
+    const c = cleanAnswers(o || {}, answers);
+    if (c.error) return { ok: false, error: c.error };
+    answers = c.answers; save(); return { ok: true };
+  }
+  function setUefiLoader(v) { if (v !== 'snponly' && v !== 'ipxe') return { ok: false, error: 'Unknown loader' }; uefiLoader = v; save(); return { ok: true }; }
   function setAllow(o) {
     const macs = [];
     (Array.isArray(o && o.macs) ? o.macs : []).forEach((m) => { const n = normMac(m); if (n && !macs.includes(n) && macs.length < 50) macs.push(n); });
@@ -426,7 +531,12 @@ function create(opts) {
   function setChoice(mac, what) {
     const m = normMac(mac); const c = String(what || 'menu');
     if (!m || !allow.macs.includes(m)) return { ok: false, error: 'That computer is not on your list.' };
-    if (!/^(menu|local|netbootxyz|iso:[a-z0-9]{3,12})$/.test(c)) return { ok: false, error: 'That choice is not offered.' };
+    if (!/^(menu|local|netbootxyz|iso:[a-z0-9]{3,12}(:auto)?)$/.test(c)) return { ok: false, error: 'That choice is not offered.' };
+    if (/:auto$/.test(c)) {
+      const x = isos.find((i) => 'iso:' + i.id === c.slice(0, -5) && i.ok !== false);
+      if (!answers) return { ok: false, error: 'Fill in and save the install answers first.' };
+      if (!autoable(x)) return { ok: false, error: 'Unattended installs work with Ubuntu Server style and Rocky/Alma/Fedora style discs.' };
+    }
     if (c === 'menu') delete choice[m]; else choice[m] = c;
     save(); return { ok: true };
   }
@@ -460,12 +570,12 @@ function create(opts) {
   function status() {
     isos.forEach((x) => { try { fs.accessSync(x.path, fs.constants.R_OK); x.ok = true; } catch (e) { x.ok = false; } });
     return {
-      running, ip, allow: { macs: allow.macs.slice(), any: allow.any, choice: Object.assign({}, choice) }, ports: { dhcp: ports.dhcp, pxe: ports.pxe, tftp: ports.tftp, http: ports.http }, addresses: localAddresses(),
+      running, ip, uefiLoader, answers: answers ? { username: answers.username, hostname: answers.hostname, timezone: answers.timezone, keyboard: answers.keyboard, hasPassword: true } : null, allow: { macs: allow.macs.slice(), any: allow.any, choice: Object.assign({}, choice) }, ports: { dhcp: ports.dhcp, pxe: ports.pxe, tftp: ports.tftp, http: ports.http }, addresses: localAddresses(),
       isos: isos.map((x) => ({ id: x.id, name: x.name, path: x.path, mode: x.mode, size: x.size, ok: x.ok !== false })),
       clients: Array.from(clients.entries()).map(([a, c]) => ({ ip: a, last: c.last, t: c.t })), log: logLines.slice(-40)
     };
   }
-  return { start, stop, addIso, removeIso, renameIso, setAllow, setChoice, check, status, menuScript, _isos: () => isos };
+  return { start, stop, addIso, removeIso, renameIso, setAllow, setChoice, setUefiLoader, setAnswers, check, status, menuScript, _isos: () => isos };
 }
 
-module.exports = { create, analyzeIso, openIso, parseDhcp, buildReply, normMac, ipxeFeatures, PORTS };
+module.exports = { sha512crypt, create, analyzeIso, openIso, parseDhcp, buildReply, normMac, ipxeFeatures, PORTS };

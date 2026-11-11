@@ -2,6 +2,15 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.11.0
+- Unattended installs (Network boot window → "Unattended installs (advanced)"): save a user name, password, computer name, time zone and keyboard layout, then choose "UNATTENDED install, ERASES THE DISK, once" in a listed computer's drop-down. Ubuntu Server style discs get an autoinstall `user-data`; Rocky/Alma/Fedora style discs get a kickstart file. Safety: asks for confirmation, only for computers you listed, never shown in the normal menu, and one-shot (the computer goes back to starting from its own disk as soon as it fetches its answers, so it cannot reinstall in a loop). The password is stored only as a SHA-512 hash (checked against `openssl passwd -6`).
+- New test: test/pxe-auto-test.js (28 checks).
+
+## 1.10.99
+- UEFI: new setting in the Network boot window, "UEFI computers get": the standard loader (`snponly.efi`) or an alternative loader (`ipxe.efi`, iPXE's own network drivers). Use the alternative one if a UEFI computer stalls. Both were tested here in a virtual UEFI computer (QEMU, Intel e1000 card): the menu and a 28 MB kernel downloaded in 1 second with either. A stall that only shows in VirtualBox's UEFI mode is therefore specific to VirtualBox's own network handling, not to the loader or to Dashboard Hub's web server.
+- The "What is happening" window now reports big downloads (kernel, initrd, installer image): when they start, when they finish and how long they took, and when a computer stops part way. This shows where a stall happens.
+- The UEFI start script now prints the network state (`ifstat`, `route`), gives each try a time limit, and pings the Dashboard Hub computer if it cannot get the menu, so a stall shows a reason on screen.
+
 ## 1.10.98
 - Rocky Linux, AlmaLinux, CentOS, Fedora and RHEL discs are now recognised and started properly. Before, they were started as a "generic ISO", and the installer stopped with "missing inst.stage2 or inst.repo". The menu now tells the installer where its files are (`inst.stage2=...`, and `inst.repo=...` when the disc carries the packages). ISOs added earlier as "generic" are re-checked automatically.
 - New test: test/pxe-rocky-test.js.

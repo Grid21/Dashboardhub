@@ -89,6 +89,8 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 - Off until you press Start. It only answers the computers (MAC addresses) you list, never hands out addresses (your router's DHCP stays in charge), and the menu itself never installs or erases anything.
 - Offers Ubuntu/Debian-style live ISOs you add, other ISOs in a generic way, and the netboot.xyz menu (live, rescue and installer images; the booting computer needs internet).
 - Each listed computer can have its own default (menu, an ISO, netboot.xyz or its own disk, started by itself after 5 seconds). A "Check my setup" button explains port, address and list problems in plain words, and the window has tips for testing with a VirtualBox VM.
+- Rocky, Alma, CentOS, Fedora and RHEL discs start with the right installer settings. UEFI computers can get either of two boot loaders (setting in the window). The log shows big downloads (start, finish, stalls).
+- **Unattended installs (advanced):** save a user name, password, computer name, time zone and keyboard once, then pick "UNATTENDED install" for a listed computer. Works with Ubuntu Server style discs (autoinstall) and Rocky/Alma/Fedora style discs (kickstart). It **erases the first disk** of that computer, asks you to confirm, and runs only once: after the installer fetches its answers, that computer goes back to starting from its own disk. The password is stored only as a hash. Windows is not supported yet.
 - Early feature: tested with simulated network boots and a real app, but not yet on real network-boot hardware. Needs administrator rights on Windows (or `sudo` on Linux) because boot ports are protected.
 
 ### 8. Web dashboard panels

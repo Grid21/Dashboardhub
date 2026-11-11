@@ -1,0 +1,42 @@
+'use strict';
+//   node test/remote-test.js   (Remote view: the parts that need no window)
+const path = require('path'), fs = require('fs'), os = require('os'), EventEmitter = require('events');
+const r = require('../remote.js');
+let failed = 0;
+const check = (n, ok, d) => { console.log((ok ? '  ok    ' : '  FAIL  ') + n + (ok ? '' : '   -> ' + d)); if (!ok) failed++; };
+(async () => {
+  let c = r.cleanDevice({ name: ' Rack PiKVM ', type: 'pikvm', host: '192.168.0.50' });
+  check('a PiKVM gets https and its name tidied', c.device && c.device.scheme === 'https' && c.device.name === 'Rack PiKVM' && r.webUrl(c.device) === 'https://192.168.0.50/', JSON.stringify(c));
+  c = r.cleanDevice({ name: 'J', type: 'jetkvm', host: '192.168.0.51' }); check('a JetKVM gets plain http', r.webUrl(c.device) === 'http://192.168.0.51/', JSON.stringify(c));
+  c = r.cleanDevice({ name: 'W', type: 'web', host: 'https://kvm.lan:8443/some/path?x=1' }); check('a pasted web address is taken apart (host and port kept, path dropped)', c.device && c.device.host === 'kvm.lan' && c.device.port === 8443 && r.webUrl(c.device) === 'https://kvm.lan:8443/', JSON.stringify(c));
+  c = r.cleanDevice({ name: 'W', type: 'web', host: 'http://10.0.0.5:80' }); check('default port is left out of the address', r.webUrl(c.device) === 'http://10.0.0.5/', JSON.stringify(c));
+  c = r.cleanDevice({ name: 'V6', type: 'pikvm', host: 'fe80::1', port: 8443 }); check('IPv6 works and is bracketed in the address', r.webUrl(c.device) === 'https://[fe80::1]:8443/', JSON.stringify(c));
+  check('empty name refused', !!r.cleanDevice({ name: ' ', type: 'pikvm', host: 'a' }).error);
+  check('unknown type refused', !!r.cleanDevice({ name: 'x', type: 'rdp', host: 'a' }).error);
+  check('addresses with spaces, slashes or quotes refused', ['a b', 'a/b', 'a"b', '<x>', 'a;b'].every((h) => !!r.cleanDevice({ name: 'x', type: 'pikvm', host: h }).error));
+  check('bad ports refused', [0.5, 70000, -1, 'abc'].every((p) => !!r.cleanDevice({ name: 'x', type: 'pikvm', host: 'a', port: p }).error || r.cleanDevice({ name: 'x', type: 'pikvm', host: 'a', port: p }).device.port === 0));
+  c = r.cleanDevice({ name: 'NX', type: 'nomachine', host: 'desk.lan', user: 'me@corp' }); check('NoMachine keeps a user, default port 4000', c.device && c.device.user === 'me@corp' && r.defaultPort(c.device) === 4000 && r.webUrl(c.device) === '', JSON.stringify(c));
+  check('NoMachine user with odd characters refused', !!r.cleanDevice({ name: 'NX', type: 'nomachine', host: 'a', user: 'a b;rm' }).error);
+  const nx = r.nxsText(c.device);
+  check('connection file has host, port, user, and no password', /Server host" value="desk\.lan"/.test(nx) && /Server port" value="4000"/.test(nx) && /key="User" value="me@corp"/.test(nx) && !/password|Auth/i.test(nx), nx);
+  check('values are escaped in the file', r.nxsText({ host: 'a&b', port: 4000, user: '<x>"' }).includes('a&amp;b') && r.nxsText({ host: 'h', port: 1, user: '<x>"' }).includes('&lt;x&gt;&quot;'));
+  const L = r.cleanList([{ name: 'a', type: 'pikvm', host: 'h1', id: 'abc123' }, { name: 'dup', type: 'pikvm', host: 'h2', id: 'abc123' }, { bad: true }, { name: 'b', type: 'jetkvm', host: 'h3' }]);
+  check('list cleaning drops bad and duplicate entries and gives new ids', L.length === 2 && L[0].id === 'abc123' && /^[a-z0-9]{3,12}$/.test(L[1].id), JSON.stringify(L));
+  check('at most 100 devices', r.cleanList(Array.from({ length: 150 }, (_, i) => ({ name: 'n' + i, type: 'web', host: 'h' + i }))).length === 100);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rv-')); const f = path.join(tmp, 'sub', 'devices.json');
+  r.save(f, L); check('saved and loaded back unchanged', JSON.stringify(r.load(f)) === JSON.stringify(L)); check('a missing or broken file gives an empty list', r.load(path.join(tmp, 'none.json')).length === 0 && (fs.writeFileSync(path.join(tmp, 'bad.json'), '{{'), r.load(path.join(tmp, 'bad.json')).length === 0));
+  // NoMachine start
+  const exists = (p) => p === 'C:\\Program Files\\NoMachine\\bin\\nxplayer.exe';
+  check('finds NoMachine in its usual Windows place', r.findNxplayer('win32', { ProgramFiles: 'C:\\Program Files' }, exists) === 'C:\\Program Files\\NoMachine\\bin\\nxplayer.exe');
+  check('finds NoMachine in its usual Linux and Mac places', r.findNxplayer('linux', {}, (p) => p === '/usr/NX/bin/nxplayer') === '/usr/NX/bin/nxplayer' && r.findNxplayer('darwin', {}, (p) => /NoMachine\.app/.test(p)).includes('NoMachine.app'));
+  check('NXPLAYER_PATH wins when set', r.findNxplayer('linux', { NXPLAYER_PATH: '/opt/x' }, () => true) === '/opt/x');
+  const calls = [];
+  const spawn = (exe, args, o) => { calls.push({ exe, args, o }); const e = new EventEmitter(); e.unref = () => {}; setImmediate(() => e.emit('spawn')); return e; };
+  let res = await r.launchNx(c.device, { platform: 'win32', env: { ProgramFiles: 'C:\\Program Files' }, exists, spawn, dir: path.join(tmp, 'nx') });
+  check('NoMachine is started with --session and the connection file, no shell', res.ok && calls[0].exe.endsWith('nxplayer.exe') && calls[0].args[0] === '--session' && calls[0].args[1].endsWith(c.device.id + '.nxs') && fs.existsSync(calls[0].args[1]) && calls[0].o.detached === true && !calls[0].o.shell, JSON.stringify(res));
+  res = await r.launchNx(c.device, { platform: 'linux', env: {}, exists: () => false, spawn, dir: path.join(tmp, 'nx') }); check('not installed gives a clear answer', !res.ok && res.notInstalled === true, JSON.stringify(res));
+  res = await r.launchNx(L[0], { platform: 'linux', env: {}, exists: () => true, spawn, dir: tmp }); check('only NoMachine devices can be started this way', !res.ok);
+  const badSpawn = () => { const e = new EventEmitter(); setImmediate(() => e.emit('error', { code: 'EACCES' })); return e; };
+  res = await r.launchNx(c.device, { platform: 'linux', env: {}, exists: () => true, spawn: badSpawn, dir: path.join(tmp, 'nx') }); check('a start failure is reported', !res.ok && /EACCES/.test(res.error), JSON.stringify(res));
+  console.log(failed ? 'FAILED ' + failed : 'All passed'); process.exit(failed ? 1 : 0);
+})();

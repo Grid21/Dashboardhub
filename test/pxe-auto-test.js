@@ -22,7 +22,7 @@ mk(t + '/pl.iso', [('/README', 'readme')], [('/README/HELLO.TXT;1', 'hello.txt')
   // password hash agrees with the system's own tool
   const want = cp.execFileSync('openssl', ['passwd', '-6', '-salt', 'abcdefgh', 'Pa$$w0rd!']).toString().trim();
   check('password hash matches openssl', pxe.sha512crypt('Pa$$w0rd!', 'abcdefgh') === want, pxe.sha512crypt('Pa$$w0rd!', 'abcdefgh'));
-  const MAC = '08:00:27:89:7b:34', OTHER = '1c:c1:de:c2:02:a7';
+  const MAC = 'aa:bb:cc:00:00:01', OTHER = 'aa:bb:cc:00:00:02';
   const P = { dhcp: 16767, pxe: 14011, tftp: 16769, http: 18090 };
   const mod = pxe.create({ dataDir: tmp, ports: P });
   mod.setAllow({ macs: [MAC, OTHER], any: false });

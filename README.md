@@ -168,7 +168,7 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 
 We'd rather you hear this from us first:
 
-- **Tested on real home-lab hardware and on simulated hardware.** It has run on a real home lab (an ASUS router, a Netgear access point, an HPE switch and a mix of other devices), and the scanner and connectors are also tested against stand-in devices and sample outputs, which is how brands without a test unit are covered. Other brands should work through the standard methods (SNMP and each vendor's own interface), but reports from real equipment are very welcome.
+- **Tested on real home-lab hardware and on simulated hardware.** It has run on a real home lab with a mix of routers, switches, access points and other devices, and the scanner and connectors are also tested against stand-in devices and sample outputs, which is how brands without a test unit are covered. Other brands should work through the standard methods (SNMP and each vendor's own interface), but reports from real equipment are very welcome.
 - **Routers and switches only share what they choose to.** An unmanaged switch can't report its ports. Many consumer routers don't report link speeds, port details or traffic per device. When that happens, Dashboard Hub says so instead of guessing.
 - **Per-device bandwidth** isn't available from most gear, so the Bandwidth Monitor shows traffic per router, port or network card.
 - **Operating systems**: developed and tested on Windows and Linux. macOS code paths exist but have had little real-world testing.

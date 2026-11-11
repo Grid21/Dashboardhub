@@ -48,7 +48,7 @@ iso.write(t + '/live.iso'); iso.close()`, tmp]);
   const chk = await page.locator('#pxeChecks .pxe-item').allTextContents();
   check('"Check my setup" lists plain-language results with a verdict', chk.length >= 5 && /Everything looks ready|Fix the red items/.test(chk[chk.length - 1]), JSON.stringify(chk).slice(0, 300));
   await page.evaluate(() => { document.querySelector('.pxe-tips').open = true; document.getElementById('pxeChecks').scrollIntoView(); }); await page.screenshot({ path: process.env.SHOT2 || path.join(os.tmpdir(), 'pxe2.png') });
-  check('the VirtualBox tips are in the window', /Bridged Adapter/.test(await page.textContent('.pxe-tips:not(#pxeAuto)')));
+  check('the VirtualBox tips are in the window', /Bridged Adapter/.test(await page.textContent('.pxe-tips:not(#pxeAuto):not(#pxeWin)')));
   await page.click('#pxeStart'); await sleep(1200);
   const running = await page.evaluate(() => /Running on/.test(document.getElementById('pxeState').textContent));
   check('Start works and says it is running', running, await page.textContent('#pxeMsg'));

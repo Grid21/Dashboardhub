@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Dashboard Hub - Remote view</title>
+  <link rel="stylesheet" href="remote.css">
+</head>
+<body>
+  <button type="button" id="rvFullExit">Exit full screen</button>
+  <div id="rvApp">
+    <aside id="rvSide">
+      <div class="rv-head">Remote view</div>
+      <div id="rvList"></div>
+      <button type="button" id="rvAdd" class="primary">+ Add a device</button>
+      <p class="rv-hint">PiKVM, JetKVM and other web KVMs open here. NoMachine opens in its own NoMachine window.</p>
+    </aside>
+    <main id="rvMain">
+      <div id="rvTabs"></div>
+      <div id="rvBar" class="hidden">
+        <button type="button" id="rvReload" title="Reload this page">Reload</button>
+        <button type="button" id="rvFull" title="Full screen (the Exit button at the top leaves it; Esc goes to the remote computer)">Full screen</button>
+        <button type="button" id="rvBrowser" title="Open this device in your normal web browser">Open in browser</button>
+        <button type="button" id="rvEdit">Edit</button>
+        <span id="rvUrl"></span>
+      </div>
+      <div id="rvStage">
+        <div id="rvEmpty">
+          <h2>Control a computer remotely</h2>
+          <p>Add a device on the left, then click it to open it here.</p>
+          <ul>
+            <li><b>PiKVM</b> and <b>JetKVM</b>: see and control a computer's screen, keyboard and mouse through the small KVM box plugged into it. Sign in on the device's own page. Their self-signed certificates are accepted for the devices you add.</li>
+            <li><b>Other web KVM</b>: any device or page that works in a browser (TinyPilot, BliKVM and similar).</li>
+            <li><b>NoMachine</b>: remote desktop to a computer that runs NoMachine. <b>NoMachine is separate, free software that you install yourself</b> on this computer and on the one you want to control; Dashboard Hub only starts it with the connection filled in (the Add device form checks and links the download page).</li>
+          </ul>
+        </div>
+      </div>
+    </main>
+  </div>
+  <dialog id="rvDialog">
+    <h3 id="rvDlgTitle">Add a device</h3>
+    <div class="rv-form">
+      <label>Kind <select id="rvType">
+        <option value="pikvm">PiKVM</option><option value="jetkvm">JetKVM</option><option value="web">Other web KVM or page</option><option value="nomachine">NoMachine</option></select></label>
+      <label>Name <input id="rvName" type="text" maxlength="60" placeholder="Rack PiKVM" autocomplete="off"></label>
+      <label>Address <input id="rvHost" type="text" maxlength="260" placeholder="192.168.0.50" spellcheck="false" autocomplete="off"></label>
+      <label>Port <span class="rv-sub">(empty = normal)</span> <input id="rvPort" type="text" maxlength="5" placeholder="" autocomplete="off"></label>
+      <label id="rvUserRow">User name <span class="rv-sub">(optional)</span> <input id="rvUser" type="text" maxlength="64" spellcheck="false" autocomplete="off"></label>
+    </div>
+    <p id="rvDlgHint" class="rv-hint"></p>
+    <div id="rvNxNote" class="rv-note hidden">
+      <b>NoMachine is separate, free software. It is not part of Dashboard Hub.</b>
+      <p>You need it on <b>two</b> computers: NoMachine installed on <b>this</b> computer (to connect from), and NoMachine installed on the computer you want to control.</p>
+      <p id="rvNxState" class="rv-nxstate">Checking this computer...</p>
+      <button type="button" id="rvNxGet">Download NoMachine (official page)</button>
+      <p class="rv-hint">Dashboard Hub opens NoMachine's own website instead of installing software by itself, so you always get the current version straight from NoMachine. After installing, come back and click the device.</p>
+    </div>
+    <p id="rvDlgMsg" class="rv-msg"></p>
+    <div class="rv-buttons">
+      <button type="button" id="rvDelete" class="danger hidden">Remove</button>
+      <span class="rv-grow"></span>
+      <button type="button" id="rvCancel">Cancel</button>
+      <button type="button" id="rvSave" class="primary">Save</button>
+    </div>
+  </dialog>
+  <script src="remote-ui.js"></script>
+</body>
+</html>

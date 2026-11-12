@@ -23,6 +23,9 @@
     router: 'Router', windows: 'Windows', linux: 'Linux / Unix', apple: 'Apple (macOS / iOS)', android: 'Android', iot: 'IoT / smart device', console: 'Game console', printer: 'Printer',
     network: 'Router / network device', switch: 'Switch', unknown: 'Unknown'
   };
+  // the kinds of machine a person can choose to hear about (routers, network devices and switches count as one kind)
+  const ALERT_KINDS = [['windows', 'Windows'], ['linux', 'Linux / Unix'], ['apple', 'Apple (macOS / iOS)'], ['android', 'Android'], ['iot', 'IoT / smart devices'], ['console', 'Game consoles'], ['printer', 'Printers'], ['network', 'Routers, switches and network devices'], ['unknown', 'Other / unknown']];
+  const alertKind = (id) => (id === 'router' || id === 'switch' ? 'network' : id);
   const LIVE_CHOICES = [0, 15, 30, 60, 120, 300, 600, 1800];
   const HTTPS_PORTS = new Set([443, 5001, 8006, 8443, 8920, 9443]);
   const WEB_PORTS = new Set([1880, 3002, 4533, 5055, 5173, 5230, 5601, 5678, 6767, 7474, 8082, 8083, 8085, 8086, 8088, 8090, 8112, 8181, 8686, 8787, 8920, 9001, 9117, 9200, 9696, 10000, 28080, 80, 81, 443, 3000, 3001, 5000, 5001, 7878, 8000, 8006, 8008, 8080, 8081, 8096, 8123, 8200, 8384, 8443, 8888, 8989, 9000, 9090, 9091, 9443, 19999, 32400]);
@@ -207,6 +210,8 @@
       scannedOnce: !!src.scannedOnce,
       presenceAt: Number.isFinite(src.presenceAt) && src.presenceAt > 0 ? src.presenceAt : 0,
       alerts: ['off', 'app', 'desktop'].includes(src.alerts) ? src.alerts : 'app',
+      // which kinds of machine to alert about: null means all of them
+      alertTypes: Array.isArray(src.alertTypes) ? ALERT_KINDS.map((k) => k[0]).filter((k) => src.alertTypes.includes(k)) : null,
       showServices: src.showServices === true,
       removedReturn: true,
       // older versions kept removed machines away for good; now they come back when found again
@@ -2367,7 +2372,7 @@
   // ---------- alerts: a machine joined or left ----------
   function alertEvent(kind, dev) {
     if (!alertBase || !dev) return;
-    alertQueue.push({ kind: kind, key: dev.key, name: title(dev), ip: dev.ip });
+    alertQueue.push({ kind: kind, key: dev.key, name: title(dev), ip: dev.ip, os: effectiveOs(dev) });
   }
   function alertLine(e) {
     return (e.kind === 'left' ? 'Disconnected: ' : e.kind === 'new' ? 'New device: ' : 'Connected: ') + e.name + (e.ip && e.name !== e.ip ? ' (' + e.ip + ')' : '');
@@ -2400,9 +2405,53 @@
       else if (Notification.permission !== 'denied') Notification.requestPermission().then((p) => { if (p === 'granted') go(); }).catch(() => {});
     } catch (e) { /* ignore */ }
   }
+  // the "Which devices" window: tick the kinds of machine that should raise alerts
+  function wireAlertTypes() {
+    const btn = $('mapAlertTypes'), dlg = $('alertTypesDialog'), box = $('alertTypesList');
+    if (!btn || !dlg || !box) return;
+    const rows = () => Array.from(box.querySelectorAll('input[type=checkbox]'));
+    btn.addEventListener('click', () => {
+      box.textContent = '';
+      ALERT_KINDS.forEach((k) => {
+        const lab = document.createElement('label');
+        lab.className = 'check-row';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.value = k[0];
+        cb.checked = !Array.isArray(net.alertTypes) || net.alertTypes.includes(k[0]);
+        lab.appendChild(cb);
+        lab.appendChild(document.createTextNode(' ' + k[1]));
+        box.appendChild(lab);
+      });
+      dlg.showModal();
+    });
+    $('alertTypesAll').addEventListener('click', () => rows().forEach((c) => { c.checked = true; }));
+    $('alertTypesNone').addEventListener('click', () => rows().forEach((c) => { c.checked = false; }));
+    $('alertTypesCancel').addEventListener('click', () => dlg.close());
+    $('alertTypesSave').addEventListener('click', () => {
+      const on = rows().filter((c) => c.checked).map((c) => c.value);
+      net.alertTypes = on.length === ALERT_KINDS.length ? null : on;
+      save();
+      updateAlertTypesLabel();
+      dlg.close();
+    });
+    updateAlertTypesLabel();
+  }
+  function updateAlertTypesLabel() {
+    const btn = $('mapAlertTypes');
+    if (!btn) return;
+    const t = net.alertTypes;
+    btn.textContent = 'Alerts for: ' + (!Array.isArray(t) ? 'All devices' : t.length === 0 ? 'No devices' : t.length + ' of ' + ALERT_KINDS.length + ' kinds');
+  }
   function flushAlerts() {
-    const q = alertQueue;
+    let q = alertQueue;
     alertQueue = [];
+    // the kind of a new machine is only known once its scan result is in, so the choice is applied here
+    if (Array.isArray(net.alertTypes)) {
+      q = q.filter((e) => {
+        const d = net.devices[e.key] || devices().find((x) => e.ip && x.ip === e.ip);
+        return net.alertTypes.includes(alertKind(d ? effectiveOs(d) : e.os));
+      });
+    }
     if (!q.length || net.alerts === 'off') return;
     let lines;
     if (q.length <= 3) {
@@ -3080,6 +3129,7 @@
     els.gCluster.addEventListener('change', () => { net.groupCluster = els.gCluster.checked; save(); queueSync(); });
     els.gCircles.addEventListener('change', () => { net.groupCircles = els.gCircles.checked; save(); queueSync(); });
     els.services.addEventListener('change', () => { net.showServices = els.services.checked; save(); queueSync(); });
+    wireAlertTypes();
     els.alerts.addEventListener('change', () => { net.alerts = els.alerts.value; save(); if (net.alerts === 'desktop') desktopNotify('Desktop notices are on.'); });
     els.addSwitch.addEventListener('click', addSwitch);
     els.live.addEventListener('change', () => {
@@ -3122,6 +3172,7 @@
     els.gCluster.checked = net.groupCluster !== false;
     els.gCircles.checked = net.groupCircles !== false;
     els.alerts.value = net.alerts;
+    updateAlertTypesLabel();
     els.services.checked = net.showServices;
     els.live.value = String(net.autoSeconds);
     updateLiveUi();

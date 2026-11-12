@@ -559,3 +559,6 @@ body.window-hidden *, body.window-hidden *::before, body.window-hidden *::after 
 
 #pxeDialog .pxe-answers { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px 12px; margin: 8px 0; }
 #pxeDialog .pxe-answers label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+
+.alert-types-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 12px; }
+.alert-types-list label { display: flex; align-items: center; gap: 6px; cursor: pointer; }

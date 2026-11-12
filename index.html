@@ -150,6 +150,7 @@
           <button id="mapTidy" type="button" title="Put every machine back in a neat spiral around the router">Tidy up</button>
         </div>
       </div>
+      <button id="mapAlertTypes" type="button" title="Choose which kinds of device (Windows, Linux, IoT and so on) raise alerts when they join or leave">Alerts for: All devices</button>
       <label class="check-inline"><input type="checkbox" id="mapOffline" checked> Show offline</label>
       <label class="check-inline" title="Machines in the same group (set in the machine list) move together when you drag one. Ctrl+drag moves just one."><input type="checkbox" id="mapGroupMove" checked> Move groups together</label>
       <label class="check-inline" title="Draw a coloured circle and name around each group of machines"><input type="checkbox" id="mapGroupCircles" checked> Group circles</label>
@@ -341,6 +342,14 @@
       <button type="button" id="secQuiet" title="Listening-only scans, no pings or port checks, SNMP off">Quiet scan, no SNMP</button>
       <button type="button" id="secClose" class="primary">Close</button>
     </div>
+  </dialog>
+
+  <dialog id="alertTypesDialog">
+    <h3>Which devices raise alerts?</h3>
+    <p class="hint">Tick the kinds of device you want to hear about when they join or leave. This applies to the pop-ups in the app and to desktop notices. Devices you leave unticked stay quiet.</p>
+    <div id="alertTypesList" class="alert-types-list"></div>
+    <div class="dialog-buttons left"><button type="button" id="alertTypesAll">Tick all</button><button type="button" id="alertTypesNone">Untick all</button></div>
+    <div class="dialog-buttons"><button type="button" id="alertTypesCancel">Cancel</button><button type="button" id="alertTypesSave" class="primary">Save</button></div>
   </dialog>
 
   <dialog id="aboutDialog" class="wide">

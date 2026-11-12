@@ -2,6 +2,14 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.14.1
+- Documentation: README and FEATURES now say the code was written by Claude (an AI assistant) and that the ideas and testing are the owner's.
+- License housekeeping: the 3D library file now carries its own MIT notice (library version r186), THIRD-PARTY-NOTICES.md states exactly which iPXE file was built with an embedded start-up script, and it has a note about product names and trademarks. No program behaviour changed.
+
+## 1.14.0
+- New: choose which kinds of device raise alerts. On the map's second row, the new "Alerts for:" button opens a window with a tick for Windows, Linux / Unix, Apple, Android, IoT / smart devices, game consoles, printers, routers and switches, and other / unknown. Only ticked kinds produce the in-app pop-ups and the desktop notices when they join, leave or return. "Tick all" and "Untick all" are there for quick changes. The choice is saved with each network profile and kept after restarting.
+- Alerts are checked after the scan has identified each device, so a brand-new machine is judged by its real type (for example, a new IoT plug) and not by "unknown".
+
 ## 1.13.4
 - Fixed: the "Start by itself" drop-down next to a computer's hardware address kept closing and losing its choice. The Network boot window redrew its lists on every status refresh (every 1.5 seconds), which closed any open drop-down. The lists are now redrawn only when something actually changed and never while you are using one of them. Two new checks cover this.
 - UEFI firmware that ignores the short answer (a Dell Latitude kept asking over and over, never sending its follow-up request): after three asks in a row without a download, that computer is now answered the classic PXE way instead: the first answer names no file but offers a one-item boot menu and this computer as the boot server, and the file name comes in the answer to the computer's follow-up request on port 4011 (or port 67). If that fails three times too, it switches back, so both styles get tried. Both are explained in the log. BIOS computers and iPXE are never affected. New test: test/pxe-uefi-test.js (13 checks).

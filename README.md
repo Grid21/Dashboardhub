@@ -4,6 +4,8 @@
 
 Web panels, encrypted notes, SSH shortcuts, a live 3D map of your network, router and switch connections, server power control, traffic dials, Wake-on-LAN and more. It's built for home labs, small offices and IT professionals who look after more than one network. It runs on your own computer, with no account to create and no service to sign up for.
 
+**Who made it:** every line of code in Dashboard Hub was written by Claude, an AI assistant made by Anthropic. The ideas, features, design decisions and testing on real equipment are the owner's. Claude wrote the code to carry out those ideas.
+
 ---
 
 ## How to install and start Dashboard Hub
@@ -45,7 +47,7 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 - **Live update**: the map keeps watching and shows machines joining, leaving and coming back. Intervals run from 15 seconds to 30 minutes. A green dot says what it is doing: "Auto scan on", "Auto scan in progress..." while it blinks, then "Last auto scan" with the time.
 - **Smart identification**: guesses the type of every machine (router, switch, Windows, Linux, Apple, Android, smart-home device, game console, printer, network gear) and shows the reasons for the guess. You can override it.
 - **Maker lookup**: names the manufacturer from the hardware address.
-- **Alerts**: in-app notices or desktop notifications when something new appears, leaves or returns, and they keep working while the app is hidden in the tray.
+- **Alerts**: in-app notices or desktop notifications when something new appears, leaves or returns, and they keep working while the app is hidden in the tray. The "Alerts for:" button lets you pick which kinds of device raise alerts (for example Windows and Linux only, or IoT only), and the choice is saved per network profile.
 - **Drawing tools**: add switches and your own machines, draw cables, group and label machines, add VLAN names, tidy the layout, and use a top-down view.
 - **Device list**: search, filter and select several machines to change their type, connection, group or VLAN in one go, or to wake them up. A machine in a group shows "Group: name" under it, and the group name box keeps what you type while the map updates.
 - **Tidy toolbar**: Router & switch links, Add switch, Draw physical cable, Draw lines, Top view, Reset view and Tidy up live in one "Map layout and hardware" dropdown. Alerts sit next to Live update, and the scan message and live status share the second row, so nothing jumps around after a scan.
@@ -195,7 +197,7 @@ macOS: the code is written to be cross-platform, but there is no macOS build set
 
 ## Get involved
 - **Report a device**: tell us the brand and model of a router, switch or printer that wasn't recognised or behaved oddly.
-- **License**: free software under the **GNU General Public License v3 or later (GPL-3.0-or-later)**. You can use it, study it, change it and share it. If you share a modified version, you must share its source under the same license, so improvements stay open for everyone. See the `LICENSE` file.
+- **License**: free software under the **GNU General Public License v3 or later (GPL-3.0-or-later)**. You can use it, study it, change it and share it. If you share a modified version, you must share its source under the same license, so improvements stay open for everyone. See the `LICENSE` file. Third-party parts and their licenses are listed in `THIRD-PARTY-NOTICES.md`.
 - **Open source and easy to build on**: Dashboard Hub is written in plain JavaScript on Node.js and Electron, so the source is readable as it is. Anyone can open the code, change it and run it with `npm start`. Standard build tooling (electron-builder, already set up for Windows and Linux) packages it into a finished program. Update files (`.hubupdate`) are plain, checksummed bundles, and a built-in **Update file tools** window (Settings menu) and a command-line compiler and decompiler let the community unpack and pack them, so it's simple to inspect an update, make your own and add new router brands, device types and features.
 - **Contributing**: _(to be added)_ By contributing you agree your work is released under the same license.
 

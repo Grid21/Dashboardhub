@@ -5,7 +5,7 @@ It includes or is built with the following open-source components. All of them a
 
 | Component | Used for | License |
 |---|---|---|
-| [three.js](https://threejs.org) (bundled in `vendor/three-bundle.js`) | the 3D network map | MIT, Copyright (c) three.js authors |
+| [three.js](https://threejs.org) r186 (bundled, minified, in `vendor/three-bundle.js`) | the 3D network map | MIT, Copyright (c) three.js authors |
 | [Electron](https://www.electronjs.org) | the desktop app framework (includes Chromium and Node.js) | MIT. Chromium and Node.js carry their own open-source licenses, which Electron includes with every build (`LICENSE` and `LICENSES.chromium.html`) |
 | [electron-builder](https://www.electron.build) | building the installer and portable program (development only, not shipped) | MIT |
 | IEEE OUI registry data (`vendor/oui.json`) | turning a device's hardware address into a manufacturer name | The IEEE Registration Authority publishes the registry publicly. Manufacturer names belong to their owners. |
@@ -20,8 +20,12 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 
 ## iPXE (network boot loaders)
-`vendor/ipxe-files.json` contains the iPXE boot loaders (`undionly.kpxe`, `ipxe.efi` and `snponly.efi`) used by the Network boot feature. iPXE (https://ipxe.org) is licensed under GPL-2.0 with the UBDL exception and is included unchanged. Source: https://github.com/ipxe/ipxe
+`vendor/ipxe-files.json` contains the iPXE boot loaders (`undionly.kpxe`, `ipxe.efi` and `snponly.efi`) used by the Network boot feature. iPXE (https://ipxe.org) is licensed under GPL-2.0 with the UBDL exception and is built from the unmodified source at https://github.com/ipxe/ipxe (commit 6763bcb21395e9b87f3677c2440fdb515b0462f0). The one exception is `undionly.kpxe` (older BIOS computers): it is built from the same commit with a short start-up script embedded through iPXE's standard EMBED option. That script follows the menu address given by Dashboard Hub, retries up to 6 times, and falls back to the Dashboard Hub computer's address. No iPXE source code was changed.
 
 
 ## wimboot
 `vendor/ipxe-files.json` contains `wimboot`, built unchanged from https://github.com/ipxe/wimboot (commit cd3e021), licensed GPL-2.0-or-later. It is served to computers that boot a Windows setup disc through Network boot. Source: the repository above.
+
+
+## Names and trademarks
+Windows, Ubuntu, Rocky Linux, AlmaLinux, Fedora, Debian, NoMachine, JetKVM, PiKVM, UniFi, MikroTik, Cisco, Meraki, Aruba, HPE, iLO, iDRAC, Netgear, TP-Link, ASUS, FRITZ!Box and other product names are trademarks of their owners. They appear only to say which products Dashboard Hub can work with. Dashboard Hub is not made, endorsed or sponsored by any of them. NoMachine is separate software that is not included; Dashboard Hub only starts it if you have installed it yourself.

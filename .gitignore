@@ -5,3 +5,4 @@ update-files/
 *.log
 .DS_Store
 !updates/*.hubupdate
+Dashboard Hub/

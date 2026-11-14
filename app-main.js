@@ -62,7 +62,7 @@ function openRemoteWindow(openId) {
   if (remoteWin && !remoteWin.isDestroyed()) { if (remoteWin.isMinimized()) remoteWin.restore(); remoteWin.show(); remoteWin.focus(); return; }
   remoteWin = new BrowserWindow({
     width: 1280, height: 860, minWidth: 720, minHeight: 480, backgroundColor: '#14171c', title: 'Dashboard Hub - Remote view', autoHideMenuBar: true,
-    webPreferences: { webviewTag: true, nodeIntegration: false, contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'remote-preload.js') }
+    webPreferences: { webviewTag: true, nodeIntegration: false, contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'popout-preload.js') }
   });
   const wc = remoteWin.webContents;
   wc.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -86,6 +86,89 @@ function openRemoteWindow(openId) {
   remoteWin.loadFile(path.join(__dirname, 'remote.html'), openId && /^[a-z0-9]{3,12}$/.test(openId) ? { query: { open: openId } } : undefined);
   remoteWin.on('closed', () => { remoteWin = null; });
 }
+
+/* ---- Notifications Center: history of devices that connected and disconnected (own window) ---- */
+const notifLib = require('./notif-history');
+let notifWin = null;
+let notifStore = null;
+let notifTimer = null;
+function notifFile() { return path.join(app.getPath('userData'), 'notifications.json'); }
+function notifData() {
+  if (!notifStore) {
+    try { notifStore = notifLib.cleanStore(JSON.parse(fs.readFileSync(notifFile(), 'utf8'))); } catch (e) { notifStore = notifLib.cleanStore(null); }
+  }
+  return notifStore;
+}
+function notifWriteNow() {
+  if (notifTimer) { clearTimeout(notifTimer); notifTimer = null; }
+  if (!notifStore) return;
+  try { const tmp = notifFile() + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(notifStore)); fs.renameSync(tmp, notifFile()); } catch (e) { /* history is a convenience: never stop the program */ }
+}
+function notifSave() { if (!notifTimer) notifTimer = setTimeout(notifWriteNow, 2000); }
+function notifSender(event) { if (!notifWin || notifWin.isDestroyed() || event.sender !== notifWin.webContents) throw new Error('Not allowed'); }
+function openNotifWindow(profileId) {
+  const pid = notifLib.profileId(profileId);
+  if (notifWin && !notifWin.isDestroyed()) {
+    if (notifWin.isMinimized()) notifWin.restore();
+    notifWin.show(); notifWin.focus();
+    if (pid) notifWin.webContents.send('notif:profile', pid);
+    return;
+  }
+  notifWin = new BrowserWindow({
+    width: 1180, height: 720, minWidth: 760, minHeight: 420, backgroundColor: '#14171c', title: 'Dashboard Hub - Notifications Center', autoHideMenuBar: true,
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'popout-preload.js') }
+  });
+  const wc = notifWin.webContents;
+  wc.setWindowOpenHandler(() => ({ action: 'deny' }));
+  wc.on('will-navigate', (e, url) => { if (!/^file:/i.test(url)) e.preventDefault(); });
+  notifWin.loadFile(path.join(__dirname, 'notifications.html'), pid ? { query: { profile: pid } } : undefined);
+  notifWin.on('closed', () => { notifWin = null; });
+}
+ipcMain.handle('notif:open', (event, profileId) => { checkSender(event); openNotifWindow(String(profileId || '')); return { ok: true }; });
+ipcMain.handle('notif:record', (event, profileId, name, events) => {
+  checkSender(event);
+  const changed = notifLib.apply(notifData(), String(profileId || ''), String(name || ''), Array.isArray(events) ? events.slice(0, 500) : []);
+  if (changed) {
+    notifSave();
+    if (notifWin && !notifWin.isDestroyed()) { try { notifWin.webContents.send('notif:changed'); } catch (e) { /* window closing */ } }
+  }
+  return { ok: true };
+});
+ipcMain.handle('notif:data', (event, profileId) => {
+  notifSender(event);
+  const store = notifData();
+  const profiles = Object.keys(store.profiles).map((id) => ({ id: id, name: store.profiles[id].name, count: store.profiles[id].sessions.length }));
+  const pid = notifLib.profileId(String(profileId || ''));
+  return { ok: true, now: Date.now(), profiles: profiles, profile: pid, sessions: pid && store.profiles[pid] ? store.profiles[pid].sessions : [] };
+});
+ipcMain.handle('notif:clear', async (event, profileId) => {
+  notifSender(event);
+  const pid = notifLib.profileId(String(profileId || ''));
+  const store = notifData();
+  if (!pid || !store.profiles[pid]) return { ok: false };
+  const r = await dialog.showMessageBox(notifWin, { type: 'warning', buttons: ['Cancel', 'Delete the history'], defaultId: 0, cancelId: 0, title: 'Clear history', message: 'Delete the connection history of "' + store.profiles[pid].name + '"?', detail: 'This cannot be undone. Devices that are online now will appear again the next time they connect.' });
+  if (r.response !== 1) return { ok: false, cancelled: true };
+  // devices that are online now stay listed, so their disconnect time can still be recorded
+  const list = store.profiles[pid].sessions;
+  for (let i = list.length - 1; i >= 0; i--) if (list[i].end !== null) list.splice(i, 1);
+  notifWriteNow();
+  return { ok: true };
+});
+ipcMain.handle('notif:export', async (event, profileId, ids) => {
+  notifSender(event);
+  const pid = notifLib.profileId(String(profileId || ''));
+  const store = notifData();
+  if (!pid || !store.profiles[pid]) return { ok: false, error: 'No history to export.' };
+  const want = new Set((Array.isArray(ids) ? ids : []).slice(0, 20000).map((x) => String(x)));
+  const rows = store.profiles[pid].sessions.filter((x) => want.has(x.id));
+  if (!rows.length) return { ok: false, error: 'There is nothing in the list to export.' };
+  const d = new Date();
+  const stamp = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+  const r = await dialog.showSaveDialog(notifWin, { title: 'Save the list as a spreadsheet file', defaultPath: path.join(app.getPath('documents'), 'dashboard-hub-connections-' + stamp + '.csv'), filters: [{ name: 'Spreadsheet (CSV)', extensions: ['csv'] }] });
+  if (r.canceled || !r.filePath) return { ok: false, cancelled: true };
+  try { fs.writeFileSync(r.filePath, '﻿' + notifLib.toCsv(rows, Date.now())); } catch (e) { return { ok: false, error: 'Could not save the file there.' }; }
+  return { ok: true, file: r.filePath, count: rows.length };
+});
 ipcMain.handle('remote:open', (event, id) => { checkSender(event); openRemoteWindow(String(id || '')); return { ok: true }; });
 ipcMain.handle('remote:list', (event) => { remoteSender(event); return { ok: true, devices: remoteList() }; });
 ipcMain.handle('remote:save', (event, list) => {
@@ -405,7 +488,7 @@ ipcMain.handle('pxe:choice', (event, mac, what) => { checkSender(event); return 
 ipcMain.handle('pxe:check', async (event, ip) => { checkSender(event); try { return await pxeMod.check(String(ip || '').slice(0, 40)); } catch (e) { return { ok: false, error: 'The check could not run.' }; } });
 ipcMain.handle('pxe:removeIso', (event, id) => { checkSender(event); return pxeMod.removeIso(String(id || '')); });
 ipcMain.handle('pxe:renameIso', (event, id, name) => { checkSender(event); return pxeMod.renameIso(String(id || ''), String(name || '').slice(0, 80)); });
-app.on('before-quit', () => { try { pxeMod.stop(true); } catch (e) { /* closing anyway */ } });
+app.on('before-quit', () => { try { pxeMod.stop(true); } catch (e) { /* closing anyway */ } notifWriteNow(); });
 
 // ---------- "Update file tools": unpack (decompile) and pack (compile) .hubupdate files ----------
 const hubTools = require('./hubupdate-tools');

@@ -560,5 +560,29 @@ body.window-hidden *, body.window-hidden *::before, body.window-hidden *::after 
 #pxeDialog .pxe-answers { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px 12px; margin: 8px 0; }
 #pxeDialog .pxe-answers label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
 
-.alert-types-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 12px; }
-.alert-types-list label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.alert-types-list { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 12px; }
+.alert-types-list label.check { align-items: center; margin-bottom: 6px; cursor: pointer; }
+.alert-types-list label.check input { margin: 0; flex: none; }
+
+.about-tabs { display: flex; gap: 6px; margin: 4px 0 12px; border-bottom: 1px solid #2c3341; }
+.about-tab { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 14px; color: #a9b1c0; cursor: pointer; font-size: 14px; }
+.about-tab.on { color: #fff; border-bottom-color: #3b82f6; }
+.manual-search { display: flex; gap: 8px; align-items: center; }
+.manual-search input { flex: 1; margin: 0; }
+.manual-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.manual-sec { border: 1px solid #2c3341; border-radius: 8px; background: #161a21; }
+.manual-sec > summary { cursor: pointer; padding: 10px 12px; font-weight: 600; color: #e6e9ef; }
+.manual-body { padding: 0 14px 12px; font-size: 13px; line-height: 1.55; color: #c3c9d6; }
+.manual-body p { margin: 8px 0; }
+.manual-body ol, .manual-body ul { margin: 8px 0; padding-left: 22px; }
+.manual-body li { margin: 4px 0; }
+.manual-tip { border-left: 3px solid #3b82f6; background: #1a2230; padding: 8px 10px; border-radius: 4px; margin: 10px 0; }
+.manual-body mark { background: #f5c542; color: #1b1f27; border-radius: 2px; padding: 0 1px; }
+.manual-pane.hidden, #aboutPane.hidden { display: none; }
+
+.panel-nap { display: block; width: 100%; height: 100%; min-height: 120px; background: #12151b; border: 1px dashed #2c3341; border-radius: 6px; color: #a9b1c0; cursor: pointer; padding: 16px; text-align: center; font-size: 13px; }
+.panel-nap.hidden { display: none; }
+.panel-nap:hover { color: #e6e9ef; border-color: #3b82f6; }
+
+.dialog-buttons.split { justify-content: flex-start; align-items: center; gap: 8px; }
+.dialog-buttons.split .grow { flex: 1; }

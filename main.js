@@ -22,7 +22,8 @@ const BUILTIN_DIR = __dirname;
 const MAX_BUNDLE_BYTES = 40 * 1024 * 1024;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
-const MAX_FILES = 40;
+// Updates may hold at most this many files. Programs built before 1.18.1 stop at 40, so tools/make-update.js keeps updates at 40 or fewer.
+const MAX_FILES = 120;
 const REQUIRED = ['app-main.js', 'preload.js', 'renderer.js', 'index.html', 'styles.css'];
 const NAME_RE = /^(vendor\/)?[A-Za-z0-9][A-Za-z0-9._-]{0,60}\.(js|json|html|css)$/;
 const RESERVED = new Set(['main.js', 'package.json', 'manifest.json']);

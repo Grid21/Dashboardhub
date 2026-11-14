@@ -2,6 +2,60 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.18.1
+- **Fixed: 1.18.0 could not be installed.** It showed "Could not install the update. The update file has an unexpected number of files." The starter program that checks update files accepts at most 40 files, and 1.18.0 had grown to 44. This version has exactly 40 again, with no change in what the program does: the stylesheets of the Remote view and Notifications windows now live inside their pages, the tiny Remote view button script moved into `renderer.js`, and the two pop-out windows share one `popout-preload.js` (each window still only gets its own functions).
+- If you already tried 1.18.0: nothing was installed, so you can install 1.18.1 directly.
+- So this cannot happen unnoticed again: `tools/make-update.js` now refuses to build an update with more than 40 files (unless told otherwise), and the new `test/update-size-test.js` checks the file count and that no file the pages or the program load is missing. The starter's own limit is now 120, but programs built earlier keep 40, so updates stay at 40 or fewer until a new full build is installed.
+- Honest note: the 1.18.0 update was built and tested, but I did not run it through the real "Install update" step. The new test and the existing update-install test do now.
+
+## 1.18.0
+- **The Alerts button moved to the top bar**, right next to "Remote view" (it used to be on the map's second row as "Alerts for:"). It works from any tab. Its hover text shows how many device kinds are selected.
+- **New: Notifications Center**, a separate pop-out window with a history of devices that connected and disconnected, for troubleshooting. Open it from the new **View Notifications Center** button in the Alerts window.
+  - Each row shows device name, type, MAC address, IP address(es), when it connected, when it disconnected and how long it was online. A device that changes IP address keeps one row with all its addresses.
+  - Search by name, MAC or IP; filter by device type, online / disconnected and time range; sort by clicking column headings; choose the network profile; export what you see as CSV; clear a profile's finished records.
+  - History is saved on this computer (`notifications.json`), per network profile, for up to a year or 5,000 connections each. Anything read back from disk is checked and cleaned first.
+  - Times are when Dashboard Hub noticed a change, so they are exact with Live update on, and only as exact as the last scan otherwise.
+- New tests: `test/notif-history-test.js` (25), `test/notif-center-test.js` (34), `test/tray-notify-test.js` (8). The manual's Alerts topic describes both.
+- Honest limit: tested with simulated devices, not on a real network.
+
+## 1.17.1
+- The Windows uninstaller now asks, at the end, "Do you also want to delete your Dashboard Hub data?" (panels, notes, network profiles, saved servers and settings). Yes deletes the `%AppData%\dashboard-hub` folder; No (the default button) keeps everything for a reinstall. Nothing is asked or deleted in a silent uninstall or when a newer version is installed over an old one.
+- Tested: the installer script compiles with the new question (and fails if the question is deliberately broken, so it really is included). Not tested: clicking through the real uninstaller, which needs Windows.
+
+## 1.17.0
+- **The Windows build now makes a real installer with an uninstaller.** `BUILD-APP.bat` produces `Dashboard-Hub-Setup.exe`. It installs for the current user (no administrator needed), lets you pick the folder, adds a Start menu entry and a desktop shortcut, and registers Dashboard Hub in Windows "Installed apps" with a proper Uninstall (also available as "Uninstall Dashboard Hub" in the install folder). Your own data (panels, notes, profiles, settings in `%AppData%\dashboard-hub`) is kept when you uninstall, so a reinstall finds it again.
+  - Honest note: I looked through every version I still have (back to 1.10.82) and all of them built only a single portable program, with no uninstaller. If an earlier one had one, it was before those versions.
+  - The single-file portable `Dashboard-Hub.exe` is no longer built. The same program is in the `Run without installing` folder instead.
+- **The finished program now lands next to the build scripts**, in a folder called `Dashboard Hub`, instead of in `dist`. Windows: `Dashboard-Hub-Setup.exe` and `Run without installing`. Linux: `Dashboard-Hub.AppImage`. Leftover build files are tidied away (new `tools/finish-build.js`).
+- **Safer Node.js step on Windows.** After a Windows VM crashed (blue screen) while testing 1.16.1, the Windows part no longer runs the Node.js installer at all. It downloads Node.js's plain zip (checked against nodejs.org's published checksum) and unpacks it into `%LocalAppData%\dashboard-hub-node`: no installer, no administrator prompt, nothing system-wide. I could not reproduce or prove what caused the crash.
+- The manual has a new topic, "Installing, uninstalling and building" (22 topics now).
+- Tested: the Linux build (AppImage built into `Dashboard Hub`, then started and ran), the Windows packaging step (settings accepted, `Run without installing` folder made) and the Linux/macOS Node.js tests (30 checks). Not tested: the Windows installer itself (needs Windows to build) and the Windows Node.js download.
+
+## 1.16.1
+- The install and build files now take care of Node.js. `RUN-APP`, `BUILD-APP`, `RECOMPILE-UPDATE` and `UNPACK-UPDATE` (both `.bat` and `.sh`) first check whether Node.js is installed.
+  - Installed and version 22 or newer: it says so and goes straight on, nothing is downloaded.
+  - Missing or too old: it asks "Download and install Node.js now? [Y/N]" and then downloads the current official LTS from nodejs.org, checks the download against nodejs.org's published checksum (and refuses to install it if that does not match), and installs it.
+    - Windows: new files `ENSURE-NODE.bat` and `ENSURE-NODE.ps1` (they must stay next to the other `.bat` files). Windows asks once for permission, as it does for any installer.
+    - Linux and macOS: new file `ENSURE-NODE.sh`. Node.js is unpacked into `~/.local/share/dashboard-hub-node`, needs no administrator password, and the scripts find it by themselves next time.
+  - Version 22 is the oldest accepted because the Electron version used here needs Node.js 22.12 or newer.
+- New test: `test/ensure-node-test.sh` (30 checks against a pretend nodejs.org: skip when installed, install when missing, replace an old one, refuse a damaged download, handle no internet).
+- Honest limit: the Linux/macOS part was tested against a pretend nodejs.org, and the Windows part (`.bat` and `.ps1`) has not been run on a real Windows computer yet.
+
+## 1.16.0
+- Fewer background processes and less memory. Every panel's web page is a separate process (a separate "Dashboard Hub.exe" in Task Manager), and until now they were all started when the app opened, even if you were on the Network Map. Now:
+  - Panels only start while the Panels tab is showing. Panels drawn while you are on the Network Map stay unstarted ("Not loaded yet") until you open the Panels tab, or click one to load it.
+  - After 5 minutes away from the Panels tab, or with the window hidden in the tray or minimised, the pages go to sleep and their processes end. They wake when you come back, and you stay signed in. A short trip to the map changes nothing.
+  - New Settings tick box: "Let panels sleep when I am away for 5 minutes (saves memory)". On by default. Untick it to keep panels running all the time.
+- In a test with 6 panels, the app went from 10 processes and about 1.1 GB while sitting on the Network Map to 4 processes and about 0.5 GB once the panels were asleep.
+- New test: test/panel-sleep-test.js. The manual has a note on this.
+- Honest limit: Dashboard Hub always keeps about 4 processes (main program, graphics, network helper, window). Chromium needs them and they cannot be removed. The two extra windows (Remote view and the main window's tools) only start when you open them.
+
+## 1.15.0
+- New: a full **Manual** inside the About window. About now has two tabs, About and Manual. The Manual has 21 topics (getting started, panels, notes, SSH servers, the map, alerts, drawing tools, router and switch links, ports, Bandwidth Monitor, profiles, server management, Wake-on-LAN, Remote view, network boot, security, backup, updates, background running, troubleshooting and shortcuts), written in plain language with numbered steps. A search box finds topics as you type: every word must match, title matches come first, matches are opened and highlighted, and a friendly message appears when nothing matches.
+- Fixed: the new "Which devices raise alerts?" window had its tick boxes and names spread out and misaligned. They now sit in one tidy column.
+- The manual is checked by a test that every button it names really exists in the app.
+- The guided tour is not in this version yet. It comes next.
+
 ## 1.14.1
 - Documentation: README and FEATURES now say the code was written by Claude (an AI assistant) and that the ideas and testing are the owner's.
 - License housekeeping: the 3D library file now carries its own MIT notice (library version r186), THIRD-PARTY-NOTICES.md states exactly which iPXE file was built with an embedded start-up script, and it has a note about product names and trademarks. No program behaviour changed.

@@ -378,6 +378,7 @@
       newCount++;
       alertEvent('new', dev);
     }
+    if (!created && hasIp && dev.ip && dev.ip !== h.ip && dev.online !== false) histEvent('ip', dev);   // same machine, new address
     if (hasIp) dev.ip = h.ip;
     if (mac) {
       dev.mac = mac;
@@ -2370,7 +2371,26 @@
   }
 
   // ---------- alerts: a machine joined or left ----------
+  // Notifications Center: every connect and disconnect is recorded (whatever the alert settings), with the final details of the device once the scan has named it
+  let histQueue = [];
+  function histEvent(kind, dev) {
+    if (!dev || dev.isRouter || !window.notifCenterApi) return;
+    histQueue.push({ kind: kind, key: dev.key, ip: dev.ip, t: Date.now() });
+    if (histQueue.length > 2000) histQueue.shift();
+  }
+  function flushHistory() {
+    const q = histQueue;
+    histQueue = [];
+    const prof = activeProf();
+    if (!q.length || !prof || !window.notifCenterApi || !net) return;
+    const events = q.map((e) => {
+      const d = net.devices[e.key] || devices().find((x) => e.ip && x.ip === e.ip) || null;
+      return { kind: e.kind, key: d ? d.key : e.key, t: e.t, mac: d ? d.mac : '', ip: d ? d.ip : e.ip, name: d ? title(d) : e.ip || '', os: d ? effectiveOs(d) : 'unknown', vendor: d ? d.vendor : '' };
+    });
+    try { window.notifCenterApi.record(prof.id, prof.name, events).catch(() => {}); } catch (e) { /* history is a convenience */ }
+  }
   function alertEvent(kind, dev) {
+    if (dev) histEvent(!alertBase && kind === 'new' ? 'seen' : kind, dev);
     if (!alertBase || !dev) return;
     alertQueue.push({ kind: kind, key: dev.key, name: title(dev), ip: dev.ip, os: effectiveOs(dev) });
   }
@@ -2410,16 +2430,21 @@
     const btn = $('mapAlertTypes'), dlg = $('alertTypesDialog'), box = $('alertTypesList');
     if (!btn || !dlg || !box) return;
     const rows = () => Array.from(box.querySelectorAll('input[type=checkbox]'));
+    $('alertTypesCenter').addEventListener('click', () => {
+      const p = activeProf();
+      if (window.notifCenterApi) window.notifCenterApi.open(p ? p.id : '');
+      dlg.close();
+    });
     btn.addEventListener('click', () => {
       box.textContent = '';
       ALERT_KINDS.forEach((k) => {
         const lab = document.createElement('label');
-        lab.className = 'check-row';
+        lab.className = 'check';
         const cb = document.createElement('input');
         cb.type = 'checkbox'; cb.value = k[0];
-        cb.checked = !Array.isArray(net.alertTypes) || net.alertTypes.includes(k[0]);
+        cb.checked = !net || !Array.isArray(net.alertTypes) || net.alertTypes.includes(k[0]);
         lab.appendChild(cb);
-        lab.appendChild(document.createTextNode(' ' + k[1]));
+        lab.appendChild(document.createTextNode(k[1]));
         box.appendChild(lab);
       });
       dlg.showModal();
@@ -2428,6 +2453,7 @@
     $('alertTypesNone').addEventListener('click', () => rows().forEach((c) => { c.checked = false; }));
     $('alertTypesCancel').addEventListener('click', () => dlg.close());
     $('alertTypesSave').addEventListener('click', () => {
+      if (!net) { dlg.close(); return; }
       const on = rows().filter((c) => c.checked).map((c) => c.value);
       net.alertTypes = on.length === ALERT_KINDS.length ? null : on;
       save();
@@ -2439,10 +2465,12 @@
   function updateAlertTypesLabel() {
     const btn = $('mapAlertTypes');
     if (!btn) return;
-    const t = net.alertTypes;
-    btn.textContent = 'Alerts for: ' + (!Array.isArray(t) ? 'All devices' : t.length === 0 ? 'No devices' : t.length + ' of ' + ALERT_KINDS.length + ' kinds');
+    const t = net ? net.alertTypes : null;
+    btn.textContent = 'Alerts';
+    btn.title = 'Choose which kinds of device raise alerts, and open the Notifications Center. Alerts for: ' + (!Array.isArray(t) ? 'all devices' : t.length === 0 ? 'no devices' : t.length + ' of ' + ALERT_KINDS.length + ' kinds') + '.';
   }
   function flushAlerts() {
+    flushHistory();
     let q = alertQueue;
     alertQueue = [];
     // the kind of a new machine is only known once its scan result is in, so the choice is applied here

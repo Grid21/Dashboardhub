@@ -1,14 +1,14 @@
 {
   "name": "dashboard-hub",
-  "version": "1.14.1",
+  "version": "1.18.1",
   "description": "All my local web panels in one window",
   "main": "main.js",
   "author": "Me",
   "license": "GPL-3.0-or-later",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win portable --publish never",
-    "dist:linux": "electron-builder --linux AppImage --publish never"
+    "dist": "electron-builder --win nsis --publish never && node tools/finish-build.js",
+    "dist:linux": "electron-builder --linux AppImage --publish never && node tools/finish-build.js"
   },
   "devDependencies": {
     "electron": "^45.0.0",
@@ -31,11 +31,8 @@
       "!*.hubupdate"
     ],
     "win": {
-      "target": "portable",
+      "target": "nsis",
       "signAndEditExecutable": false
-    },
-    "portable": {
-      "artifactName": "Dashboard-Hub.exe"
     },
     "linux": {
       "target": "AppImage",
@@ -44,6 +41,22 @@
     },
     "appImage": {
       "artifactName": "Dashboard-Hub.AppImage"
+    },
+    "directories": {
+      "output": "Dashboard Hub"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Dashboard Hub",
+      "uninstallDisplayName": "Dashboard Hub",
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Dashboard-Hub-Setup.exe",
+      "runAfterFinish": true,
+      "include": "build/installer.nsh"
     }
   }
 }

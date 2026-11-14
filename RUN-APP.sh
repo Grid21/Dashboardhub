@@ -7,12 +7,15 @@ echo "  Dashboard Hub - run from source"
 echo "============================================================="
 echo
 
-if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-  echo "Node.js is not installed on this computer."
-  echo
-  echo "Install the LTS version (24 or newer) from https://nodejs.org (or with your"
-  echo "package manager, for example: sudo apt install nodejs npm),"
-  echo "then run ./RUN-APP.sh again."
+DIR="$(pwd)"
+ENSURE="$DIR/ENSURE-NODE.sh"; [ -f "$ENSURE" ] || ENSURE="$DIR/../ENSURE-NODE.sh"
+if [ -f "$ENSURE" ]; then
+  # shellcheck disable=SC1090
+  source "$ENSURE"
+  ensure_node || exit 1
+elif ! command -v node >/dev/null 2>&1; then
+  echo "Error: Node.js was not found in your PATH."
+  echo "Please install Node.js (LTS version, 22 or newer) from https://nodejs.org"
   exit 1
 fi
 

@@ -8,13 +8,13 @@ echo   Dashboard Hub - run from source
 echo =============================================================
 echo.
 
-where node >nul 2>nul
+set "ENSURE=%~dp0ENSURE-NODE.bat"
+if not exist "%ENSURE%" set "ENSURE=%~dp0..\ENSURE-NODE.bat"
+call "%ENSURE%"
 if errorlevel 1 (
-  echo Node.js is not installed on this computer.
   echo.
-  echo 1. Go to https://nodejs.org and download the "LTS" version (version 24 or newer).
-  echo 2. Install it with the default choices.
-  echo 3. Close this window and double-click RUN-APP.bat again.
+  echo Node.js is needed to continue. Install Node.js 22 or newer from
+  echo https://nodejs.org ^(the LTS button^) and run this again.
   echo.
   pause
   exit /b 1

@@ -45,3 +45,76 @@
   });
   $('aboutClose').addEventListener('click', () => dlg.close());
 })();
+
+// The manual inside the About window, with search.
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const dlg = $('aboutDialog'), tabAbout = $('aboutTabAbout'), tabManual = $('aboutTabManual');
+  const pane = $('manualPane'), about = $('aboutPane'), list = $('manualList');
+  const input = $('manualSearch'), clear = $('manualClear'), count = $('manualCount');
+  if (!dlg || !tabAbout || !tabManual || !pane || !list || !Array.isArray(window.HUB_MANUAL)) return;
+  const DATA = window.HUB_MANUAL;
+  const plain = (b) => (typeof b === 'string' ? b : b.tip ? b.tip : (b.steps || b.list || []).join(' '));
+  const full = DATA.map((sec) => ({ sec: sec, text: (sec.title + ' ' + sec.words + ' ' + sec.body.map(plain).join(' ')).toLowerCase(), title: sec.title.toLowerCase(), words: sec.words.toLowerCase() }));
+
+  // put the matched words in <mark> without ever using innerHTML
+  function addText(parent, text, terms) {
+    if (!terms.length) { parent.appendChild(document.createTextNode(text)); return; }
+    const re = new RegExp('(' + terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'gi');
+    text.split(re).forEach((part, i) => {
+      if (i % 2 === 1) { const m = document.createElement('mark'); m.textContent = part; parent.appendChild(m); } else if (part) parent.appendChild(document.createTextNode(part));
+    });
+  }
+  function build(sec, terms, open) {
+    const d = document.createElement('details');
+    d.className = 'manual-sec'; d.id = 'manual-' + sec.id; d.open = open;
+    const sm = document.createElement('summary'); addText(sm, sec.title, terms); d.appendChild(sm);
+    const body = document.createElement('div'); body.className = 'manual-body';
+    sec.body.forEach((b) => {
+      if (typeof b === 'string') { const p = document.createElement('p'); addText(p, b, terms); body.appendChild(p); return; }
+      if (b.tip) { const p = document.createElement('p'); p.className = 'manual-tip'; const st = document.createElement('b'); st.textContent = 'Tip: '; p.appendChild(st); addText(p, b.tip, terms); body.appendChild(p); return; }
+      const ul = document.createElement(b.steps ? 'ol' : 'ul');
+      (b.steps || b.list || []).forEach((t) => { const li = document.createElement('li'); addText(li, t, terms); ul.appendChild(li); });
+      body.appendChild(ul);
+    });
+    d.appendChild(body);
+    return d;
+  }
+  function render() {
+    const q = input.value.trim().toLowerCase();
+    const terms = q.split(/\s+/).filter((t) => t.length > 0).slice(0, 6);
+    clear.classList.toggle('hidden', !q);
+    list.textContent = '';
+    if (!terms.length) {
+      DATA.forEach((sec) => list.appendChild(build(sec, [], false)));
+      count.textContent = DATA.length + ' topics. Type above to search, or click a topic to open it.';
+      return;
+    }
+    // every word must appear somewhere in the topic; title and keyword hits rank first
+    const hits = full.filter((f) => terms.every((t) => f.text.includes(t)))
+      .map((f) => ({ f: f, score: terms.reduce((n, t) => n + (f.title.includes(t) ? 3 : 0) + (f.words.includes(t) ? 1 : 0), 0) }))
+      .sort((a, b) => b.score - a.score);
+    hits.forEach((h) => list.appendChild(build(h.f.sec, terms, true)));
+    if (!hits.length) {
+      const p = document.createElement('p'); p.className = 'hint'; p.textContent = 'Nothing in the manual matches "' + input.value.trim() + '". Try a shorter or different word.';
+      list.appendChild(p);
+    }
+    count.textContent = hits.length ? hits.length + (hits.length === 1 ? ' topic matches.' : ' topics match.') : 'No matches.';
+  }
+  function show(manual) {
+    pane.classList.toggle('hidden', !manual);
+    about.classList.toggle('hidden', manual);
+    tabAbout.classList.toggle('on', !manual); tabManual.classList.toggle('on', manual);
+    tabAbout.setAttribute('aria-selected', String(!manual)); tabManual.setAttribute('aria-selected', String(manual));
+    if (manual) { render(); input.focus(); }
+  }
+  tabAbout.addEventListener('click', () => show(false));
+  tabManual.addEventListener('click', () => show(true));
+  input.addEventListener('input', render);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Escape' && input.value) { e.stopPropagation(); e.preventDefault(); input.value = ''; render(); } });
+  clear.addEventListener('click', () => { input.value = ''; render(); input.focus(); });
+  // always open on the About tab with a fresh search
+  const aboutBtn = $('aboutBtn');
+  if (aboutBtn) aboutBtn.addEventListener('click', () => { input.value = ''; show(false); });
+  window.hubManual = { open: (id) => { show(true); const d = id && $('manual-' + id); if (d) { d.open = true; d.scrollIntoView({ block: 'start' }); } } };
+})();

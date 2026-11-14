@@ -10,10 +10,13 @@ echo.
 rem works whether this file sits next to the tools folder or inside it
 set "TOOLS=%~dp0tools"
 if not exist "%TOOLS%\unpack-update.js" set "TOOLS=%~dp0"
-where node >nul 2>nul
-if %ERRORLEVEL% neq 0 (
-  echo Error: Node.js was not found on your computer.
-  echo Please install Node.js LTS from https://nodejs.org and try again.
+set "ENSURE=%~dp0ENSURE-NODE.bat"
+if not exist "%ENSURE%" set "ENSURE=%~dp0..\ENSURE-NODE.bat"
+call "%ENSURE%"
+if errorlevel 1 (
+  echo.
+  echo Node.js is needed to continue. Install Node.js 22 or newer from
+  echo https://nodejs.org ^(the LTS button^) and run this again.
   echo.
   pause
   exit /b 1

@@ -7,12 +7,15 @@ echo "  Dashboard Hub - build the Linux program (AppImage)"
 echo "============================================================="
 echo
 
-if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-  echo "Node.js is not installed on this computer."
-  echo
-  echo "Install the LTS version (24 or newer) from https://nodejs.org (or with your"
-  echo "package manager, for example: sudo apt install nodejs npm),"
-  echo "then run ./BUILD-APP.sh again."
+DIR="$(pwd)"
+ENSURE="$DIR/ENSURE-NODE.sh"; [ -f "$ENSURE" ] || ENSURE="$DIR/../ENSURE-NODE.sh"
+if [ -f "$ENSURE" ]; then
+  # shellcheck disable=SC1090
+  source "$ENSURE"
+  ensure_node || exit 1
+elif ! command -v node >/dev/null 2>&1; then
+  echo "Error: Node.js was not found in your PATH."
+  echo "Please install Node.js (LTS version, 22 or newer) from https://nodejs.org"
   exit 1
 fi
 
@@ -36,9 +39,10 @@ fi
 
 echo
 echo "============================================================="
-echo "  Done! Your program is in the \"dist\" folder:"
-echo "  dist/Dashboard-Hub.AppImage"
-echo "  (make it runnable once with: chmod +x dist/Dashboard-Hub.AppImage)"
+echo "  Done! Your program is in the \"Dashboard Hub\" folder, next to"
+echo "  this file:"
+echo "  Dashboard Hub/Dashboard-Hub.AppImage"
+echo "  (make it runnable once with: chmod +x \"Dashboard Hub/Dashboard-Hub.AppImage\")"
 echo "  If it says \"Cannot mount AppImage ... FUSE\", run once:"
 echo "    sudo apt install libfuse2t64   (Mint 22 / Ubuntu 24.04)"
 echo "    sudo apt install libfuse2      (Mint 21 / Ubuntu 22.04)"

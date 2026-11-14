@@ -71,6 +71,11 @@ contextBridge.exposeInMainWorld('sshApi', {
   connect: (server) => ipcRenderer.invoke('ssh:connect', server)
 });
 
+contextBridge.exposeInMainWorld('notifCenterApi', {
+  open: (profileId) => ipcRenderer.invoke('notif:open', String(profileId || '')),
+  record: (profileId, name, events) => ipcRenderer.invoke('notif:record', String(profileId || ''), String(name || ''), Array.isArray(events) ? events.slice(0, 500) : [])
+});
+
 contextBridge.exposeInMainWorld('remoteViewApi', {
   open: () => ipcRenderer.invoke('remote:open', '')
 });

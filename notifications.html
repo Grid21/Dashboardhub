@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Dashboard Hub - Notifications Center</title>
+  <style>
+:root { color-scheme: dark; --bg: #14171c; --panel: #1b2027; --line: #2b323c; --text: #e6e9ee; --dim: #9aa4b2; --accent: #3b82f6; --good: #34d399; --bad: #f87171; --warn: #f5c542; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, 'Segoe UI', Roboto, sans-serif; }
+body { display: flex; flex-direction: column; }
+.hidden { display: none !important; }
+#ncHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.nc-title { font-size: 18px; font-weight: 600; }
+.nc-sub { font-size: 12px; font-weight: normal; color: var(--dim); margin-left: 8px; }
+.nc-profile { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 13px; }
+button, select, input { font: inherit; color: var(--text); background: #232a33; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+button { cursor: pointer; } button:hover { border-color: var(--accent); }
+button.danger { color: var(--bad); }
+#ncBar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; flex-wrap: wrap; }
+#ncSearch { flex: 1 1 240px; min-width: 180px; }
+#ncSpacer { flex: 1 1 0; }
+.nc-count { margin: 0; padding: 0 16px 6px; color: var(--dim); font-size: 12px; min-height: 1.4em; }
+#ncWrap { flex: 1; min-height: 0; overflow: auto; margin: 0 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th { position: sticky; top: 0; background: #232a33; text-align: left; padding: 8px 10px; font-weight: 600; border-bottom: 1px solid var(--line); white-space: nowrap; z-index: 1; }
+th.sortable { cursor: pointer; user-select: none; } th.sortable:hover { color: #fff; }
+th.sorted-asc::after { content: ' \25B2'; font-size: 10px; } th.sorted-desc::after { content: ' \25BC'; font-size: 10px; }
+td { padding: 7px 10px; border-bottom: 1px solid #232a33; vertical-align: top; }
+tbody tr:hover { background: #20262e; }
+.nc-name { font-weight: 600; } .nc-vendor { color: var(--dim); font-size: 11px; }
+.nc-mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; word-break: break-all; }
+.nc-time { white-space: nowrap; } .nc-note { display: block; color: var(--dim); font-size: 11px; }
+.nc-online { color: var(--good); font-weight: 600; } .nc-gone { color: var(--text); } .nc-unknown { color: var(--dim); font-style: italic; }
+.nc-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--dim); }
+.nc-dot.on { background: var(--good); }
+#ncEmpty { padding: 40px 20px; text-align: center; color: var(--dim); }
+.nc-msg { margin: 6px 16px 0; min-height: 1.3em; font-size: 13px; color: var(--good); } .nc-msg.bad { color: var(--bad); }
+.nc-foot { margin: 4px 16px 12px; color: var(--dim); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header id="ncHead">
+    <div class="nc-title">Notifications Center <span class="nc-sub">devices that connected and disconnected</span></div>
+    <label class="nc-profile">Network profile
+      <select id="ncProfile" aria-label="Network profile"></select>
+    </label>
+  </header>
+  <div id="ncBar">
+    <input id="ncSearch" type="search" placeholder="Search name, MAC address or IP address" autocomplete="off" aria-label="Search the history" maxlength="80">
+    <select id="ncKind" aria-label="Type of device"></select>
+    <select id="ncStatus" aria-label="Status">
+      <option value="all">Online and disconnected</option>
+      <option value="online">Online now</option>
+      <option value="gone">Disconnected</option>
+    </select>
+    <select id="ncRange" aria-label="Time range">
+      <option value="0">All time</option>
+      <option value="3600000">Last hour</option>
+      <option value="86400000">Last 24 hours</option>
+      <option value="604800000">Last 7 days</option>
+      <option value="2592000000">Last 30 days</option>
+    </select>
+    <span id="ncSpacer"></span>
+    <button type="button" id="ncExport" title="Save the list you see as a spreadsheet (CSV) file">Export list (CSV)</button>
+    <button type="button" id="ncClear" class="danger" title="Delete the finished connection records of this profile">Clear history</button>
+  </div>
+  <p id="ncCount" class="nc-count" aria-live="polite"></p>
+  <div id="ncWrap">
+    <table id="ncTable">
+      <thead>
+        <tr>
+          <th data-sort="name" class="sortable">Device</th>
+          <th data-sort="os" class="sortable">Type</th>
+          <th>MAC address</th>
+          <th>IP address(es)</th>
+          <th data-sort="start" class="sortable">Connected</th>
+          <th data-sort="end" class="sortable">Disconnected</th>
+          <th data-sort="dur" class="sortable">Time online</th>
+        </tr>
+      </thead>
+      <tbody id="ncRows"></tbody>
+    </table>
+    <div id="ncEmpty" class="hidden"></div>
+  </div>
+  <p id="ncMsg" class="nc-msg" role="status"></p>
+  <p class="nc-foot">Times are when Dashboard Hub noticed a change, in your computer's time zone. It notices changes when it scans your network, so turn on Live update on the Network Map for the most exact times. A device already online when watching began shows "already online". Records are kept for a year and stored only on this computer.</p>
+  <script src="notifications-ui.js"></script>
+</body>
+</html>

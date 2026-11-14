@@ -32,6 +32,7 @@
           <option value="full">Full screen</option>
         </select>
       </label>
+      <button id="mapAlertTypes" type="button" title="Choose which kinds of device raise alerts, and open the Notifications Center (history of devices that connected and disconnected)">Alerts</button>
       <button id="remoteBtn" title="See and control other computers in a separate window: PiKVM, JetKVM, other web KVMs and NoMachine">Remote view</button>
       <button id="serversBtn" title="Log in to your Linux servers over SSH">&gt;_ Servers</button>
       <div class="profile-control settings-control">
@@ -59,6 +60,7 @@
           <button type="button" id="gpuRestart" role="menuitem" hidden>Restart now to apply</button>
           <label class="menu-check" title="The green lines on the network map fade gently in and out, like link lights on a switch. Untick for steady lines."><input type="checkbox" id="pulseCheck" checked> Gently blink the network lines on the map</label>
           <label class="menu-check" title="When a panel cannot load or its page crashes, Dashboard Hub reloads it by itself (waiting a little longer each time). Untick to reload by hand."><input type="checkbox" id="panelAutoCheck" checked> Reload a panel by itself when it fails</label>
+          <label class="menu-check" title="A panel's web page uses memory and a process of its own. When you have been away from the Panels tab (or the window has been hidden) for 5 minutes, the pages go to sleep and wake again when you come back. Untick to keep them running."><input type="checkbox" id="panelSleepCheck" checked> Let panels sleep when I am away for 5 minutes (saves memory)</label>
           <label class="menu-check" title="Once in a while, ask GitHub whether a newer Dashboard Hub exists. Nothing is installed unless you click Install."><input type="checkbox" id="updAuto"> Check for new versions automatically (contacts GitHub)</label>
           <button type="button" id="updCheckNow" role="menuitem">Check for updates now</button>
           <div class="menu-note" id="updHint"></div>
@@ -150,7 +152,6 @@
           <button id="mapTidy" type="button" title="Put every machine back in a neat spiral around the router">Tidy up</button>
         </div>
       </div>
-      <button id="mapAlertTypes" type="button" title="Choose which kinds of device (Windows, Linux, IoT and so on) raise alerts when they join or leave">Alerts for: All devices</button>
       <label class="check-inline"><input type="checkbox" id="mapOffline" checked> Show offline</label>
       <label class="check-inline" title="Machines in the same group (set in the machine list) move together when you drag one. Ctrl+drag moves just one."><input type="checkbox" id="mapGroupMove" checked> Move groups together</label>
       <label class="check-inline" title="Draw a coloured circle and name around each group of machines"><input type="checkbox" id="mapGroupCircles" checked> Group circles</label>
@@ -349,11 +350,24 @@
     <p class="hint">Tick the kinds of device you want to hear about when they join or leave. This applies to the pop-ups in the app and to desktop notices. Devices you leave unticked stay quiet.</p>
     <div id="alertTypesList" class="alert-types-list"></div>
     <div class="dialog-buttons left"><button type="button" id="alertTypesAll">Tick all</button><button type="button" id="alertTypesNone">Untick all</button></div>
-    <div class="dialog-buttons"><button type="button" id="alertTypesCancel">Cancel</button><button type="button" id="alertTypesSave" class="primary">Save</button></div>
+    <div class="dialog-buttons split"><button type="button" id="alertTypesCenter" title="Opens a separate window with the history of devices that connected and disconnected: MAC and IP addresses and the times">View Notifications Center</button><span class="grow"></span><button type="button" id="alertTypesCancel">Cancel</button><button type="button" id="alertTypesSave" class="primary">Save</button></div>
   </dialog>
 
   <dialog id="aboutDialog" class="wide">
     <h3>About Dashboard Hub</h3>
+    <div class="about-tabs" role="tablist">
+      <button type="button" id="aboutTabAbout" class="about-tab on" role="tab" aria-selected="true">About</button>
+      <button type="button" id="aboutTabManual" class="about-tab" role="tab" aria-selected="false">Manual</button>
+    </div>
+    <div id="manualPane" class="manual-pane hidden">
+      <div class="manual-search">
+        <input id="manualSearch" type="search" placeholder="Search the manual (for example: alerts, backup, PXE, SNMP)" autocomplete="off" aria-label="Search the manual" maxlength="80">
+        <button type="button" id="manualClear" class="hidden">Clear</button>
+      </div>
+      <p id="manualCount" class="hint" aria-live="polite"></p>
+      <div id="manualList" class="manual-list"></div>
+    </div>
+    <div id="aboutPane">
     <p id="aboutVersion" class="hint"></p>
     <p class="hint">Your whole network and every tool you use to run it, in one desktop app. Free software under the GNU General Public License v3 or later: you can use it, study it, change it and share it, and if you share a changed version you share its source under the same license.</p>
     <h4>Network ports it uses</h4>
@@ -365,6 +379,7 @@
       </table>
     </div>
     <p class="hint">Tip for SNMP: use version 3 or a read-only community with a name of your own (not "public"), and never expose it to the internet. Only scan networks you own or have permission to scan.</p>
+    </div>
     <div class="dialog-buttons"><button type="button" id="aboutClose" class="primary">Close</button></div>
   </dialog>
 
@@ -553,9 +568,9 @@
   <script src="bmc-ui.js"></script>
   <script src="bandwidth-ui.js"></script>
   <script src="updates.js"></script>
+  <script src="manual.js"></script>
   <script src="about-ui.js"></script>
   <script src="pxe-ui.js"></script>
-  <script src="remote-open.js"></script>
   <script src="security-ui.js"></script>
   <script src="tools-ui.js"></script>
   <script src="updater-ui.js"></script>

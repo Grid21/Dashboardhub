@@ -62,6 +62,15 @@ for (const req of ['app-main.js', 'preload.js', 'renderer.js', 'index.html', 'st
   }
 }
 
+// Programs built before 1.18.1 refuse an update with more than 40 files ("unexpected number of files").
+// An update can't change that rule, so stay within it unless you really mean to need a newer full build.
+const STARTER_LIMIT = 40;
+if (names.length > STARTER_LIMIT && !process.env.ALLOW_MANY_FILES) {
+  console.error(`Error: this update would hold ${names.length} files, but installed programs built before 1.18.1 only accept ${STARTER_LIMIT}.`);
+  console.error('Merge some small files together, or set ALLOW_MANY_FILES=1 if the update should need the newer full build.');
+  process.exit(1);
+}
+
 const files = {};
 let rawTotal = 0;
 for (const name of names.sort()) {

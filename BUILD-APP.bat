@@ -4,17 +4,17 @@ title Dashboard Hub - Build
 cd /d "%~dp0"
 
 echo =============================================================
-echo   Dashboard Hub - build the Windows program (Dashboard-Hub.exe)
+echo   Dashboard Hub - build the Windows program
 echo =============================================================
 echo.
 
-where node >nul 2>nul
+set "ENSURE=%~dp0ENSURE-NODE.bat"
+if not exist "%ENSURE%" set "ENSURE=%~dp0..\ENSURE-NODE.bat"
+call "%ENSURE%"
 if errorlevel 1 (
-  echo Node.js is not installed on this computer.
   echo.
-  echo 1. Go to https://nodejs.org and download the "LTS" version (version 24 or newer).
-  echo 2. Install it with the default choices.
-  echo 3. Close this window and double-click BUILD-APP.bat again.
+  echo Node.js is needed to continue. Install Node.js 22 or newer from
+  echo https://nodejs.org ^(the LTS button^) and run this again.
   echo.
   pause
   exit /b 1
@@ -33,7 +33,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo Step 2 of 2: building Dashboard-Hub.exe. This can take a few minutes.
+echo Step 2 of 2: building the installer. This can take a few minutes.
 echo.
 call npm run dist
 if errorlevel 1 (
@@ -45,9 +45,12 @@ if errorlevel 1 (
 
 echo.
 echo =============================================================
-echo   Done! Your program is in the "dist" folder:
-echo   dist\Dashboard-Hub.exe
+echo   Done! Your program is in the "Dashboard Hub" folder, next to
+echo   this file:
+echo.
+echo   Dashboard-Hub-Setup.exe      installs it (with an uninstaller)
+echo   Run without installing\      the program itself, no install needed
 echo =============================================================
-if exist "dist\Dashboard-Hub.exe" explorer "dist"
+if exist "Dashboard Hub\Dashboard-Hub-Setup.exe" explorer "Dashboard Hub"
 pause
 endlocal

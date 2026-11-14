@@ -27,6 +27,10 @@ let editingId = null;
 let noteButtons = {};          // panel id -> its Notes button
 let notesIds = new Set();      // ids of panels that have a saved note
 let notesPanelId = null;       // panel whose note is open right now
+function panelsShownNow() {
+  return !document.body.classList.contains('view-map') && !document.body.classList.contains('window-hidden');
+}
+let panelSleepers = {};         // panel id -> { wake, sleep }: panels are only loaded while someone can see them
 let panelEls = {};             // panel id -> its panel box
 let chipEls = {};              // panel id -> its top-bar jump button
 let findBars = {};             // panel id -> { open(), close(), isOpen() } for its find box (Ctrl+F)
@@ -121,6 +125,7 @@ function render() {
   jump.innerHTML = '';
   noteButtons = {};
   panelEls = {};
+  panelSleepers = {};
   chipEls = {};
   findBars = {};
   findGuests = {};
@@ -229,7 +234,32 @@ function render() {
     el.addEventListener('mousedown', () => { activePanelId = panel.id; });
     wv.addEventListener('focus', () => { activePanelId = panel.id; });
 
-    body.append(wv, bar);
+    // A panel's web page costs memory and a process of its own, so it is only started while the Panels tab can be seen.
+    // Away from it for a while, the page is put to sleep (Settings can turn that off) and wakes when you come back.
+    const napNote = document.createElement('button');
+    napNote.type = 'button';
+    napNote.className = 'panel-nap hidden';
+    body.append(bar, napNote);
+    let napped = false;
+    let retryTimer = null;
+    const wake = () => {
+      if (wv.isConnected) return;
+      body.insertBefore(wv, bar);
+      napNote.classList.add('hidden');
+      napped = false;
+      if (status.textContent === 'Asleep' || status.textContent === 'Not loaded yet') status.textContent = '';
+    };
+    const nap = (everLoaded) => {
+      if (wv.isConnected) wv.remove();
+      napped = true;
+      if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+      napNote.textContent = everLoaded ? 'Asleep to save memory. Click here, or open this tab again, to wake it.' : 'Not loaded yet, to save memory. It loads when you open this tab. Click here to load it now.';
+      napNote.classList.remove('hidden');
+      status.textContent = everLoaded ? 'Asleep' : 'Not loaded yet';
+    };
+    napNote.addEventListener('click', wake);
+    panelSleepers[panel.id] = { wake: wake, sleep: () => { if (wv.isConnected) nap(true); }, asleep: () => napped };
+    if (panelsShownNow()) wake(); else nap(false);
     el.append(head, body);
     grid.append(el);
     el.style.order = index;
@@ -267,7 +297,7 @@ function render() {
 
     // --- events ---
     notesBtn.addEventListener('click', () => openNotes(panel));
-    reloadBtn.addEventListener('click', () => { status.textContent = ''; wv.reload(); });
+    reloadBtn.addEventListener('click', () => { status.textContent = ''; if (!wv.isConnected) { wake(); return; } wv.reload(); });
 
     editBtn.addEventListener('click', () => openDialog(panel));
     delBtn.addEventListener('click', () => {
@@ -282,7 +312,7 @@ function render() {
 
     // A panel that fails to load or crashes reloads itself (waits a little longer each time, then once a minute).
     // Settings -> "Reload a panel by itself when it fails" turns this off.
-    let tries = 0, retryTimer = null, loadFailed = false;
+    let tries = 0, loadFailed = false;
     wv.addEventListener('did-start-loading', () => { loadFailed = false; });
     const RETRY_WAITS = [3, 6, 10, 20, 30, 60];
     const autoRetry = (what) => {
@@ -1281,4 +1311,43 @@ window.hubPanelAutoReload = function () {
   chk.addEventListener('change', () => {
     try { localStorage.setItem('hubPanelAutoReload', chk.checked ? 'on' : 'off'); } catch (e) { /* lasts until the app closes */ }
   });
+})();
+
+
+/* Panels sleep while nobody is looking at them (on unless switched off in Settings) */
+window.hubPanelSleepOn = function () {
+  try { return localStorage.getItem('hubPanelSleep') !== 'off'; } catch (e) { return true; }
+};
+window.hubPanelSleepMs = 5 * 60 * 1000;       // away from the Panels tab (or window hidden) for this long
+window.hubPanelsShown = panelsShownNow;
+(function () {
+  let timer = null;
+  const all = () => Object.keys(panelSleepers).map((k) => panelSleepers[k]);
+  function update() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (window.hubPanelsShown()) { all().forEach((p) => p.wake()); return; }
+    if (!window.hubPanelSleepOn()) return;
+    timer = setTimeout(() => {
+      timer = null;
+      if (window.hubPanelsShown() || !window.hubPanelSleepOn()) return;
+      all().forEach((p) => { try { p.sleep(); } catch (e) { /* already gone */ } });
+    }, window.hubPanelSleepMs);
+  }
+  window.hubPanelSleepCheck = update;
+  new MutationObserver(update).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  const chk = document.getElementById('panelSleepCheck');
+  if (chk) {
+    chk.checked = window.hubPanelSleepOn();
+    chk.addEventListener('change', () => {
+      try { localStorage.setItem('hubPanelSleep', chk.checked ? 'on' : 'off'); } catch (e) { /* lasts until the app closes */ }
+      update();
+    });
+  }
+})();
+
+// top bar button: open the separate Remote view window.
+(function () {
+  'use strict';
+  const b = document.getElementById('remoteBtn');
+  if (b && window.remoteViewApi) b.addEventListener('click', () => { window.remoteViewApi.open(); });
 })();

@@ -10,16 +10,16 @@ Web panels, encrypted notes, SSH shortcuts, a live 3D map of your network, route
 
 ## How to install and start Dashboard Hub
 
-You don't need to know any programming. You need **Node.js 24 LTS or newer** (the free "LTS" download from [nodejs.org](https://nodejs.org)).
+You don't need to know any programming. You need **Node.js 24 LTS or newer** (the free "LTS" download from [nodejs.org](https://nodejs.org)). If you don't have it, the start files install it for you.
 
-1. **Install Node.js.** Go to [nodejs.org](https://nodejs.org), click the **LTS** download (version 24 or newer) and install it with the default choices. To check, open a terminal (Command Prompt on Windows) and type `node -v`. It should show `v24` or higher.
+1. **Node.js (installed for you if it is missing).** You don't have to do anything here. The start and build files (`RUN-APP`, `BUILD-APP` and the update tools) check whether Node.js is already installed. If it is (version 22 or newer), they skip this step and go straight on. If it is missing or too old, they offer to download the official Node.js LTS from nodejs.org, check the download, and unpack it into your own folder (no installer, no administrator password, nothing else on the computer is changed). Prefer to do it yourself? Install the **LTS** from [nodejs.org](https://nodejs.org) (24 recommended). To check, type `node -v` in a terminal (Command Prompt on Windows).
 2. **Get Dashboard Hub.** On the project's GitHub page click **Code**, then **Download ZIP**, and unzip it to a folder you'll keep. (Or clone it with GitHub Desktop.)
 3. **Start it.**
    - **Windows:** double-click `RUN-APP.bat`.
    - **Linux:** open a terminal in that folder and run `./RUN-APP.sh` (if it says permission denied, run `chmod +x RUN-APP.sh` first).
 4. **The first start takes a few minutes.** It downloads what it needs and needs an internet connection. After that it starts quickly.
 
-**Want a finished program instead of running from the folder?** Double-click `BUILD-APP.bat` on Windows (it makes `dist\Dashboard-Hub.exe`), or run `./BUILD-APP.sh` on Linux (it makes `dist/Dashboard-Hub.AppImage`). If the project's Releases page has a ready-made `Dashboard-Hub.exe`, you can download and run that directly, with no Node.js needed.
+**Want a finished program instead of running from the folder?** Double-click `BUILD-APP.bat` on Windows (it makes a `Dashboard Hub` folder right next to the file, with `Dashboard-Hub-Setup.exe` inside: an installer that also gives you an uninstaller, plus a `Run without installing` folder), or run `./BUILD-APP.sh` on Linux (it puts `Dashboard-Hub.AppImage` in the same `Dashboard Hub` folder). If the project's Releases page has a ready-made `Dashboard-Hub.exe`, you can download and run that directly, with no Node.js needed.
 
 **Updating later:** open **Updates** in the top bar. You can check online (if you turn that on), or install a `.hubupdate` file you were given. You can also go back to earlier versions there, and choose how many are kept.
 
@@ -47,7 +47,7 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 - **Live update**: the map keeps watching and shows machines joining, leaving and coming back. Intervals run from 15 seconds to 30 minutes. A green dot says what it is doing: "Auto scan on", "Auto scan in progress..." while it blinks, then "Last auto scan" with the time.
 - **Smart identification**: guesses the type of every machine (router, switch, Windows, Linux, Apple, Android, smart-home device, game console, printer, network gear) and shows the reasons for the guess. You can override it.
 - **Maker lookup**: names the manufacturer from the hardware address.
-- **Alerts**: in-app notices or desktop notifications when something new appears, leaves or returns, and they keep working while the app is hidden in the tray. The "Alerts for:" button lets you pick which kinds of device raise alerts (for example Windows and Linux only, or IoT only), and the choice is saved per network profile.
+- **Alerts**: in-app notices or desktop notifications when something new appears, leaves or returns, and they keep working while the app is hidden in the tray. The **Alerts** button in the top bar (next to Remote view) lets you pick which kinds of device raise alerts (for example Windows and Linux only, or IoT only), saved per network profile. **View Notifications Center** in the same window opens a pop-out history of every device that connected and disconnected (name, type, MAC, IPs, time connected, time disconnected, time online), with search, filters, CSV export and clear.
 - **Drawing tools**: add switches and your own machines, draw cables, group and label machines, add VLAN names, tidy the layout, and use a top-down view.
 - **Device list**: search, filter and select several machines to change their type, connection, group or VLAN in one go, or to wake them up. A machine in a group shows "Group: name" under it, and the group name box keeps what you type while the map updates.
 - **Tidy toolbar**: Router & switch links, Add switch, Draw physical cable, Draw lines, Top view, Reset view and Tidy up live in one "Map layout and hardware" dropdown. Alerts sit next to Live update, and the scan message and live status share the second row, so nothing jumps around after a scan.
@@ -109,6 +109,7 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 - Works with the **self-signed certificates** most home-lab tools use.
 - **Full screen for any panel**: a Maximize button makes a panel fill the whole window to work in it, with an Exit full screen button (or Esc) to go back. The page inside is not reloaded.
 - Search inside a panel with Ctrl+F, reload everything with one click.
+- **Light on memory**: a panel's page only runs while the Panels tab is showing. After 5 minutes away (on the Network Map, minimised or hidden in the tray) the pages sleep and give their memory and processes back, then wake when you return (you stay signed in). A Settings tick box turns sleeping off.
 - **Panels fix themselves**: a panel that can't load or crashes reloads on its own (waiting a little longer each time, then once a minute) and says so. Turn it off in Settings ("Reload a panel by itself when it fails").
 
 ### 9. Encrypted notes and SSH shortcuts
@@ -143,7 +144,7 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 
 ### Dashboard and app extras
 - **Update file tools built in**: unpack any `.hubupdate` into its source files, or pack a folder back into one, from inside the app, with plain-language messages and no command line.
-- **About window**: shows the version, the license and a table of every network port the app uses, handy when your network has a firewall.
+- **About window with a built-in Manual**: the About tab shows the version, the license and a table of every network port the app uses, handy when your network has a firewall. The Manual tab explains every feature step by step and has a search box that finds topics as you type.
 - **Security settings** (Settings menu): choose whether panels may use self-signed certificates, open pop-up windows, or use the camera, microphone, notifications and clipboard; switch off the thorough scan, router connections or Cisco Meraki; and require SNMP version 3. "Standard" and "Strictest" buttons set everything at once. The protections that must never be off (page isolation, update-file checks, local-network-only scanning) are fixed on purpose.
 - **Run in the background**: an option to hide in the system tray when you close the window (Windows and Linux), with notifications and live scans carrying on.
 - **Graphics card (GPU) switch** with a status line, for machines with driver trouble.
@@ -181,14 +182,16 @@ We'd rather you hear this from us first:
 
 ## Run it or build it yourself
 
-You don't need to know any programming. You only need **Node.js 24 LTS or newer** (the free "LTS" download from [nodejs.org](https://nodejs.org)). The step-by-step version is at the top of this page.
+You don't need to know any programming. You only need **Node.js 24 LTS or newer** (the free "LTS" download from [nodejs.org](https://nodejs.org)); the start files install it for you if it is missing. The step-by-step version is at the top of this page.
 
 | I want to... | Windows | Linux |
 |---|---|---|
 | **Run** Dashboard Hub straight from the source | double-click `RUN-APP.bat` | run `./RUN-APP.sh` |
-| **Build** the finished program | double-click `BUILD-APP.bat` (makes `dist\Dashboard-Hub.exe`) | run `./BUILD-APP.sh` (makes `dist/Dashboard-Hub.AppImage`) |
+| **Build** the finished program | double-click `BUILD-APP.bat` (makes `Dashboard Hub\Dashboard-Hub-Setup.exe`) | run `./BUILD-APP.sh` (makes `Dashboard Hub/Dashboard-Hub.AppImage`) |
 
-The first time, these download what they need (a few minutes, internet connection required). Developers can also use `npm install`, `npm start` and `npm run dist`.
+The first time, these check for Node.js (installing it if needed) and download what they need (a few minutes, internet connection required). Developers can also use `npm install`, `npm start` and `npm run dist`. The finished program always lands in a `Dashboard Hub` folder next to the build files.
+
+**Uninstalling.** Installed it with `Dashboard-Hub-Setup.exe`? Remove it like any program: Windows Settings > Apps > Installed apps > Dashboard Hub > Uninstall (or the "Uninstall Dashboard Hub" file inside the install folder). At the end, the uninstaller asks "Do you also want to delete your Dashboard Hub data?" (panels, notes, profiles, saved servers and settings). The default is No, so a reinstall finds everything again; choose Yes to wipe it too. (Run silently, or installing a newer version over an old one, it never deletes anything.) If you chose No and change your mind later, delete the folder `%AppData%\dashboard-hub` yourself. Used `Run without installing`? Just delete that folder. On Linux, delete the `.AppImage` file and, to remove your data, the folder `~/.config/dashboard-hub`.
 **Linux: "Cannot mount AppImage, please check your FUSE setup"?** That is not a Dashboard Hub bug. An AppImage needs a small system library called FUSE 2, and newer Ubuntu-based systems (Linux Mint 22, Ubuntu 24.04) do not include it. Fix it once in a terminal: `sudo apt install libfuse2t64` (on Mint 21 / Ubuntu 22.04 use `sudo apt install libfuse2`). Or skip the fix and start it with `./Dashboard-Hub.AppImage --appimage-extract-and-run`. Running from the source folder with `./RUN-APP.sh` never needs FUSE.
 
 macOS: the code is written to be cross-platform, but there is no macOS build set up yet and it has had little testing.

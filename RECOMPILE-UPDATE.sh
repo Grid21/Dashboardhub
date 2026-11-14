@@ -11,9 +11,14 @@ echo "  Dashboard Hub .hubupdate Compiler (Drag & Drop / CLI)"
 echo "============================================================="
 echo
 
-if ! command -v node >/dev/null 2>&1; then
+ENSURE="$DIR/ENSURE-NODE.sh"; [ -f "$ENSURE" ] || ENSURE="$DIR/../ENSURE-NODE.sh"
+if [ -f "$ENSURE" ]; then
+  # shellcheck disable=SC1090
+  source "$ENSURE"
+  ensure_node || exit 1
+elif ! command -v node >/dev/null 2>&1; then
   echo "Error: Node.js was not found in your PATH."
-  echo "Please install Node.js (LTS version) from https://nodejs.org"
+  echo "Please install Node.js (LTS version, 22 or newer) from https://nodejs.org"
   exit 1
 fi
 

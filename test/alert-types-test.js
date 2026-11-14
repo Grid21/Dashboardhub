@@ -19,7 +19,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const toasts = () => page.evaluate(() => Array.from(document.querySelectorAll('#mapToasts .map-toast')).map((t) => t.textContent));
   await page.click('#tabMap'); await sleep(500);
   await page.evaluate(() => { state.profiles[0].fp = null; saveState(); window.hubNetmap.guardCheck(); }); await sleep(300);
-  check('the button starts as "All devices"', (await page.textContent('#mapAlertTypes')).trim() === 'Alerts for: All devices');
+  check('the Alerts button starts as "all devices"', (await page.getAttribute('#mapAlertTypes', 'title')).includes('Alerts for: all devices'));
   // first scan sets the starting point (no alerts)
   await page.click('#mapScan'); await sleep(300); await host(5, 'linux'); await done(); await sleep(1200);
   // default: every kind raises an alert
@@ -33,7 +33,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.click('#alertTypesNone');
   await page.check('#alertTypesList input[value=linux]');
   await page.click('#alertTypesSave'); await sleep(300);
-  check('the button now says 1 of 9 kinds', (await page.textContent('#mapAlertTypes')).trim() === 'Alerts for: 1 of 9 kinds', await page.textContent('#mapAlertTypes'));
+  check('the button tooltip now says 1 of 9 kinds', (await page.getAttribute('#mapAlertTypes', 'title')).includes('Alerts for: 1 of 9 kinds'));
   await page.click('#mapScan'); await sleep(300); await host(5, 'linux'); await host(6, 'windows'); await host(7, 'iot'); await host(8, 'windows'); await host(9, 'linux'); await host(10, 'iot'); await host(11, 'printer'); await done(); await sleep(1200);
   t = await toasts();
   check('only the Linux device raises an alert now', t.length === 1 && /10\.8\.0\.9/.test(t[0]), JSON.stringify(t));
@@ -47,20 +47,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // nothing ticked = silent
   await page.evaluate(() => document.getElementById('mapToasts').textContent = '');
   await page.click('#mapAlertTypes'); await sleep(300); await page.click('#alertTypesNone'); await page.click('#alertTypesSave'); await sleep(300);
-  check('nothing ticked shows "No devices"', (await page.textContent('#mapAlertTypes')).trim() === 'Alerts for: No devices');
+  check('nothing ticked shows "no devices"', (await page.getAttribute('#mapAlertTypes', 'title')).includes('Alerts for: no devices'));
   await page.click('#mapScan'); await sleep(300); for (const [n, o] of [[5,'linux'],[6,'windows'],[7,'iot'],[8,'windows'],[9,'linux'],[10,'iot'],[11,'printer'],[12,'switch'],[13,'linux']]) await host(n, o); await host(14, 'linux'); await done(); await sleep(1200);
   check('nothing ticked means no alerts', (await toasts()).length === 0);
   // cancel keeps the old choice
   await page.click('#mapAlertTypes'); await sleep(300); await page.click('#alertTypesAll'); await page.click('#alertTypesCancel'); await sleep(200);
-  check('Cancel changes nothing', (await page.textContent('#mapAlertTypes')).trim() === 'Alerts for: No devices');
+  check('Cancel changes nothing', (await page.getAttribute('#mapAlertTypes', 'title')).includes('Alerts for: no devices'));
   // choice survives a restart
   await page.click('#mapAlertTypes'); await sleep(300); await page.check('#alertTypesList input[value=iot]'); await page.click('#alertTypesSave'); await sleep(500);
   await app.close(); await sleep(500);
   app = await launch(); page = await app.firstWindow(); await page.waitForSelector('#tabMap'); await page.click('#tabMap'); await sleep(800);
-  check('the choice is still there after restarting', (await page.textContent('#mapAlertTypes')).trim() === 'Alerts for: 1 of 9 kinds', await page.textContent('#mapAlertTypes'));
+  check('the choice is still there after restarting', (await page.getAttribute('#mapAlertTypes', 'title')).includes('Alerts for: 1 of 9 kinds'));
   await page.click('#mapAlertTypes'); await sleep(300);
   check('and only IoT is ticked', await page.evaluate(() => Array.from(document.querySelectorAll('#alertTypesList input')).filter((c) => c.checked).map((c) => c.value).join() === 'iot'));
   await page.click('#alertTypesAll'); await page.click('#alertTypesSave'); await sleep(300);
-  check('Tick all goes back to "All devices"', (await page.textContent('#mapAlertTypes')).trim() === 'Alerts for: All devices');
+  check('Tick all goes back to "All devices"', (await page.getAttribute('#mapAlertTypes', 'title')).includes('Alerts for: all devices'));
   console.log(failed ? '\nFAILED ' + failed : '\nAll ' + passed + ' passed'); await app.close(); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log('ERR', e); process.exit(2); });

@@ -2,6 +2,16 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.18.3
+- **Safety net for unexpected errors.** If something unexpected goes wrong inside the background program, it is now written to `error-log.txt` in your Dashboard Hub data folder (kept small) instead of possibly showing an error box or closing the app.
+- Robustness check, stage 2. Two new tests: `test/fuzz-ipc-test.js` sends junk (wrong types, huge text, odd characters) to all 91 channels between the window and the main program (2,408 calls: nothing crashed, hung or returned unsendable data), and `test/corrupt-data-test.js` starts the app with every saved data file damaged in six different ways (it always starts normally). No bugs were found in those areas.
+- Robustness check, stages 3 and 4 (tests only, no app change): `test/soak-test.js` runs the app 12 minutes with fast automatic scans and watches memory, processes and page size (all stayed flat); `test/update-e2e-test.js` starts an installed older program with the old 40-file limit, installs real update files through the real "Install update" step, restarts, checks it runs the new version, and goes back to the previous version. It also proves that a too-large update is refused, which is what broke 1.18.0.
+
+## 1.18.2
+- **Far fewer PING.EXE programs during a scan.** Before, every address on your network got its own ping (a separate PING.EXE each, up to 24 at once in a manual scan and 8 in an automatic one). Now a ping is only sent to machines that really are there (they answered the port check or are in your computer's address list), and only 8 run at once in a manual scan and 3 in an automatic one. Empty addresses are no longer pinged. Addresses on other networks are still pinged, just fewer at a time.
+- The ping is only used to guess the operating system, so scan results are the same; scans of a quiet network are also lighter on the network.
+- New test: `test/ping-count-test.js` counts how many pings start and how many run at once. The DNS test now waits properly for slow networks.
+
 ## 1.18.1
 - **Fixed: 1.18.0 could not be installed.** It showed "Could not install the update. The update file has an unexpected number of files." The starter program that checks update files accepts at most 40 files, and 1.18.0 had grown to 44. This version has exactly 40 again, with no change in what the program does: the stylesheets of the Remote view and Notifications windows now live inside their pages, the tiny Remote view button script moved into `renderer.js`, and the two pop-out windows share one `popout-preload.js` (each window still only gets its own functions).
 - If you already tried 1.18.0: nothing was installed, so you can install 1.18.1 directly.

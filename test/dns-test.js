@@ -96,7 +96,7 @@ function fakeDns(ip, mode) {
     ipcMain.handle('net:scan', (e, o) => { setTimeout(() => { const w = BrowserWindow.getAllWindows()[0]; w.webContents.send('net:event', { type: 'host', host: { ip: '127.0.0.11', mac: 'aa:bb:cc:00:00:01', hostname: 'pihole box', ports: [], os: { id: 'linux', label: 'Linux', confidence: 'low', reasons: [] } } }); w.webContents.send('net:event', { type: 'done' }); }, 150); return { ok: true, cidr: o.cidr }; });
   });
   await page.evaluate(() => { const x = window.hubNetmap.exportData(); Object.values(x.devices).forEach((d) => { d.dns = null; d.dnsAt = null; }); window.hubNetmap.importData(x, true); });
-  await page.click('#mapScan'); await sleep(3000);
+  await page.click('#mapScan'); for (let i = 0; i < 80; i++) { await sleep(1000); if (await page.evaluate(() => { const d = window.hubNetmap.exportData().devices.router; return !!(d && d.dnsAt); })) break; } await sleep(500);
   const afterScan = await page.evaluate((k) => { const x = window.hubNetmap.exportData().devices; return { router: x.router.dns && x.router.dns.software, pi: x[k].dns && x[k].dns.software, lapAt: !!x['aa:bb:cc:00:00:02'].dnsAt }; }, A);
   check('after a real scan finishes, DNS servers are found by themselves', afterScan.router === 'dnsmasq 2.89' && /Pi-hole/.test(afterScan.pi || ''), JSON.stringify(afterScan));
   check('the info is only in the device pane, not drawn on the map', await page.evaluate(() => !document.querySelector('#mapLegend').textContent.includes('DNS')));

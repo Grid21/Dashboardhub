@@ -695,9 +695,18 @@ function startScan(options, emit) {
 
   // A background scan is deliberately gentle: far fewer connections at the same time
   const tcp = limiter(background ? 40 : 200);
-  const pings = limiter(background ? 8 : 24);
+  // pings each start a separate ping program, so only a few run at once (and only for machines that need one, see below)
+  const pings = limiter(background ? 3 : 8);
   const hostsOut = new Map();   // ip -> host record
 
+  const localNets = [];         // the networks this computer is directly connected to
+  for (const i of (testHooks.interfaces || listInterfaces())) {
+    const m = /^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/.exec(i.cidr || '');
+    const b = m ? ipToInt(m[1]) : null;
+    if (b === null) continue;
+    const mask = Number(m[2]) === 0 ? 0 : ((0xFFFFFFFF << (32 - Number(m[2]))) >>> 0);
+    localNets.push({ base: (b & mask) >>> 0, mask: mask });
+  }
   const mine = new Map();       // our own addresses
   for (const i of listInterfaces()) mine.set(i.address, i.mac);
   if (loopback) mine.set('127.0.0.1', null);
@@ -710,10 +719,9 @@ function startScan(options, emit) {
     await Promise.all(parsed.hosts.map(async (ip) => {
       const info = { ttl: null, open: new Set(), answered: false };
       await Promise.all(!M.probe ? [] : [
-        pings(async () => { if (!canceled) info.ttl = await pingHost(ip); }),
         Promise.all(DISCOVERY_PORTS.map((p) => tcp(async () => {
           if (canceled) return;
-          const r = await tcpProbe(ip, p, 700);
+          const r = await (testHooks.tcpProbe || tcpProbe)(ip, p, 700);
           if (r === 'open') { info.open.add(p); info.answered = true; }
           else if (r === 'closed') info.answered = true;
         })))
@@ -725,6 +733,21 @@ function startScan(options, emit) {
       }
     }));
     if (canceled) return;
+
+    // Phase 1b: ping (only to read the reply's TTL, which hints at the operating system).
+    // Every ping starts its own ping.exe, so empty addresses are NOT pinged: on the local network a machine that is
+    // really there shows up in the ARP table after the port checks above. Addresses on other networks are still pinged.
+    if (M.probe) {
+      const arp0 = await readArpTable();
+      const onLink = (ip) => { const n = ipToInt(ip); return n !== null && localNets.some((x) => ((n & x.mask) >>> 0) === x.base); };
+      await Promise.all(parsed.hosts.map((ip) => {
+        const info = alive.get(ip);
+        if (!info || canceled) return null;
+        const needs = info.answered || arp0.has(ip) || !onLink(ip);
+        return needs ? pings(async () => { if (!canceled) info.ttl = await pingHost(ip); }) : null;
+      }));
+      if (canceled) return;
+    }
 
     const disc = await discoveryPromise;
     let arp = await readArpTable();

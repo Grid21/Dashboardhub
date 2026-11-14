@@ -244,6 +244,21 @@ function notesEncryptionOk() {
   }
 }
 
+// A safety net: an unexpected error in the background program is written to error-log.txt (in the data folder)
+// instead of showing a scary error box or closing the whole app. The log is kept small.
+function logProblem(kind, err) {
+  try {
+    const file = path.join(app.getPath('userData'), 'error-log.txt');
+    let old = '';
+    try { old = fs.readFileSync(file, 'utf8'); } catch (e) { /* first entry */ }
+    if (old.length > 60000) old = old.slice(-30000);
+    const msg = (err && err.stack) ? err.stack : String(err);
+    fs.writeFileSync(file, old + new Date().toISOString() + ' ' + kind + ': ' + String(msg).slice(0, 3000) + '\n');
+  } catch (e) { /* nothing more can be done */ }
+}
+process.on('uncaughtException', (err) => { logProblem('Unexpected error', err); });
+process.on('unhandledRejection', (err) => { logProblem('Unhandled problem', err); });
+
 function checkSender(event) {
   // Only our own main window may use the notes, never the web panels.
   if (!mainWindow || event.sender !== mainWindow.webContents) {

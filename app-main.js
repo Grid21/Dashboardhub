@@ -496,9 +496,11 @@ ipcMain.handle('pxe:addIso', async (event) => {
     return pxeMod.addIso(pick.filePaths[0]);
   } catch (e) { return { ok: false, error: 'That file could not be added.' }; }
 });
-ipcMain.handle('pxe:answers', (event, o) => { checkSender(event); o = o || {}; return pxeMod.setAnswers({ username: String(o.username || '').slice(0, 40), password: String(o.password || '').slice(0, 130), hostname: String(o.hostname || '').slice(0, 40), timezone: String(o.timezone || '').slice(0, 42), keyboard: String(o.keyboard || '').slice(0, 12) }); });
+ipcMain.handle('pxe:answers', (event, o) => { checkSender(event); o = o || {}; return pxeMod.setAnswers({ username: String(o.username || '').slice(0, 40), password: String(o.password || '').slice(0, 130), hostname: String(o.hostname || '').slice(0, 40), timezone: String(o.timezone || '').slice(0, 42), keyboard: String(o.keyboard || '').slice(0, 12), layout: String(o.layout || '').slice(0, 10), disk: String(o.disk || '').slice(0, 20) }); });
 ipcMain.handle('pxe:winshare', (event, o) => { checkSender(event); o = o || {}; return pxeMod.setWinShare({ unc: String(o.unc || '').slice(0, 160), user: String(o.user || '').slice(0, 70), bypass: o.bypass === true }); });
 ipcMain.handle('pxe:uefi', (event, v) => { checkSender(event); return pxeMod.setUefiLoader(String(v || '')); });
+ipcMain.handle('pxe:sbGet', async (event) => { checkSender(event); return pxeMod.getSecureBootFiles(); });
+ipcMain.handle('pxe:sbSet', (event, v) => { checkSender(event); return pxeMod.setSecureBoot(v === true); });
 ipcMain.handle('pxe:choice', (event, mac, what) => { checkSender(event); return pxeMod.setChoice(String(mac || '').slice(0, 40), String(what || '').slice(0, 40)); });
 ipcMain.handle('pxe:check', async (event, ip) => { checkSender(event); try { return await pxeMod.check(String(ip || '').slice(0, 40)); } catch (e) { return { ok: false, error: 'The check could not run.' }; } });
 ipcMain.handle('pxe:removeIso', (event, id) => { checkSender(event); return pxeMod.removeIso(String(id || '')); });

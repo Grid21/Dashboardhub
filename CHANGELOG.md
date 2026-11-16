@@ -2,6 +2,29 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.20.0
+- **Secure Boot network boot.** Computers with Secure Boot ON refuse Dashboard Hub's unsigned boot loaders. The Network boot window now has "Secure Boot computers (advanced)": "Download the signed files" fetches Ubuntu's own Microsoft-signed `shim` and Canonical-signed network `grub` from Ubuntu's official archive (checked against the archive's checksums), and a tick box hands them out to computers that start in UEFI mode. The computer then starts shim, then grub (which shows a menu from Dashboard Hub, including the unattended-install choices), then a signed Ubuntu kernel from your disc. Ubuntu-style discs only. Older-BIOS computers and computers with Secure Boot off keep using the normal loaders.
+- Tested with a virtual computer with real Secure Boot firmware (OVMF with Microsoft keys) and the real signed Ubuntu files: the firmware accepted shim and grub, accepted a signed kernel, and refused an unsigned one ("bad shim signature") before loading anything. `test/secureboot-vm-test.js` (16 checks; needs root, QEMU, OVMF, dnsmasq) and `test/pxe-sb-ui-test.js` (10 checks). Not tested on a real computer.
+- Found while testing: Hub's DHCP reply is broadcast to 255.255.255.255, and on a computer with several network connections (for example Wi-Fi plus a cable to the PXE computer) the system may send that broadcast out of the wrong connection. Not changed yet.
+- New: `DEVELOPMENT-RULES.md` and a file guard (`tools/release-files.txt`, `tools/removed-files.txt`): `check-release` now fails if any file from earlier releases disappears without being written down. Rule: files are never removed unless the owner asks or an update no longer needs them.
+- Note: the 1.19.1 files already contained the unfinished Secure Boot code in `pxe.js`, switched off and without any buttons. This version finishes it.
+
+## 1.19.1
+- **Uninstall scripts are back: `UNINSTALL.bat` (Windows) and `UNINSTALL.sh` (Linux/macOS).** Put them next to the other `.bat`/`.sh` files. They show what they found and ask before removing each part: the finished "Dashboard Hub" program folder, the libraries downloaded on first run, the copy of Node.js the scripts downloaded for themselves (never a Node.js you installed yourself), and launcher entries. `UNINSTALL.bat` starts the Setup program's own uninstaller if Dashboard Hub was installed that way. Your data is always asked separately and is kept unless you say yes. Neither script deletes the source folder itself.
+- **They can no longer silently disappear.** `tools/check-release.js` checks that the uninstall scripts, the installer's uninstaller settings (`build/installer.nsh` and the `package.json` installer settings) and the other required files are present. `tools/make-update.js` now refuses to make an update while anything is missing, and `npm run check` runs it by hand.
+- BUILD-APP, the README, FEATURES and the in-app manual now mention the uninstall scripts.
+- New tests: `test/uninstall-test.sh` (16 checks, runs UNINSTALL.sh on throwaway folders) and `test/release-check-test.js` (14 checks). `UNINSTALL.bat` could only be checked for structure here, not run on Windows.
+- Note: `.hubupdate` files can only carry `.js`, `.json`, `.html` and `.css` files, so the two uninstall scripts come with the source zip and must be copied into your Dashboard Hub folder by hand.
+
+## 1.19.0
+- **UEFI-aware unattended installs, with a choice of disk (stage A, inspired by how Foreman handles UEFI hosts).**
+  - New "Install on which disk" choice: let the installer decide (as before, erases every disk), only the largest internal disk (USB sticks are skipped), or a disk you name (`sda`, `nvme0n1`, `vda`...). Disk names are strictly checked. A named or "largest" disk that is not found stops the install before anything is erased.
+  - New "Disk layout" choice for Rocky/Alma/Fedora: "Simple" makes the partitions that fit how the computer really started. A small script inside the installer looks for `/sys/firmware/efi`: UEFI mode gets an EFI partition + /boot + one big root, older BIOS mode gets a BIOS boot partition + /boot + one big root with the boot loader on the chosen disk. Ubuntu discs use their own standard layout on the disk you pick.
+  - The network boot log now says whether each computer started in UEFI or BIOS mode when it fetches its answers, and what that means for the install.
+  - Default settings write exactly the same answer files as before.
+- Fixed the text that said the first disk is erased: it is every disk unless you choose otherwise.
+- New tests: `test/pxe-disk-test.js` (19 checks, including running the installer script with pretend disks and a pretend UEFI folder, and checking the answer files with `ksvalidator`) and `test/pxe-disk-ui-test.js` (9). Not yet run in a real installer on real hardware.
+
 ## 1.18.3
 - **Safety net for unexpected errors.** If something unexpected goes wrong inside the background program, it is now written to `error-log.txt` in your Dashboard Hub data folder (kept small) instead of possibly showing an error box or closing the app.
 - Robustness check, stage 2. Two new tests: `test/fuzz-ipc-test.js` sends junk (wrong types, huge text, odd characters) to all 91 channels between the window and the main program (2,408 calls: nothing crashed, hung or returned unsendable data), and `test/corrupt-data-test.js` starts the app with every saved data file damaged in six different ways (it always starts normally). No bugs were found in those areas.

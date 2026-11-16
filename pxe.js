@@ -130,6 +130,8 @@ function sha512crypt(password, salt, rounds) {
   put(C[63], 2);
   return '$6$' + sl.toString('latin1') + '$' + out;
 }
+// the only disk names accepted (they end up inside the installer's script, so nothing else may get through)
+const DISK_NAME = /^(sd[a-z]{1,2}|vd[a-z]{1,2}|xvd[a-z]{1,2}|hd[a-z]|nvme\d{1,2}n\d{1,2}|mmcblk\d{1,2})$/;
 function cleanAnswers(o, old) {
   const crypto = require('crypto');
   const t = (v) => String(v == null ? '' : v).trim();
@@ -142,17 +144,45 @@ function cleanAnswers(o, old) {
   let hash = old && old.hash || '';
   if (pw) { let salt = ''; const r = crypto.randomBytes(16); for (let i = 0; i < 16; i++) salt += CRYPT64[r[i] & 63]; hash = sha512crypt(pw, salt); }
   if (!hash) return { error: 'Type a password for the new user.' };
-  return { answers: { username: user, hostname: host, timezone: tz, keyboard: kb, hash } };
+  const layout = t(o.layout || 'auto').toLowerCase(), disk = t(o.disk || 'auto').toLowerCase();
+  if (layout !== 'auto' && layout !== 'simple') return { error: 'The disk layout must be "automatic" or "simple".' };
+  if (disk !== 'auto' && disk !== 'largest' && !DISK_NAME.test(disk)) return { error: 'The disk name looks like sda, nvme0n1 or vda (letters and numbers only, no /dev/).' };
+  return { answers: { username: user, hostname: host, timezone: tz, keyboard: kb, hash, layout, disk } };
 }
 function userDataText(a, id) {
   return ['#cloud-config', 'autoinstall:', '  version: 1', '  locale: en_US.UTF-8', '  keyboard: {layout: ' + a.keyboard + '}', '  timezone: ' + a.timezone,
     '  identity: {hostname: ' + a.hostname + ', username: ' + a.username + ', password: "' + a.hash + '"}', '  ssh: {install-server: true, allow-pw: true}',
-    '  storage: {layout: {name: direct}}', '  updates: security', '  shutdown: reboot', ''].join('\n');
+    '  storage: {layout: {name: direct' + (a.disk === 'largest' ? ', match: {size: largest}' : DISK_NAME.test(a.disk || '') ? ', match: {path: /dev/' + a.disk + '}' : '') + '}}', '  updates: security', '  shutdown: reboot', ''].join('\n');
+}
+// The disk part of a Rocky/Alma/Fedora answer file. With the default settings (automatic layout, installer picks the disk) it is
+// exactly what earlier versions wrote. Otherwise a small script runs inside the installer, which can see whether the computer
+// really started in UEFI mode (the folder /sys/firmware/efi exists) and so makes the right partitions for that mode.
+function kickstartDisk(a) {
+  const disk = a.disk || 'auto', layout = a.layout || 'auto';
+  if (disk === 'auto' && layout === 'auto') return ['zerombr', 'clearpart --all --initlabel', 'autopart'];
+  const L = ['%pre --interpreter=/bin/sh --erroronfail', 'DISK=""'];
+  if (disk === 'largest') L.push("DISK=$(lsblk -dnbo NAME,SIZE,TYPE,RM 2>/dev/null | awk '$3==\"disk\" && $4==\"0\" {print $2, $1}' | sort -rn | head -1 | awk '{print $2}')");
+  else if (disk !== 'auto') L.push('DISK=' + disk);
+  if (disk !== 'auto') L.push('if [ -z "$DISK" ] || [ ! -b "/dev/$DISK" ]; then echo "Dashboard Hub: the disk to install on was not found. Nothing was erased." >&2; exit 1; fi');
+  const ONDISK = disk === 'auto' ? '' : ' --ondisk=$DISK';
+  L.push('if [ -d /sys/firmware/efi ]; then MODE=efi; else MODE=bios; fi', 'echo "Dashboard Hub: installing in $MODE mode${DISK:+ on /dev/$DISK}" >&2');
+  const head = () => disk === 'auto' ? ['zerombr', 'clearpart --all --initlabel --disklabel=gpt'] : ['ignoredisk --only-use=$DISK', 'zerombr', 'clearpart --all --initlabel --disklabel=gpt --drives=$DISK'];
+  const body = (mode) => layout === 'auto' ? ['autopart'] : (mode === 'efi'
+    ? ['part /boot/efi --fstype=efi --size=600' + ONDISK, 'part /boot --fstype=xfs --size=1024' + ONDISK, 'part / --fstype=xfs --size=1 --grow' + ONDISK]
+    : ['part biosboot --fstype=biosboot --size=1' + ONDISK, 'part /boot --fstype=xfs --size=1024' + ONDISK, 'part / --fstype=xfs --size=1 --grow' + ONDISK, 'bootloader --location=mbr' + (disk === 'auto' ? '' : ' --boot-drive=$DISK')]);
+  ['efi', 'bios'].forEach((mode, i) => {
+    L.push((i ? 'else' : 'if [ "$MODE" = efi ]; then'));
+    L.push('cat > /tmp/hub-part <<HUBEOF');
+    head().concat(body(mode)).forEach((x) => L.push(x));
+    L.push('HUBEOF');
+  });
+  L.push('fi', '%end', '%include /tmp/hub-part');
+  return L;
 }
 function kickstartText(a, base, repo) {
   return ['text', 'reboot', repo ? 'url --url=' + base : '# no packages on this disc: the installer picks an online mirror', 'lang en_US.UTF-8', "keyboard --xlayouts='" + a.keyboard + "'", 'timezone ' + a.timezone + ' --utc',
-    'network --bootproto=dhcp --hostname=' + a.hostname + ' --activate', 'rootpw --lock', 'user --name=' + a.username + ' --groups=wheel --iscrypted --password=' + a.hash,
-    'zerombr', 'clearpart --all --initlabel', 'autopart', 'firstboot --disable', '%packages', '@^minimal-environment', '%end', ''].join('\n');
+    'network --bootproto=dhcp --hostname=' + a.hostname + ' --activate', 'rootpw --lock', 'user --name=' + a.username + ' --groups=wheel --iscrypted --password=' + a.hash]
+    .concat(kickstartDisk(a), ['firstboot --disable', '%packages', '@^minimal-environment', '%end', '']).join('\n');
 }
 
 const WIN_DEFAULT = { unc: '', user: '', bypass: false };
@@ -248,6 +278,164 @@ function buildReply(req, type, serverIp, bootfile, extra) {
 }
 
 // ---------- TFTP (read only, only the two boot loaders) ----------
+// ---------- reading .deb packages (needed for the Secure Boot boot files) ----------
+// A .deb is an "ar" archive holding data.tar.xz / data.tar.zst / data.tar.gz. Node itself can unpack gzip and zstd; the small
+// XZ (LZMA2) reader below covers the rest, so nothing has to be installed on the computer.
+function xzDecode(buf) {
+  if (buf.length < 32 || buf.readUInt32BE(0) !== 0xFD377A58 || buf.readUInt16BE(4) !== 0x5A00) throw new Error('not an .xz file');
+  const checkLen = { 0: 0, 1: 4, 4: 8, 10: 32 }[buf[7] & 15];
+  if (checkLen === undefined) throw new Error('unsupported .xz check type');
+  let out = Buffer.alloc(1 << 20), n = 0, p = 12;
+  const need = (extra) => { if (n + extra > out.length) { const b = Buffer.alloc(Math.max(out.length * 2, n + extra)); out.copy(b, 0, 0, n); out = b; } };
+  while (p < buf.length && buf[p] !== 0) {                       // a 0 byte here is the index: the end of the blocks
+    const hsz = (buf[p] + 1) * 4, hdr = buf.subarray(p, p + hsz), flags = hdr[1];
+    let q = 2; const vint = () => { let v = 0, s = 0, b; do { b = hdr[q++]; v += (b & 127) * Math.pow(2, s); s += 7; } while (b & 128); return v; };
+    if (flags & 0x40) vint();
+    if (flags & 0x80) vint();
+    if ((flags & 3) !== 0) throw new Error('unsupported .xz filter chain');   // exactly one filter: LZMA2
+    if (vint() !== 0x21) throw new Error('unsupported .xz filter');
+    vint(); p += hsz;
+    // ---- LZMA2 chunks ----
+    let lc = 0, lp = 0, pb = 0, probs = null, state = 0, rep0 = 0, rep1 = 0, rep2 = 0, rep3 = 0, needProps = true;
+    const blockStart = n;
+    for (;;) {
+      const ctl = buf[p++];
+      if (ctl === 0) break;
+      if (ctl === 1 || ctl === 2) { const len = buf.readUInt16BE(p) + 1; p += 2; need(len); buf.copy(out, n, p, p + len); n += len; p += len; continue; }
+      if (ctl < 0x80) throw new Error('bad .xz data');
+      const unp = (((ctl & 31) << 16) | buf.readUInt16BE(p)) + 1, pack = buf.readUInt16BE(p + 2) + 1; p += 4;
+      const mode = (ctl >> 5) & 3;
+      if (mode >= 2) { let d = buf[p++]; if (d > 224) throw new Error('bad .xz data'); lc = d % 9; d = (d - lc) / 9; lp = d % 5; pb = (d - lp) / 5; if (lc + lp > 4) throw new Error('bad .xz data'); needProps = false; }
+      if (needProps) throw new Error('bad .xz data');
+      if (mode >= 1 || !probs) {                                // state reset
+        probs = { lit: new Uint16Array(0x300 << (lc + lp)).fill(1024), isMatch: new Uint16Array(12 << 4).fill(1024), isRep: new Uint16Array(12).fill(1024), isRepG0: new Uint16Array(12).fill(1024), isRepG1: new Uint16Array(12).fill(1024), isRepG2: new Uint16Array(12).fill(1024), isRep0Long: new Uint16Array(12 << 4).fill(1024), posSlot: new Uint16Array(4 << 6).fill(1024), posSpec: new Uint16Array(115).fill(1024), align: new Uint16Array(16).fill(1024), len: lenProbs(), repLen: lenProbs() };
+        state = 0; rep0 = rep1 = rep2 = rep3 = 0;
+      }
+      // ---- range decoder over this chunk ----
+      const end = p + pack; let range = 0xFFFFFFFF, code = buf.readUInt32BE(p + 1) >>> 0; let ip = p + 5;
+      const bit = (arr, i) => {
+        const pr = arr[i], bound = (range >>> 11) * pr; let r;
+        if (code < bound) { range = bound; arr[i] = pr + ((2048 - pr) >> 5); r = 0; } else { range -= bound; code -= bound; arr[i] = pr - (pr >> 5); r = 1; }
+        if (range < 16777216) { range = (range * 256) >>> 0; code = ((code * 256) + buf[ip++]) >>> 0; }
+        return r;
+      };
+      const tree = (arr, base, bits) => { let m = 1; for (let i = 0; i < bits; i++) m = (m << 1) | bit(arr, base + m); return m - (1 << bits); };
+      const rtree = (arr, base, bits) => { let m = 1, sym = 0; for (let i = 0; i < bits; i++) { const b = bit(arr, base + m); m = (m << 1) | b; sym |= b << i; } return sym; };
+      const direct = (cnt) => { let r = 0; for (let i = 0; i < cnt; i++) { range = range >>> 1; let t = 0; if (code >= range) { code -= range; t = 1; } r = ((r << 1) | t) >>> 0; if (range < 16777216) { range = (range * 256) >>> 0; code = ((code * 256) + buf[ip++]) >>> 0; } } return r; };
+      const decLen = (lp2, posState) => {
+        if (!bit(lp2.choice, 0)) return tree(lp2.low, posState << 3, 3);
+        if (!bit(lp2.choice, 1)) return 8 + tree(lp2.mid, posState << 3, 3);
+        return 16 + tree(lp2.high, 0, 8);
+      };
+      const stop = n + unp, chunkStart = n; need(unp);
+      while (n < stop) {
+        const pos = n - blockStart, posState = pos & ((1 << pb) - 1);
+        if (!bit(probs.isMatch, (state << 4) + posState)) {
+          const prev = pos > 0 ? out[n - 1] : 0, off = 0x300 * (((pos & ((1 << lp) - 1)) << lc) + (prev >> (8 - lc)));
+          let sym = 1;
+          if (state >= 7) { let mb = out[n - rep0 - 1]; do { const mbit = (mb >> 7) & 1; mb <<= 1; const b = bit(probs.lit, off + ((1 + mbit) << 8) + sym); sym = (sym << 1) | b; if (mbit !== b) break; } while (sym < 0x100); }
+          while (sym < 0x100) sym = (sym << 1) | bit(probs.lit, off + sym);
+          out[n++] = sym & 255;
+          state = state < 4 ? 0 : state < 10 ? state - 3 : state - 6;
+          continue;
+        }
+        let len;
+        if (bit(probs.isRep, state)) {
+          if (pos === 0) throw new Error('bad .xz data');
+          if (!bit(probs.isRepG0, state)) {
+            if (!bit(probs.isRep0Long, (state << 4) + posState)) { state = state < 7 ? 9 : 11; out[n] = out[n - rep0 - 1]; n++; continue; }
+          } else {
+            let dist;
+            if (!bit(probs.isRepG1, state)) dist = rep1; else { if (!bit(probs.isRepG2, state)) dist = rep2; else { dist = rep3; rep3 = rep2; } rep2 = rep1; }
+            rep1 = rep0; rep0 = dist;
+          }
+          len = decLen(probs.repLen, posState); state = state < 7 ? 8 : 11;
+        } else {
+          rep3 = rep2; rep2 = rep1; rep1 = rep0;
+          len = decLen(probs.len, posState); state = state < 7 ? 7 : 10;
+          const lenState = len < 4 ? len : 3, slot = tree(probs.posSlot, lenState << 6, 6);
+          if (slot < 4) rep0 = slot;
+          else {
+            const nb = (slot >> 1) - 1; let d = (2 | (slot & 1)) << nb;
+            if (slot < 14) d += rtree(probs.posSpec, d - slot, nb); else { d += direct(nb - 4) * 16; d += rtree(probs.align, 0, 4); }
+            rep0 = d >>> 0;
+            if (rep0 === 0xFFFFFFFF) break;                      // end marker
+          }
+        }
+        len += 2;
+        if (rep0 >= pos || n + len > stop) throw new Error('bad .xz data');
+        for (let k = 0; k < len; k++) { out[n] = out[n - rep0 - 1]; n++; }
+      }
+      if (n - chunkStart !== unp) throw new Error('bad .xz data');
+      p = end;
+    }
+    p += (4 - ((p - 0) % 4)) % 4;                                // block padding (blocks start 4-byte aligned from the file start)
+    p += checkLen;
+  }
+  return out.subarray(0, n);
+}
+function lenProbs() { return { choice: new Uint16Array(2).fill(1024), low: new Uint16Array(16 << 3).fill(1024), mid: new Uint16Array(16 << 3).fill(1024), high: new Uint16Array(256).fill(1024) }; }
+
+// the file called wanted ("./usr/lib/shim/shimx64.efi.signed.latest") out of a .deb
+function debFile(deb, wanted) {
+  const zlib = require('zlib');
+  if (deb.toString('latin1', 0, 8) !== '!<arch>\n') throw new Error('not a .deb file');
+  let p = 8, data = null, name = '';
+  while (p + 60 <= deb.length) {
+    const nm = deb.toString('latin1', p, p + 16).trim().replace(/\/$/, ''), size = parseInt(deb.toString('latin1', p + 48, p + 58), 10);
+    if (!(size >= 0)) throw new Error('bad .deb file');
+    if (/^data\.tar/.test(nm)) { data = deb.subarray(p + 60, p + 60 + size); name = nm; break; }
+    p += 60 + size + (size & 1);
+  }
+  if (!data) throw new Error('no data in the .deb file');
+  const tar = /\.xz$/.test(name) ? xzDecode(data) : /\.zst$/.test(name) ? zlib.zstdDecompressSync(data) : /\.gz$/.test(name) ? zlib.gunzipSync(data) : /\.tar$/.test(name) ? data : null;
+  if (!tar) throw new Error('unknown .deb compression (' + name + ')');
+  let q = 0; const want = String(wanted).replace(/^\.?\//, '');
+  let longName = '';
+  while (q + 512 <= tar.length) {
+    const h = tar.subarray(q, q + 512); if (h[0] === 0) break;
+    let nm = longName || (h.toString('latin1', 345, 500).replace(/\0.*$/, '') ? h.toString('latin1', 345, 500).replace(/\0.*$/, '') + '/' : '') + h.toString('latin1', 0, 100).replace(/\0.*$/, '');
+    longName = '';
+    const size = parseInt(h.toString('latin1', 124, 136).replace(/\0.*$/, '').trim() || '0', 8), type = String.fromCharCode(h[156] || 48);
+    if (type === 'L') { longName = tar.toString('latin1', q + 512, q + 512 + size).replace(/\0.*$/, ''); }
+    else if ((type === '0' || type === '\0') && nm.replace(/^\.?\//, '') === want) return Buffer.from(tar.subarray(q + 512, q + 512 + size));
+    q += 512 + Math.ceil(size / 512) * 512;
+  }
+  throw new Error('the file ' + wanted + ' is not in the .deb file');
+}
+
+// ---------- Secure Boot boot files (official, signed Ubuntu files) ----------
+// Computers with Secure Boot ON only run boot programs signed by a company their firmware trusts. iPXE (Dashboard Hub's normal
+// loader) is not signed, so for those computers Dashboard Hub hands out Ubuntu's signed "shim" (signed by Microsoft) and
+// Ubuntu's signed network "grub" (signed by Canonical) instead. Both are downloaded straight from Ubuntu's own archive, over
+// https, and checked against the checksum list of that archive. The computer's firmware checks the signatures again when it boots.
+const SB_SUITES = ['noble-updates', 'noble'];
+function fetchBuf(url, max, hops) {
+  return new Promise((resolve, reject) => {
+    const mod = /^https:/.test(url) ? require('https') : http;
+    const req = mod.get(url, { headers: { 'User-Agent': 'DashboardHub' }, timeout: 30000 }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && (hops || 0) < 4) { res.resume(); resolve(fetchBuf(new URL(res.headers.location, url).href, max, (hops || 0) + 1)); return; }
+      if (res.statusCode !== 200) { res.resume(); reject(new Error('The download server answered ' + res.statusCode + '.')); return; }
+      const parts = []; let n = 0;
+      res.on('data', (c) => { n += c.length; if (n > max) { req.destroy(new Error('The download was bigger than expected.')); return; } parts.push(c); });
+      res.on('end', () => resolve(Buffer.concat(parts)));
+      res.on('error', reject);
+    });
+    req.on('timeout', () => req.destroy(new Error('The download server did not answer in time.')));
+    req.on('error', reject);
+  });
+}
+// the entry for one package out of an Ubuntu "Packages" list
+function packageEntry(text, pkg) {
+  const blocks = String(text).split('\n\n'); let best = null;
+  blocks.forEach((b) => {
+    if (!new RegExp('^Package: ' + pkg.replace(/[-.]/g, '\\$&') + '$', 'm').test(b)) return;
+    const f = /^Filename: (\S+)$/m.exec(b), h = /^SHA256: ([0-9a-f]{64})$/m.exec(b), v = /^Version: (\S+)$/m.exec(b);
+    if (f && h && v && /^pool\/[A-Za-z0-9._+\/~-]+\.deb$/.test(f[1])) best = { file: f[1], sha256: h[1], version: v[1] };
+  });
+  return best;
+}
+
 function startTftp(port, files, log) {
   return new Promise((resolve, reject) => {
     const sock = dgram.createSocket({ type: 'udp4', reuseAddr: true });
@@ -255,9 +443,10 @@ function startTftp(port, files, log) {
     sock.on('message', (msg, ri) => {
       if (msg.length < 4 || msg.readUInt16BE(0) !== 1) { err(sock, ri, 4, 'Only reading is allowed'); return; }
       const parts = msg.subarray(2).toString('latin1').split('\0');
-      const name = path.basename(parts[0] || '').toLowerCase();
-      const buf = files[name];
-      if (!buf) { err(sock, ri, 1, 'File not found'); log('tftp-miss', ri.address, parts[0]); return; }
+      const asked = String(parts[0] || '').replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
+      const name = path.basename(asked);
+      const buf = typeof files === 'function' ? files(asked) : files[name];
+      if (!buf) { err(sock, ri, 1, 'File not found'); if (!/^revocations/.test(name)) log('tftp-miss', ri.address, parts[0]); return; }
       const opt = {};
       for (let i = 2; i + 1 < parts.length; i += 2) opt[parts[i].toLowerCase()] = parts[i + 1];
       const t = dgram.createSocket('udp4');
@@ -314,10 +503,17 @@ function create(opts) {
   const delivered = new Map();                      // 'mac id' -> time the install answers were fetched (they stay available for 30 minutes)
   let uefiLoader = 'snponly';                       // which UEFI boot loader to hand out: 'snponly' (uses the firmware's network card) or 'ipxe' (iPXE's own card drivers)
   let allow = { macs: [], any: false };
+  let secureBoot = false;                           // hand out Ubuntu's signed boot files to UEFI computers (for computers with Secure Boot ON)
+  let sb = null;                                    // { shim, grub, info } the signed boot files, once downloaded
+  const sbDir = path.join(dataDir, 'secureboot');
+  try {
+    const shim = fs.readFileSync(path.join(sbDir, 'shimx64.efi')), grub = fs.readFileSync(path.join(sbDir, 'grubx64.efi'));
+    if (shim.length > 100000 && grub.length > 100000 && shim.toString('latin1', 0, 2) === 'MZ' && grub.toString('latin1', 0, 2) === 'MZ') sb = { shim, grub, info: JSON.parse(fs.readFileSync(path.join(sbDir, 'info.json'), 'utf8')) };
+  } catch (e) { /* not downloaded yet */ }
   let choice = {};   // per computer: what to start by itself ('menu', 'local', 'netbootxyz' or 'iso:<id>')   // which machines may be answered (nothing is answered until you list one)
-  try { const j = JSON.parse(fs.readFileSync(store, 'utf8')); if (j.allow && Array.isArray(j.allow.macs)) allow = { macs: j.allow.macs.map(normMac).filter(Boolean).slice(0, 50), any: j.allow.any === true }; if (j.choice && typeof j.choice === 'object') Object.keys(j.choice).slice(0, 50).forEach((k) => { const m = normMac(k); if (m && /^(menu|local|netbootxyz|iso:[a-z0-9]{3,12}(:auto)?)$/.test(String(j.choice[k]))) choice[m] = String(j.choice[k]); }); if (j.answers && typeof j.answers === 'object') { const c = cleanAnswers(Object.assign({}, j.answers, { password: '' }), j.answers); if (c.answers) answers = c.answers; } if (j.winShare && typeof j.winShare === 'object') { const c = cleanWinShare(j.winShare); if (c.win) winShare = c.win; } if (j.uefiLoader === 'ipxe' || j.uefiLoader === 'snponly') uefiLoader = j.uefiLoader; if (Array.isArray(j.isos)) isos = j.isos.filter((x) => x && typeof x.path === 'string' && /^[a-z0-9]{3,12}$/.test(x.id)).slice(0, 40); } catch (e) { /* none yet */ }
+  try { const j = JSON.parse(fs.readFileSync(store, 'utf8')); if (j.allow && Array.isArray(j.allow.macs)) allow = { macs: j.allow.macs.map(normMac).filter(Boolean).slice(0, 50), any: j.allow.any === true }; if (j.choice && typeof j.choice === 'object') Object.keys(j.choice).slice(0, 50).forEach((k) => { const m = normMac(k); if (m && /^(menu|local|netbootxyz|iso:[a-z0-9]{3,12}(:auto)?)$/.test(String(j.choice[k]))) choice[m] = String(j.choice[k]); }); if (j.secureBoot === true) secureBoot = true; if (j.answers && typeof j.answers === 'object') { const c = cleanAnswers(Object.assign({}, j.answers, { password: '' }), j.answers); if (c.answers) answers = c.answers; } if (j.winShare && typeof j.winShare === 'object') { const c = cleanWinShare(j.winShare); if (c.win) winShare = c.win; } if (j.uefiLoader === 'ipxe' || j.uefiLoader === 'snponly') uefiLoader = j.uefiLoader; if (Array.isArray(j.isos)) isos = j.isos.filter((x) => x && typeof x.path === 'string' && /^[a-z0-9]{3,12}$/.test(x.id)).slice(0, 40); } catch (e) { /* none yet */ }
   isos.forEach((x) => { if (x.mode === 'sanboot') { try { const i = analyzeIso(x.path); if (i.mode !== 'sanboot') { x.mode = i.mode; x.kernel = i.kernel; x.initrd = i.initrd; x.squash = i.squash; x.repo = i.repo === true; } } catch (e) { /* file missing */ } } });
-  const save = () => { try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(store, JSON.stringify({ isos, allow, choice, uefiLoader, answers, winShare }), { mode: 0o600 }); } catch (e) { /* not saved */ } };
+  const save = () => { try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(store, JSON.stringify({ isos, allow, choice, uefiLoader, secureBoot, answers, winShare }), { mode: 0o600 }); } catch (e) { /* not saved */ } };
 
   let running = false, ip = '', loaders = null, servers = {}, httpSrv = null;
   const logLines = [];
@@ -447,6 +643,9 @@ function create(opts) {
       if (req.method === 'GET' && (file === 'user-data' || file === 'ks.cfg') && live) {
         delivered.set(key, Date.now()); choice[mac] = 'local'; save();   // one shot: next time this computer starts from its own disk
         log('info', '', mac + ' fetched its install answers. It will install by itself now, and from now on it starts from its own disk.');
+        const bm = bootMode.get(mac);
+        if (bm === 'uefi') log('info', '', mac + ' started in UEFI mode, so it is installed in UEFI mode (with an EFI partition).');
+        else if (bm === 'bios') log('info', '', mac + ' started in older BIOS mode, so it is installed in BIOS mode (no EFI partition). If this computer can do UEFI and you want that, change its network boot choice in the firmware to the UEFI one and start again.');
       }
       return;
     }
@@ -465,6 +664,7 @@ function create(opts) {
   }
 
   const asks = new Map();                           // mac -> times it asked in the last 40 s
+  const bootMode = new Map();                       // mac -> 'uefi' | 'bios': how each computer started its network boot
   const menuMacs = new Set();                       // UEFI computers whose firmware ignored the short answer: they get the classic boot-menu answer
   function dhcpHandler(sock, isProxyPort) {
     return (msg, ri) => {
@@ -478,6 +678,7 @@ function create(opts) {
       if (!isProxyPort && mt !== 1 && mt !== 3) return;            // port 67: "who is there?" and the follow-up request that some firmware (Dell, Intel UEFI) broadcasts here instead of to port 4011
       if (isProxyPort && mt !== 3) return;                         // port 4011: the follow-up request
       const arch = clientArch(d);
+      bootMode.set(d.mac, arch === 0 ? 'bios' : (arch === 7 || arch === 9) ? 'uefi' : 'other');
       let file = '';
       const weakIpxe = isIpxe(d) && !ipxeCanHttp(d);                    // iPXE that cannot download over the web yet
       if (weakIpxe && !isProxyPort) {                                   // seen over and over = our own loader cannot do it either: stop instead of looping
@@ -489,6 +690,7 @@ function create(opts) {
       }
       if (ipxeCanHttp(d)) file = 'http://' + ip + ':' + ports.http + '/boot.ipxe';
       else if (arch === 0) file = 'undionly.kpxe';
+      else if ((arch === 7 || arch === 9) && secureBoot && sb) file = 'shimx64.efi';
       else if (arch === 7 || arch === 9) file = (uefiLoader === 'snponly' && loaders['snponly.efi']) ? 'snponly.efi' : 'ipxe.efi';
       else { log('info', '', d.mac + ' asked for a boot type this version does not offer (code ' + arch + ').'); return; }
       const firmwareUefi = (arch === 7 || arch === 9) && !isIpxe(d);                  // the firmware's own PXE, not iPXE
@@ -551,7 +753,16 @@ function create(opts) {
       step = ports.tftp; // iPXE looks for "autoexec.ipxe" next to the boot loader it was started from: a tiny script that points it straight at the menu
       const menuUrl = 'http://' + ip + ':' + ports.http + '/boot.ipxe';
       const autoexec = Buffer.from(['#!ipxe', 'echo Dashboard Hub network boot: script started', 'ifstat', 'route', 'echo Getting the menu from ' + menuUrl, 'chain --timeout 15000 ' + menuUrl + ' && exit', 'echo That did not work with the settings the computer already has. Asking for an address...', 'dhcp || echo (could not get an address)', 'ifstat', 'route', 'chain --timeout 15000 ' + menuUrl + ' && exit', 'echo Still no menu. Testing the connection to ' + ip + ' ...', 'ping -c 3 ' + ip + ' || echo (no answer from ' + ip + ': firewall, wrong network or network card problem)', 'chain --timeout 30000 ' + menuUrl + ' || shell', ''].join('\n'));
-      servers.tftp = await startTftp(ports.tftp, Object.assign({}, loaders, { 'autoexec.ipxe': autoexec }), log); opened.push('tftp');
+      const tftpFiles = Object.assign({}, loaders, { 'autoexec.ipxe': autoexec });
+      servers.tftp = await startTftp(ports.tftp, (asked) => {
+        const b = path.posix.basename(asked);
+        if (secureBoot && sb) {
+          if (b === 'shimx64.efi') return sb.shim;
+          if (b === 'grubx64.efi') return sb.grub;
+          if (asked === 'grub/grub.cfg' || asked === 'grub.cfg') return grubCfg();
+        }
+        return tftpFiles[b];
+      }, log); opened.push('tftp');
       step = ports.dhcp; servers.dhcp = await bindUdp(ports.dhcp); servers.dhcp.on('message', dhcpHandler(servers.dhcp, false));
       step = ports.pxe; servers.pxe = await bindUdp(ports.pxe); servers.pxe.on('message', dhcpHandler(servers.pxe, true));
     } catch (e) {
@@ -598,6 +809,62 @@ function create(opts) {
     const c = cleanWinShare(o || {});
     if (c.error) return { ok: false, error: c.error };
     winShare = c.win; save(); return { ok: true };
+  }
+  // ---- Secure Boot ----
+  async function getSecureBootFiles() {
+    try {
+      const base = String(opts.sbMirror || 'https://archive.ubuntu.com/ubuntu').replace(/\/+$/, '');
+      const found = {};
+      for (const suite of SB_SUITES) {
+        if (found.shim && found.grub) break;
+        let list; try { list = require('zlib').gunzipSync(await fetchBuf(base + '/dists/' + suite + '/main/binary-amd64/Packages.gz', 40e6)).toString('utf8'); } catch (e) { if (suite === SB_SUITES[SB_SUITES.length - 1] && !found.shim) throw e; continue; }
+        if (!found.shim) found.shim = packageEntry(list, 'shim-signed');
+        if (!found.grub) found.grub = packageEntry(list, 'grub-efi-amd64-signed');
+      }
+      if (!found.shim || !found.grub) return { ok: false, error: 'The Ubuntu package list does not have the Secure Boot files right now.' };
+      const crypto = require('crypto');
+      const get = async (e) => { const b = await fetchBuf(base + '/' + e.file, 30e6); if (crypto.createHash('sha256').update(b).digest('hex') !== e.sha256) throw new Error('A download did not match the checksum from Ubuntu, so it was NOT used.'); return b; };
+      const shim = debFile(await get(found.shim), './usr/lib/shim/shimx64.efi.signed.latest');
+      const grub = debFile(await get(found.grub), './usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed');
+      if (shim.length < 100000 || grub.length < 100000 || shim.toString('latin1', 0, 2) !== 'MZ' || grub.toString('latin1', 0, 2) !== 'MZ') return { ok: false, error: 'The downloaded files do not look like boot programs, so they were NOT used.' };
+      const info = { from: 'Ubuntu archive', shim: found.shim.version, grub: found.grub.version, at: new Date().toISOString().slice(0, 10) };
+      fs.mkdirSync(sbDir, { recursive: true });
+      fs.writeFileSync(path.join(sbDir, 'shimx64.efi'), shim); fs.writeFileSync(path.join(sbDir, 'grubx64.efi'), grub); fs.writeFileSync(path.join(sbDir, 'info.json'), JSON.stringify(info));
+      sb = { shim, grub, info };
+      log('info', '', 'Secure Boot files downloaded from Ubuntu (shim ' + info.shim + ', grub ' + info.grub + ').');
+      return { ok: true, info };
+    } catch (e) {
+      return { ok: false, error: 'Could not get the Secure Boot files: ' + String((e && e.message) || e).slice(0, 200) + ' Check your internet connection and try again.' };
+    }
+  }
+  function setSecureBoot(on) {
+    if (on && !sb) return { ok: false, error: 'Get the Secure Boot files first.' };
+    secureBoot = !!on; save(); return { ok: true };
+  }
+  // the boot menu for computers that start through Secure Boot (grub reads it from "grub/grub.cfg"). Same ideas as the iPXE menu:
+  // each listed computer can have its own default, and only Ubuntu-style (casper) discs can be offered: their kernels are
+  // signed by Canonical, which is what Ubuntu's shim trusts.
+  function grubCfg() {
+    const gb = '(http,' + ip + ':' + ports.http + ')', web = 'http://' + ip + ':' + ports.http;
+    const ok = isos.filter((x) => x.ok !== false && x.mode === 'casper');
+    const nm = (x) => safeText(x.name).replace(/["`\\]/g, '');
+    const L = ['set timeout=20', 'set default=local', 'menuentry "Start from this computer\'s own disk" --id local { exit }'];
+    ok.forEach((x) => L.push('menuentry "' + nm(x) + '" --id iso' + x.id + ' {', '  linux ' + gb + '/iso/' + x.id + '/f' + enc(x.kernel) + ' boot=casper ip=dhcp url=' + web + '/iso/' + x.id + '/image.iso ---', '  initrd ' + gb + '/iso/' + x.id + '/f' + enc(x.initrd), '}'));
+    Object.keys(choice).forEach((m) => {
+      if (!allow.macs.includes(m)) return;
+      const c = choice[m], auto = /:auto$/.test(c), id = String(c).replace(/^iso:/, '').replace(/:auto$/, '');
+      const x = ok.find((i) => i.id === id);
+      if (c === 'local') L.push('if [ "$net_default_mac" = "' + m + '" ]; then set default=local; set timeout=5; fi');
+      else if (x && !auto) L.push('if [ "$net_default_mac" = "' + m + '" ]; then set default=iso' + x.id + '; set timeout=5; fi');
+      else if (x && auto && answers) {
+        L.push('if [ "$net_default_mac" = "' + m + '" ]; then',
+          '  menuentry "UNATTENDED install of ' + nm(x) + '" --id iso' + x.id + 'auto {',
+          '    regexp --set=1:a1 --set=2:a2 --set=3:a3 --set=4:a4 --set=5:a5 --set=6:a6 \'^(..):(..):(..):(..):(..):(..)$\' "$net_default_mac"',
+          '    linux ' + gb + '/iso/' + x.id + '/f' + enc(x.kernel) + ' boot=casper ip=dhcp url=' + web + '/iso/' + x.id + '/image.iso autoinstall "ds=nocloud-net;s=' + web + '/auto/' + x.id + '/${a1}-${a2}-${a3}-${a4}-${a5}-${a6}/" ---',
+          '    initrd ' + gb + '/iso/' + x.id + '/f' + enc(x.initrd), '  }', '  set default=iso' + x.id + 'auto; set timeout=5', 'fi');
+      }
+    });
+    return Buffer.from(L.join('\n') + '\n');
   }
   function setUefiLoader(v) { if (v !== 'snponly' && v !== 'ipxe') return { ok: false, error: 'Unknown loader' }; uefiLoader = v; save(); return { ok: true }; }
   function setAllow(o) {
@@ -651,12 +918,12 @@ function create(opts) {
   function status() {
     isos.forEach((x) => { try { fs.accessSync(x.path, fs.constants.R_OK); x.ok = true; } catch (e) { x.ok = false; } });
     return {
-      running, ip, uefiLoader, winShare: Object.assign({}, winShare), answers: answers ? { username: answers.username, hostname: answers.hostname, timezone: answers.timezone, keyboard: answers.keyboard, hasPassword: true } : null, allow: { macs: allow.macs.slice(), any: allow.any, choice: Object.assign({}, choice) }, ports: { dhcp: ports.dhcp, pxe: ports.pxe, tftp: ports.tftp, http: ports.http }, addresses: localAddresses(),
+      running, ip, uefiLoader, secureBoot: { on: secureBoot && !!sb, ready: !!sb, info: sb ? sb.info : null }, winShare: Object.assign({}, winShare), answers: answers ? { username: answers.username, hostname: answers.hostname, timezone: answers.timezone, keyboard: answers.keyboard, layout: answers.layout || 'auto', disk: answers.disk || 'auto', hasPassword: true } : null, allow: { macs: allow.macs.slice(), any: allow.any, choice: Object.assign({}, choice) }, ports: { dhcp: ports.dhcp, pxe: ports.pxe, tftp: ports.tftp, http: ports.http }, addresses: localAddresses(),
       isos: isos.map((x) => ({ id: x.id, name: x.name, path: x.path, mode: x.mode, size: x.size, ok: x.ok !== false })),
       clients: Array.from(clients.entries()).map(([a, c]) => ({ ip: a, last: c.last, t: c.t })), log: logLines.slice(-40)
     };
   }
-  return { start, stop, addIso, removeIso, renameIso, setAllow, setChoice, setUefiLoader, setAnswers, setWinShare, check, status, menuScript, _isos: () => isos };
+  return { start, stop, addIso, removeIso, renameIso, setAllow, setChoice, setUefiLoader, setSecureBoot, getSecureBootFiles, setAnswers, setWinShare, check, status, menuScript, _isos: () => isos };
 }
 
-module.exports = { sha512crypt, pxeSub, create, analyzeIso, openIso, parseDhcp, buildReply, normMac, ipxeFeatures, PORTS };
+module.exports = { xzDecode, debFile, packageEntry, kickstartText, userDataText, cleanAnswers, DISK_NAME, sha512crypt, pxeSub, create, analyzeIso, openIso, parseDhcp, buildReply, normMac, ipxeFeatures, PORTS };

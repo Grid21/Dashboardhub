@@ -64,6 +64,11 @@ for (const req of ['app-main.js', 'preload.js', 'renderer.js', 'index.html', 'st
 
 // Programs built before 1.18.1 refuse an update with more than 40 files ("unexpected number of files").
 // An update can't change that rule, so stay within it unless you really mean to need a newer full build.
+// never make an update while something a release must contain (like the uninstall scripts) is missing
+{
+  const problems = require('./check-release').problems;
+  if (problems.length) { console.error('Error: the release is not complete, so no update was made:'); problems.forEach((p) => console.error('  - ' + p)); process.exit(1); }
+}
 const STARTER_LIMIT = 40;
 if (names.length > STARTER_LIMIT && !process.env.ALLOW_MANY_FILES) {
   console.error(`Error: this update would hold ${names.length} files, but installed programs built before 1.18.1 only accept ${STARTER_LIMIT}.`);

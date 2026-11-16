@@ -59,6 +59,8 @@
     const a = s.answers; if (!a) return;
     if (!$('pxeAnUser').value) $('pxeAnUser').value = a.username; if (!$('pxeAnHost').value) $('pxeAnHost').value = a.hostname;
     if (!$('pxeAnTz').value) $('pxeAnTz').value = a.timezone; if (!$('pxeAnKb').value) $('pxeAnKb').value = a.keyboard;
+    const dk = a.disk || 'auto'; $('pxeAnDisk').value = dk === 'auto' || dk === 'largest' ? dk : 'name'; if (dk !== 'auto' && dk !== 'largest') $('pxeAnDiskName').value = dk;
+    $('pxeAnDiskNameRow').classList.toggle('hidden', $('pxeAnDisk').value !== 'name'); $('pxeAnLayout').value = a.layout || 'auto';
   }
   let lastSig = '';
   function renderIsos(s) {
@@ -79,6 +81,9 @@
     $('pxeStart').classList.toggle('hidden', run); $('pxeStop').classList.toggle('hidden', !run);
     $('pxeState').textContent = run ? 'Running on ' + s.ip + '. Now boot the other computer from its network (often F12 at power-on).' : 'Not running.';
     $('pxeState').classList.toggle('ok', run);
+    const sbs = s.secureBoot || {};
+    $('pxeSbGet').disabled = run; $('pxeSbOn').disabled = run || !sbs.ready; if (document.activeElement !== $('pxeSbOn')) $('pxeSbOn').checked = !!sbs.on;
+    $('pxeSbInfo').textContent = sbs.ready ? 'Signed files ready' + (sbs.info ? ' (Ubuntu shim ' + String(sbs.info.shim || '').slice(0, 30) + ', grub ' + String(sbs.info.grub || '').slice(0, 30) + ', downloaded ' + String(sbs.info.at || '').slice(0, 10) + ').' : '.') + (sbs.on ? ' They are being handed out to computers that start in UEFI mode.' : ' Tick the box to start handing them out.') : 'Not downloaded yet.';
     ['pxeMacInput', 'pxeMacAdd', 'pxeMacPick', 'pxeAny', 'pxeIp'].forEach((id) => { $(id).disabled = run; });
     if (!loaded) {
       macs = (s.allow && s.allow.macs || []).slice(); fillAnswers(s); fillWin(s); if (s.uefiLoader && document.activeElement !== $('pxeUefi')) $('pxeUefi').value = s.uefiLoader; $('pxeAny').checked = !!(s.allow && s.allow.any);
@@ -127,13 +132,23 @@
   });
   $('pxeMacInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('pxeMacAdd').click(); } });
   $('pxeMacPick').addEventListener('change', () => { const v = $('pxeMacPick').value; if (v) { $('pxeMacInput').value = v; $('pxeMacAdd').click(); $('pxeMacPick').value = ''; } });
+  $('pxeAnDisk').addEventListener('change', () => { $('pxeAnDiskNameRow').classList.toggle('hidden', $('pxeAnDisk').value !== 'name'); });
   $('pxeAnSave').addEventListener('click', async () => {
-    const r = await api.answers({ username: $('pxeAnUser').value, password: $('pxeAnPass').value, hostname: $('pxeAnHost').value, timezone: $('pxeAnTz').value || 'UTC', keyboard: $('pxeAnKb').value || 'us' });
+    const r = await api.answers({ username: $('pxeAnUser').value, password: $('pxeAnPass').value, hostname: $('pxeAnHost').value, timezone: $('pxeAnTz').value || 'UTC', keyboard: $('pxeAnKb').value || 'us', layout: $('pxeAnLayout').value, disk: $('pxeAnDisk').value === 'name' ? $('pxeAnDiskName').value : $('pxeAnDisk').value });
     if (r && r.ok) { $('pxeAnPass').value = ''; say('Install answers saved. Now pick "UNATTENDED install" in the drop-down of the computer that should use them.'); await refresh(); } else say((r && r.error) || 'The answers could not be saved.');
   });
   $('pxeWinSave').addEventListener('click', async () => {
     const r = await api.winShare({ unc: $('pxeWinUnc').value, user: $('pxeWinUser').value, bypass: $('pxeWinBypass').checked });
     if (r && r.ok) { say('Windows settings saved.'); await refresh(); } else say((r && r.error) || 'The Windows settings could not be saved.');
+  });
+  $('pxeSbGet').addEventListener('click', async () => {
+    $('pxeSbGet').disabled = true; say('Downloading Ubuntu\'s signed boot files (a few MB)...');
+    const r = await api.sbGet(); say(r && r.ok ? 'The signed boot files were downloaded and checked.' : ((r && r.error) || 'Download failed.'), !!(r && r.ok)); refresh();
+  });
+  $('pxeSbOn').addEventListener('change', async () => {
+    const r = await api.sbSet($('pxeSbOn').checked);
+    if (!r || !r.ok) say((r && r.error) || 'Could not change that.'); else say($('pxeSbOn').checked ? 'Secure Boot computers will now get Ubuntu\'s signed boot files. Restart the network boot if it is running.' : 'Secure Boot computers will get the normal loaders again (turn Secure Boot off on them).', true);
+    refresh();
   });
   $('pxeUefi').addEventListener('change', async () => { await api.uefi($('pxeUefi').value); say($('pxeUefi').value === 'ipxe' ? 'UEFI computers will now get the alternative loader. Restart the network boot on that computer.' : 'UEFI computers will now get the standard loader.'); });
   $('pxeAny').addEventListener('change', async () => { await save(); say($('pxeAny').checked ? 'Any computer on your network that asks to network boot will be answered.' : ''); });

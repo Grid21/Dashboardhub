@@ -244,10 +244,11 @@
           'It is off until you press Start. It only answers computers on your list, and never hands out addresses. Your router stays in charge.',
           'Each listed computer can have its own default: menu, an ISO, netboot.xyz or its own disk.',
           'Check my setup explains problems in plain words. The log shows downloads, stalls and what each computer asked for.',
-          'Unattended installs (advanced) fill in the installer\'s answers for Ubuntu Server and Rocky/Alma/Fedora style discs. They erase the first disk, ask you to confirm, and run only once.',
+          'Unattended installs (advanced) fill in the installer\'s answers for Ubuntu Server and Rocky/Alma/Fedora style discs. They erase disks (every disk, unless you choose "only the largest internal disk" or type a disk name), ask you to confirm, and run only once. On Rocky/Alma/Fedora discs the installer checks by itself whether the computer started in UEFI or older BIOS mode; with the "Simple" layout it makes an EFI partition (UEFI) or a BIOS boot partition (older mode), a /boot partition and one big root partition. The network boot log says which mode each computer used.',
           'Windows installs (experimental) start Windows Setup and connect to a shared folder on a Windows PC.',
           'Large Ubuntu ISOs are copied into the booting computer\'s memory, so it needs roughly the ISO size plus 3 GB of RAM.',
-          'UEFI computers can use either of two boot loaders (setting in the window). Secure Boot usually has to be off.'
+          'UEFI computers can use either of two boot loaders (setting in the window). Those loaders are not signed, so a computer with Secure Boot ON will refuse them: either turn Secure Boot off on it, or use "Secure Boot computers" in the window to download Ubuntu\'s own signed boot files and hand them out (Ubuntu-style discs only).',
+          'Secure Boot computers (advanced): press "Download the signed files" once (a few MB from Ubuntu\'s official archive, checked against Ubuntu\'s checksums), tick the box, then start the network boot. A Secure Boot computer then starts Ubuntu\'s signed shim, then Ubuntu\'s signed network grub, which shows a menu from Dashboard Hub, then a signed Ubuntu kernel from your disc. An unsigned or unknown kernel is refused by the computer itself. Computers in older BIOS mode, or with Secure Boot off, keep using the normal loaders.'
         ] },
         { tip: 'The window has a testing guide for VirtualBox and similar virtual machines.' }
       ]
@@ -316,9 +317,10 @@
         { list: [
           'Windows: "Dashboard-Hub-Setup.exe" installs Dashboard Hub for your user account (no administrator needed) with a Start menu entry and a desktop shortcut. "Run without installing" is the same program in a folder you can start straight away.',
           'Linux: "Dashboard-Hub.AppImage". Make it runnable once, then double-click it.',
+          'To uninstall, double-click UNINSTALL.bat (Windows) or run ./UNINSTALL.sh (Linux/macOS) in the Dashboard Hub folder. It shows what it found and asks before removing each part; your data is asked separately and is kept unless you say yes. If you installed with the Setup file, UNINSTALL.bat starts that uninstaller for you.',
           'To uninstall on Windows: Settings > Apps > Installed apps > Dashboard Hub > Uninstall.',
           'At the end of an uninstall, Windows asks "Do you also want to delete your Dashboard Hub data?" Choose Yes to remove your panels, notes, profiles, servers and settings, or No (the default) to keep them for a reinstall. If you chose No and change your mind, delete the folder %AppData%\\dashboard-hub (Linux: ~/.config/dashboard-hub).',
-          'The "Run without installing" folder and the AppImage have no uninstaller: just delete them.'
+          'The "Run without installing" folder and the AppImage have no uninstaller of their own: UNINSTALL.bat / UNINSTALL.sh remove them, or just delete them.'
         ] }
       ]
     },
@@ -332,7 +334,7 @@
           'A router or switch shows "not reported": that device does not share that information. Try SNMP or its own connection type.',
           'Scan says you are on a different network: Network Guard stopped it. Switch profile or accept the new network when asked.',
           'A panel will not load: check the address, and whether the device uses https. Allow self-signed certificates in Security settings.',
-          'Network boot does nothing: run with administrator rights, use a cable, and press Check my setup. Turn Secure Boot off on the other computer.',
+          'Network boot does nothing: run with administrator rights, use a cable, and press Check my setup. Either turn Secure Boot off on the other computer, or use the Secure Boot option in the window (Ubuntu-style discs only).',
           'Linux: "Cannot mount AppImage, please check your FUSE setup" is not a Dashboard Hub fault. Install FUSE 2 with sudo apt install libfuse2t64 (Ubuntu 22.04 and Mint 21: libfuse2), or start the file with --appimage-extract-and-run.',
           'The app looks broken after an update: open Updates and go back to an earlier version.',
           'Still stuck: click Reload in the top bar, or restart the app.'

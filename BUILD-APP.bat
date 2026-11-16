@@ -49,6 +49,7 @@ echo   Done! Your program is in the "Dashboard Hub" folder, next to
 echo   this file:
 echo.
 echo   Dashboard-Hub-Setup.exe      installs it (with an uninstaller)
+echo   To remove it again later, double-click UNINSTALL.bat (next to this file).
 echo   Run without installing\      the program itself, no install needed
 echo =============================================================
 if exist "Dashboard Hub\Dashboard-Hub-Setup.exe" explorer "Dashboard Hub"

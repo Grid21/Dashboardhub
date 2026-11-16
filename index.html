@@ -397,16 +397,39 @@
     </div>
     <div id="pxeMacList" class="pxe-list"></div>
     <label class="check-inline">UEFI computers get: <select id="pxeUefi"><option value="snponly">Standard loader (uses the computer's own network card)</option><option value="ipxe">Alternative loader (iPXE's own network drivers) - try this if UEFI stalls</option></select></label>
+    <details class="pxe-tips2" id="pxeSb">
+      <summary>Secure Boot computers (advanced): keep Secure Boot ON</summary>
+      <p class="hint">Computers with <b>Secure Boot</b> only start programs signed by a company their firmware trusts. Dashboard Hub's normal boot loaders are not signed, so until now Secure Boot had to be turned off. Here you can download Ubuntu's own signed boot files (from Ubuntu's official archive, checked against Ubuntu's checksums) and hand them out instead. The computer then starts Ubuntu's signed shim, then Ubuntu's signed network grub, then a signed Ubuntu kernel from your disc. <b>Only Ubuntu-style discs can be offered this way</b> (others have kernels this shim does not trust). Computers with older BIOS mode, or with Secure Boot off, keep using the normal loaders.</p>
+      <div class="pxe-row">
+        <button type="button" id="pxeSbGet">Download the signed files</button>
+        <label class="check-inline"><input type="checkbox" id="pxeSbOn" disabled> Hand out the signed files to Secure Boot computers</label>
+      </div>
+      <p class="hint" id="pxeSbInfo">Not downloaded yet.</p>
+    </details>
     <label class="check-inline"><input type="checkbox" id="pxeAny"> Answer <b>any</b> computer that asks (not recommended: it can interfere with other computers' network boot)</label>
     <details class="pxe-tips" id="pxeAuto">
       <summary>Unattended installs (advanced): answers for Ubuntu Server and Rocky/Alma/Fedora discs</summary>
-      <p class="hint"><b>This erases the whole first disk of the computer you choose it for.</b> Fill these in once, then pick <i>UNATTENDED install</i> in that computer's drop-down above. It runs <b>once</b>: after the installer fetches its answers, that computer goes back to starting from its own disk, so it will not reinstall itself in a loop. Your password is stored only as a scrambled hash.</p>
+      <p class="hint"><b>This erases disks of the computer you choose it for: every disk, unless you choose "only the largest" or name one below.</b> Fill these in once, then pick <i>UNATTENDED install</i> in that computer's drop-down above. It runs <b>once</b>: after the installer fetches its answers, that computer goes back to starting from its own disk, so it will not reinstall itself in a loop. The installer checks by itself whether the computer started in UEFI or older BIOS mode and makes the matching partitions. Ubuntu discs always use their own standard layout on the disk you pick. Your password is stored only as a scrambled hash.</p>
       <div class="pxe-answers">
         <label>User name <input id="pxeAnUser" type="text" maxlength="32" placeholder="admin" spellcheck="false" autocomplete="off"></label>
         <label>Password <input id="pxeAnPass" type="password" maxlength="128" autocomplete="new-password" placeholder="(saved: leave empty to keep it)"></label>
         <label>Computer name <input id="pxeAnHost" type="text" maxlength="32" placeholder="server1" spellcheck="false" autocomplete="off"></label>
         <label>Time zone <input id="pxeAnTz" type="text" maxlength="40" placeholder="America/New_York" spellcheck="false" autocomplete="off"></label>
         <label>Keyboard <input id="pxeAnKb" type="text" maxlength="10" placeholder="us" spellcheck="false" autocomplete="off"></label>
+        <label>Install on which disk
+          <select id="pxeAnDisk">
+            <option value="auto">Let the installer decide (erases every disk)</option>
+            <option value="largest">Only the largest internal disk (safer)</option>
+            <option value="name">A disk I name...</option>
+          </select>
+        </label>
+        <label id="pxeAnDiskNameRow" class="hidden">Disk name <input id="pxeAnDiskName" type="text" maxlength="20" placeholder="sda or nvme0n1" spellcheck="false" autocomplete="off"></label>
+        <label>Disk layout (Rocky/Alma/Fedora)
+          <select id="pxeAnLayout">
+            <option value="auto">Automatic (the installer decides)</option>
+            <option value="simple">Simple: EFI partition (UEFI) or BIOS boot partition + /boot + one big root</option>
+          </select>
+        </label>
       </div>
       <div class="dialog-buttons left"><button type="button" id="pxeAnSave">Save answers</button></div>
     </details>

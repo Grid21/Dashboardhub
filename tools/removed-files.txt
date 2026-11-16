@@ -1,0 +1,2 @@
+# Files removed on purpose. One path per line, then  # the reason (who asked, or which update no longer needs it).
+# Nothing may be added here without the owner asking, or an update genuinely not needing the file any more.

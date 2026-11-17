@@ -70,7 +70,7 @@ const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
   const cleanup = () => { net('pkill -f "dnsmasq.*hubdhcp-test"'); net('pkill -f "qemu-system-x86_64.*sbvm"'); net('ip netns del hubdhcp'); net('ip link del tapsb0'); net('ip link del hubbr0'); };
   cleanup();
   sh('ip link add hubbr0 type bridge && ip addr add 10.77.0.1/24 dev hubbr0 && ip link set hubbr0 up');
-  net('ip route add 255.255.255.255/32 dev hubbr0');   // like a computer whose only network is this one: broadcasts must leave on the virtual network, not on this machine's default one
+  // NO special route for 255.255.255.255 here on purpose: this machine's default connection is a different network, like a PC with Wi-Fi plus a cable. Hub's answers must still leave through the virtual network.
   sh('ip tuntap add dev tapsb0 mode tap && ip link set tapsb0 master hubbr0 && ip link set tapsb0 up');
   sh('ip netns add hubdhcp && ip link add vethh type veth peer name vethd && ip link set vethd netns hubdhcp && ip link set vethh master hubbr0 && ip link set vethh up');
   sh('ip netns exec hubdhcp sh -c "ip addr add 10.77.0.2/24 dev vethd && ip link set vethd up && ip link set lo up"');

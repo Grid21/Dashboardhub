@@ -101,6 +101,8 @@ test/printer-test.js
 test/profile-panels-test.js
 test/pulse-test.js
 test/pxe-auto-test.js
+test/pxe-dhcp-server-test.js
+test/pxe-dhcp-ui-test.js
 test/pxe-disk-test.js
 test/pxe-disk-ui-test.js
 test/pxe-rocky-test.js

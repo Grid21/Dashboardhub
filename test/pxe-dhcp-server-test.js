@@ -1,0 +1,62 @@
+'use strict';
+//   node test/pxe-dhcp-server-test.js   (Dashboard Hub acting as a complete DHCP server: address + boot file; simulated computers on this machine only)
+const dgram = require('dgram'), crypto = require('crypto'), fs = require('fs'), os = require('os'), path = require('path');
+const pxe = require('../pxe.js');
+let failed = 0;
+const check = (n, ok, d) => { console.log((ok ? '  ok    ' : '  FAIL  ') + n + (ok ? '' : '   -> ' + d)); if (!ok) failed++; };
+function pkt(mac, arch, type, extra) {
+  const b = Buffer.alloc(240); b[0] = 1; b[1] = 1; b[2] = 6; b[10] = 0x80; crypto.randomBytes(4).copy(b, 4);
+  Buffer.from(mac.split(':').map((x) => parseInt(x, 16))).copy(b, 28); Buffer.from([0x63, 0x82, 0x53, 0x63]).copy(b, 236);
+  const o = [Buffer.from([53, 1, type]), Buffer.from([60, 32]), Buffer.from('PXEClient:Arch:00007:UNDI:003016'), Buffer.from([93, 2, 0, arch]), Buffer.from([97, 17, 0]), crypto.randomBytes(16)].concat(extra || []);
+  o.push(Buffer.from([255])); return Buffer.concat([b, ...o]);
+}
+const optOf = (m, code) => { let p = 240; while (p < m.length) { const c = m[p++]; if (c === 255) break; if (c === 0) continue; const l = m[p++]; if (c === code) return m.subarray(p, p + l); p += l; } return null; };
+const ipOf = (m, o) => Array.from(m.subarray(o, o + 4)).join('.');
+(async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pxed-'));
+  const holder = {}, P = { dhcp: 16767, pxe: 14011, tftp: 16969, http: 18088 }, MAC = 'aa:bb:cc:00:00:09', MAC2 = 'aa:bb:cc:00:00:0a';
+  const mod = pxe.create({ dataDir: tmp, ports: P, version: 'test', testing: { replyTo: '127.0.0.1', get replyPort() { return holder.port; } } });
+  mod.setAllow({ macs: [MAC, MAC2], any: false });
+  check('normal mode is the default', mod.status().dhcpServer.on === false);
+  check('bad address is refused', !mod.setDhcpServer({ on: true, from: '999.1.1.1', to: '127.0.0.9' }).ok);
+  check('only one end of the range is refused', !mod.setDhcpServer({ on: true, from: '127.0.0.20', to: '' }).ok);
+  check('range outside the network is refused at start', (mod.setDhcpServer({ on: true, from: '10.9.9.1', to: '10.9.9.9' }), !(await mod.start({ ip: '127.0.0.1' })).ok));
+  check('good settings are saved', mod.setDhcpServer({ on: true, from: '127.0.0.20', to: '127.0.0.21', router: '127.0.0.1' }).ok && mod.status().dhcpServer.from === '127.0.0.20');
+  check('server starts in DHCP server mode', (await mod.start({ ip: '127.0.0.1' })).ok && mod.status().dhcpServer.active);
+  const ask = async (mac, type, arch, extra) => {
+    const c = dgram.createSocket('udp4'); await new Promise((r) => c.bind(0, '127.0.0.1', r)); holder.port = c.address().port;
+    const got = new Promise((res) => { c.on('message', (m) => res(m)); setTimeout(() => res(null), 500); });
+    c.send(pkt(mac, arch, type, extra), P.dhcp, '127.0.0.1'); const m = await got; c.close(); return m;
+  };
+  let m = await ask(MAC, 1, 7);
+  check('UEFI discover gets a full offer (type 2)', m && optOf(m, 53)[0] === 2);
+  check('...with an address from the range', m && ipOf(m, 16) === '127.0.0.20', m && ipOf(m, 16));
+  check('...the boot file named in the file field and option 67', m && m.toString('latin1', 108, 120).startsWith('snponly.efi') && optOf(m, 67).toString().startsWith('snponly.efi'));
+  check('...next server and server ID are Dashboard Hub', m && ipOf(m, 20) === '127.0.0.1' && optOf(m, 54).join('.') === '127.0.0.1');
+  check('...lease time, subnet mask, router and machine ID', m && optOf(m, 51).readUInt32BE(0) === 3600 && optOf(m, 1) && optOf(m, 3).join('.') === '127.0.0.1' && optOf(m, 97).length === 17);
+  const req = [Buffer.from([54, 4, 127, 0, 0, 1]), Buffer.from([50, 4, 127, 0, 0, 20])];
+  m = await ask(MAC, 3, 7, req);
+  check('request gets an acknowledgement (type 5) for the same address', m && optOf(m, 53)[0] === 5 && ipOf(m, 16) === '127.0.0.20' && m.toString('latin1', 108, 120).startsWith('snponly.efi'));
+  m = await ask(MAC, 3, 7, [Buffer.from([54, 4, 127, 0, 0, 1]), Buffer.from([50, 4, 127, 0, 0, 99])]);
+  check('asking for an address that is not its own is refused (type 6)', m && optOf(m, 53)[0] === 6 && ipOf(m, 16) === '0.0.0.0');
+  m = await ask(MAC2, 1, 0);
+  check('a second BIOS computer gets the next address and undionly.kpxe', m && ipOf(m, 16) === '127.0.0.21' && m.toString('latin1', 108, 121) === 'undionly.kpxe', m && ipOf(m, 16));
+  m = await ask('aa:bb:cc:00:00:0b', 1, 7);
+  check('a computer that is not on the list gets nothing', m === null);
+  mod.setAllow({ macs: [MAC, MAC2, 'aa:bb:cc:00:00:0b'], any: false });
+  m = await ask('aa:bb:cc:00:00:0b', 1, 7);
+  check('...and when listed but the range is full, still nothing (and Dashboard Hub says why)', m === null && /all addresses in your range are used/.test(JSON.stringify(mod.status().log)), JSON.stringify(mod.status().log.slice(-3)));
+  m = await ask(MAC, 3, 7, [Buffer.from([54, 4, 10, 1, 1, 1])]);
+  check('a request meant for another DHCP server is ignored', m === null);
+  m = await ask('aa:bb:cc:00:00:0b', 1, 7);
+  check('...and its address is given back, so the waiting computer gets it', m && ipOf(m, 16) === '127.0.0.20', m && ipOf(m, 16));
+  const log = mod.status().log.map((x) => x.text || x.message || JSON.stringify(x)).join('\n');
+  check('log names the Dashboard Hub version and DHCP server mode', /Dashboard Hub version test started .*acting as the DHCP server/.test(log), log.slice(0, 300));
+  await mod.stop();
+  mod.setDhcpServer({ on: false });
+  check('server restarts in normal mode and keeps the short style', (await mod.start({ ip: '127.0.0.1' })).ok && !mod.status().dhcpServer.active);
+  m = await ask(MAC, 1, 7);
+  check('normal mode still gives no address (yiaddr 0) and type 2', m && optOf(m, 53)[0] === 2 && ipOf(m, 16) === '0.0.0.0');
+  await mod.stop();
+  console.log(failed ? 'FAILED ' + failed : 'All passed'); process.exit(failed ? 1 : 0);
+})();

@@ -478,7 +478,7 @@ let armedUpdateFile = '', armedUntil = 0;       // a downloaded update waiting t
 
 // ---------- Network boot (PXE): boot another computer from this one. Off until Start is pressed; stops when the app quits ----------
 const pxeLib = require('./pxe');
-const pxeMod = pxeLib.create({ dataDir: app.getPath('userData') });
+const pxeMod = pxeLib.create({ dataDir: app.getPath('userData'), version: app.getVersion() });
 ipcMain.handle('pxe:status', (event) => { checkSender(event); try { return Object.assign({ ok: true }, pxeMod.status()); } catch (e) { return { ok: false, error: 'Could not read the network boot state.' }; } });
 ipcMain.handle('pxe:start', async (event, o) => { checkSender(event); try { return await pxeMod.start({ ip: String(o && o.ip || '') }); } catch (e) { return { ok: false, error: 'Network boot could not start (' + (e && e.message || 'unknown') + ').' }; } });
 ipcMain.handle('pxe:stop', async (event) => { checkSender(event); try { return await pxeMod.stop(); } catch (e) { return { ok: false }; } });
@@ -500,6 +500,7 @@ ipcMain.handle('pxe:answers', (event, o) => { checkSender(event); o = o || {}; r
 ipcMain.handle('pxe:winshare', (event, o) => { checkSender(event); o = o || {}; return pxeMod.setWinShare({ unc: String(o.unc || '').slice(0, 160), user: String(o.user || '').slice(0, 70), bypass: o.bypass === true }); });
 ipcMain.handle('pxe:uefi', (event, v) => { checkSender(event); return pxeMod.setUefiLoader(String(v || '')); });
 ipcMain.handle('pxe:sbGet', async (event) => { checkSender(event); return pxeMod.getSecureBootFiles(); });
+ipcMain.handle('pxe:dhcpSet', (event, o) => { checkSender(event); return pxeMod.setDhcpServer(o && typeof o === 'object' ? { on: o.on === true, from: String(o.from || '').slice(0, 20), to: String(o.to || '').slice(0, 20), router: String(o.router || '').slice(0, 20) } : {}); });
 ipcMain.handle('pxe:sbSet', (event, v) => { checkSender(event); return pxeMod.setSecureBoot(v === true); });
 ipcMain.handle('pxe:choice', (event, mac, what) => { checkSender(event); return pxeMod.setChoice(String(mac || '').slice(0, 40), String(what || '').slice(0, 40)); });
 ipcMain.handle('pxe:check', async (event, ip) => { checkSender(event); try { return await pxeMod.check(String(ip || '').slice(0, 40)); } catch (e) { return { ok: false, error: 'The check could not run.' }; } });

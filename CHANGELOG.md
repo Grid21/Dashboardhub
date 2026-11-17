@@ -2,10 +2,24 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.21.1
+- Wording only: the new DHCP server box, its messages and the manual now say "Dashboard Hub" instead of just "Hub". No other changes.
+
+## 1.21.0
+- **New: "Dashboard Hub acts as the DHCP server" (advanced, off by default)** in the Network boot window. Some real computers (a Dell Latitude E5450 in UEFI mode was the case that led to this) ignore Dashboard Hub's normal method of adding the boot file to the router's answer and sit at ">>Start PXE over IPv4." forever, while virtual machines accept it. With this switched on, Dashboard Hub hands out the network address **and** the boot file itself, like Foreman's DHCP does. You choose the address range (or leave it empty: x.x.x.200 - .230) and optionally the router address. Your router's DHCP must be off while it runs (two DHCP servers confuse computers); only listed computers (or "any") are answered.
+- The log now names the Dashboard Hub version and which mode started, so test reports show what was running.
+- Tested with simulated computers (offer, acknowledge, refuse a wrong address, ignore a request meant for another DHCP server, give the address back, range full, unlisted computer, normal mode unchanged) and the window's settings. **Not tested on real hardware**: whether the Dell accepts it is exactly what this version is for finding out.
+
+## 1.20.1
+- **Fix for computers in UEFI mode that stop at ">>Start PXE over IPv4." and never start the download** (seen on a VirtualBox VM and on a Dell; older-BIOS mode worked). Cause: a UEFI computer only accepts Dashboard Hub's answer when it is sent to 255.255.255.255, and on a PC with several network connections (Wi-Fi, a VPN, or VirtualBox's own host-only adapter) the system sent that answer out of the wrong connection; the "subnet broadcast" copy that went out of the right one is ignored by UEFI firmware. Dashboard Hub now sends its answers from a socket tied to the network connection you picked, so they leave through it.
+- Proven in the virtual Secure Boot test, which no longer has a special route for the broadcast: before the fix the firmware said "No valid offer received" (this machine's default connection was a different network), after the fix it boots through shim, grub and a signed kernel. Not yet tried on Windows or a real computer.
+- If the socket cannot be tied to that connection, the log says so and Dashboard Hub works as before.
+- Duplicate copies of the same request (received on both sockets) are answered once.
+
 ## 1.20.0
 - **Secure Boot network boot.** Computers with Secure Boot ON refuse Dashboard Hub's unsigned boot loaders. The Network boot window now has "Secure Boot computers (advanced)": "Download the signed files" fetches Ubuntu's own Microsoft-signed `shim` and Canonical-signed network `grub` from Ubuntu's official archive (checked against the archive's checksums), and a tick box hands them out to computers that start in UEFI mode. The computer then starts shim, then grub (which shows a menu from Dashboard Hub, including the unattended-install choices), then a signed Ubuntu kernel from your disc. Ubuntu-style discs only. Older-BIOS computers and computers with Secure Boot off keep using the normal loaders.
 - Tested with a virtual computer with real Secure Boot firmware (OVMF with Microsoft keys) and the real signed Ubuntu files: the firmware accepted shim and grub, accepted a signed kernel, and refused an unsigned one ("bad shim signature") before loading anything. `test/secureboot-vm-test.js` (16 checks; needs root, QEMU, OVMF, dnsmasq) and `test/pxe-sb-ui-test.js` (10 checks). Not tested on a real computer.
-- Found while testing: Hub's DHCP reply is broadcast to 255.255.255.255, and on a computer with several network connections (for example Wi-Fi plus a cable to the PXE computer) the system may send that broadcast out of the wrong connection. Not changed yet.
+- Found while testing: Dashboard Hub's DHCP reply is broadcast to 255.255.255.255, and on a computer with several network connections (for example Wi-Fi plus a cable to the PXE computer) the system may send that broadcast out of the wrong connection. Not changed yet.
 - New: `DEVELOPMENT-RULES.md` and a file guard (`tools/release-files.txt`, `tools/removed-files.txt`): `check-release` now fails if any file from earlier releases disappears without being written down. Rule: files are never removed unless the owner asks or an update no longer needs them.
 - Note: the 1.19.1 files already contained the unfinished Secure Boot code in `pxe.js`, switched off and without any buttons. This version finishes it.
 

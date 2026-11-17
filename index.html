@@ -406,6 +406,18 @@
       </div>
       <p class="hint" id="pxeSbInfo">Not downloaded yet.</p>
     </details>
+    <details class="pxe-tips2" id="pxeDhcp">
+      <summary>Dashboard Hub acts as the DHCP server (advanced): for computers that ignore the normal answer</summary>
+      <p class="hint">Some real computers' UEFI network boot ignores Dashboard Hub's normal "add the boot file to the router's answer" method (virtual machines usually accept it). With this switched on, Dashboard Hub hands out the network address <b>and</b> the boot file itself, the way a full DHCP server does. <b>Important:</b> turn off DHCP on your router first (or use a separate switch or network for the test), because two DHCP servers on one network confuse computers. Only computers you listed (or "any") get an address from Hub. Leave the boxes empty to let Dashboard Hub choose x.x.x.200 to x.x.x.230 on the chosen connection.</p>
+      <label class="check-inline"><input type="checkbox" id="pxeDhcpOn"> Let Dashboard Hub hand out addresses (the router's DHCP must be off)</label>
+      <div class="pxe-row">
+        <input type="text" id="pxeDhcpFrom" placeholder="First address, e.g. 192.168.0.200" maxlength="15">
+        <input type="text" id="pxeDhcpTo" placeholder="Last address, e.g. 192.168.0.230" maxlength="15">
+        <input type="text" id="pxeDhcpRouter" placeholder="Router address (optional)" maxlength="15">
+        <button type="button" id="pxeDhcpSave">Save</button>
+      </div>
+      <p class="hint">Takes effect the next time you start the network boot.</p>
+    </details>
     <label class="check-inline"><input type="checkbox" id="pxeAny"> Answer <b>any</b> computer that asks (not recommended: it can interfere with other computers' network boot)</label>
     <details class="pxe-tips" id="pxeAuto">
       <summary>Unattended installs (advanced): answers for Ubuntu Server and Rocky/Alma/Fedora discs</summary>

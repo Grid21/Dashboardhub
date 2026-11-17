@@ -89,6 +89,7 @@ contextBridge.exposeInMainWorld('pxeApi', {
   winShare: (o) => ipcRenderer.invoke('pxe:winshare', { unc: String((o && o.unc) || ''), user: String((o && o.user) || ''), bypass: !!(o && o.bypass) }),
   uefi: (v) => ipcRenderer.invoke('pxe:uefi', String(v || '')),
   sbGet: () => ipcRenderer.invoke('pxe:sbGet'),
+  dhcpSet: (o) => ipcRenderer.invoke('pxe:dhcpSet', o),
   sbSet: (on) => ipcRenderer.invoke('pxe:sbSet', on === true),
   choice: (mac, what) => ipcRenderer.invoke('pxe:choice', String(mac || ''), String(what || '')),
   check: (ip) => ipcRenderer.invoke('pxe:check', String(ip || '')),

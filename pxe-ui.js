@@ -5,7 +5,7 @@
   const api = window.pxeApi;
   const dlg = $('pxeDialog'), open = $('pxeMenuBtn');
   if (!api || !dlg || !open) return;
-  let timer = null, st = null, macs = [], busy = false, loaded = false;
+  let timer = null, st = null, macs = [], busy = false, loaded = false, dhcpLoaded = false;
 
   function say(t, good) { const m = $('pxeMsg'); m.textContent = t || ''; m.classList.toggle('ok', !!good); }
   function item(main, sub, cls) {
@@ -84,6 +84,9 @@
     const sbs = s.secureBoot || {};
     $('pxeSbGet').disabled = run; $('pxeSbOn').disabled = run || !sbs.ready; if (document.activeElement !== $('pxeSbOn')) $('pxeSbOn').checked = !!sbs.on;
     $('pxeSbInfo').textContent = sbs.ready ? 'Signed files ready' + (sbs.info ? ' (Ubuntu shim ' + String(sbs.info.shim || '').slice(0, 30) + ', grub ' + String(sbs.info.grub || '').slice(0, 30) + ', downloaded ' + String(sbs.info.at || '').slice(0, 10) + ').' : '.') + (sbs.on ? ' They are being handed out to computers that start in UEFI mode.' : ' Tick the box to start handing them out.') : 'Not downloaded yet.';
+    const ds = s.dhcpServer || {};
+    ['pxeDhcpOn', 'pxeDhcpFrom', 'pxeDhcpTo', 'pxeDhcpRouter', 'pxeDhcpSave'].forEach((id) => { $(id).disabled = run; });
+    if (!dhcpLoaded) { dhcpLoaded = true; $('pxeDhcpOn').checked = !!ds.on; $('pxeDhcpFrom').value = ds.from || ''; $('pxeDhcpTo').value = ds.to || ''; $('pxeDhcpRouter').value = ds.router || ''; }
     ['pxeMacInput', 'pxeMacAdd', 'pxeMacPick', 'pxeAny', 'pxeIp'].forEach((id) => { $(id).disabled = run; });
     if (!loaded) {
       macs = (s.allow && s.allow.macs || []).slice(); fillAnswers(s); fillWin(s); if (s.uefiLoader && document.activeElement !== $('pxeUefi')) $('pxeUefi').value = s.uefiLoader; $('pxeAny').checked = !!(s.allow && s.allow.any);
@@ -119,7 +122,7 @@
   async function mark() { try { const s = await api.status(); open.textContent = s && s.running ? 'Network boot (PXE) - running...' : label; } catch (e) { /* ignore */ } }
   setInterval(() => { if (!dlg.open && !document.hidden) mark(); }, 5000);
 
-  open.addEventListener('click', async () => { say(''); loaded = false; lastSig = ''; fillPick(); await refresh(); if (!dlg.open) dlg.showModal(); clearInterval(timer); timer = setInterval(refresh, 1500); });
+  open.addEventListener('click', async () => { say(''); loaded = false; dhcpLoaded = false; lastSig = ''; fillPick(); await refresh(); if (!dlg.open) dlg.showModal(); clearInterval(timer); timer = setInterval(refresh, 1500); });
   dlg.addEventListener('close', () => { clearInterval(timer); timer = null; mark(); });
   $('pxeClose').addEventListener('click', () => dlg.close());
   $('pxeMacAdd').addEventListener('click', async () => {
@@ -140,6 +143,10 @@
   $('pxeWinSave').addEventListener('click', async () => {
     const r = await api.winShare({ unc: $('pxeWinUnc').value, user: $('pxeWinUser').value, bypass: $('pxeWinBypass').checked });
     if (r && r.ok) { say('Windows settings saved.'); await refresh(); } else say((r && r.error) || 'The Windows settings could not be saved.');
+  });
+  $('pxeDhcpSave').addEventListener('click', async () => {
+    const r = await api.dhcpSet({ on: $('pxeDhcpOn').checked, from: $('pxeDhcpFrom').value, to: $('pxeDhcpTo').value, router: $('pxeDhcpRouter').value });
+    say(r && r.ok ? ($('pxeDhcpOn').checked ? 'Saved. Dashboard Hub will hand out addresses the next time you start the network boot. Make sure the router\'s DHCP is off.' : 'Saved. Dashboard Hub will only add boot instructions to your router\'s answers.') : ((r && r.error) || 'Could not save.'), !!(r && r.ok));
   });
   $('pxeSbGet').addEventListener('click', async () => {
     $('pxeSbGet').disabled = true; say('Downloading Ubuntu\'s signed boot files (a few MB)...');

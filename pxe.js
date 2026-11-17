@@ -277,6 +277,50 @@ function buildReply(req, type, serverIp, bootfile, extra) {
   return Buffer.concat([b].concat(o));
 }
 
+// A complete DHCP answer (used only when "Dashboard Hub acts as the DHCP server" is switched on): it hands out an address as well as the boot file.
+// type 2 = offer, 5 = acknowledgement, 6 = refusal.
+function buildFullReply(req, type, serverIp, yiaddr, bootfile, net) {
+  net = net || {};
+  const b = Buffer.alloc(240);
+  b[0] = 2; b[1] = 1; b[2] = 6; b[3] = 0;
+  req.xid.copy(b, 4); req.flags.copy(b, 10); req.ciaddr.copy(b, 12);
+  if (type !== 6) ipBuf(yiaddr).copy(b, 16);
+  ipBuf(serverIp).copy(b, 20);
+  if (req.giaddr) req.giaddr.copy(b, 24);
+  req.chaddr.copy(b, 28);
+  if (type !== 6) Buffer.from(bootfile, 'latin1').copy(b, 108, 0, 127);
+  MAGIC.copy(b, 236);
+  const o = [];
+  const add = (code, data) => { o.push(Buffer.from([code, data.length]), data); };
+  const u32 = (n) => { const x = Buffer.alloc(4); x.writeUInt32BE(n); return x; };
+  add(53, Buffer.from([type]));
+  add(54, ipBuf(serverIp));
+  if (type !== 6) {
+    add(51, u32(3600)); add(58, u32(1800)); add(59, u32(3150));
+    if (net.mask) add(1, ipBuf(net.mask));
+    if (net.router) { add(3, ipBuf(net.router)); add(6, ipBuf(net.router)); }
+    add(60, Buffer.from('PXEClient'));
+    add(66, Buffer.from(serverIp)); add(67, Buffer.from(bootfile));
+    if (req.opts[97]) add(97, req.opts[97]);
+  }
+  o.push(Buffer.from([255]));
+  return Buffer.concat([b].concat(o));
+}
+const ipNum = (s) => s.split('.').reduce((a, x) => a * 256 + Number(x), 0);
+const numIp = (n) => [Math.floor(n / 16777216) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.');
+const IPV4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
+
+function cleanDhcpSrv(o) {
+  o = o || {};
+  const s = (v) => (typeof v === 'string' && IPV4.test(v.trim()) ? v.trim() : '');
+  return { on: o.on === true, from: s(o.from), to: s(o.to), router: s(o.router) };
+}
+function netMaskOf(addr) {
+  const ifs = os.networkInterfaces();
+  for (const n of Object.keys(ifs)) for (const a of (ifs[n] || [])) if (a.family === 'IPv4' && a.address === addr) return a.netmask;
+  return '';
+}
+
 // ---------- TFTP (read only, only the two boot loaders) ----------
 // ---------- reading .deb packages (needed for the Secure Boot boot files) ----------
 // A .deb is an "ar" archive holding data.tar.xz / data.tar.zst / data.tar.gz. Node itself can unpack gzip and zstd; the small
@@ -503,6 +547,8 @@ function create(opts) {
   const delivered = new Map();                      // 'mac id' -> time the install answers were fetched (they stay available for 30 minutes)
   let uefiLoader = 'snponly';                       // which UEFI boot loader to hand out: 'snponly' (uses the firmware's network card) or 'ipxe' (iPXE's own card drivers)
   let allow = { macs: [], any: false };
+  let dhcpSrv = { on: false, from: '', to: '', router: '' };   // "Dashboard Hub acts as the DHCP server": hands out addresses itself (for firmware that ignores the short proxy answer)
+  let fullPool = null, leases = new Map();           // while running in that mode: { mask, from, to, router } and mac -> address
   let secureBoot = false;                           // hand out Ubuntu's signed boot files to UEFI computers (for computers with Secure Boot ON)
   let sb = null;                                    // { shim, grub, info } the signed boot files, once downloaded
   const sbDir = path.join(dataDir, 'secureboot');
@@ -510,10 +556,11 @@ function create(opts) {
     const shim = fs.readFileSync(path.join(sbDir, 'shimx64.efi')), grub = fs.readFileSync(path.join(sbDir, 'grubx64.efi'));
     if (shim.length > 100000 && grub.length > 100000 && shim.toString('latin1', 0, 2) === 'MZ' && grub.toString('latin1', 0, 2) === 'MZ') sb = { shim, grub, info: JSON.parse(fs.readFileSync(path.join(sbDir, 'info.json'), 'utf8')) };
   } catch (e) { /* not downloaded yet */ }
+  try { const j = JSON.parse(fs.readFileSync(store, 'utf8')); if (j.dhcpSrv) dhcpSrv = cleanDhcpSrv(j.dhcpSrv); } catch (e) { /* none saved */ }
   let choice = {};   // per computer: what to start by itself ('menu', 'local', 'netbootxyz' or 'iso:<id>')   // which machines may be answered (nothing is answered until you list one)
   try { const j = JSON.parse(fs.readFileSync(store, 'utf8')); if (j.allow && Array.isArray(j.allow.macs)) allow = { macs: j.allow.macs.map(normMac).filter(Boolean).slice(0, 50), any: j.allow.any === true }; if (j.choice && typeof j.choice === 'object') Object.keys(j.choice).slice(0, 50).forEach((k) => { const m = normMac(k); if (m && /^(menu|local|netbootxyz|iso:[a-z0-9]{3,12}(:auto)?)$/.test(String(j.choice[k]))) choice[m] = String(j.choice[k]); }); if (j.secureBoot === true) secureBoot = true; if (j.answers && typeof j.answers === 'object') { const c = cleanAnswers(Object.assign({}, j.answers, { password: '' }), j.answers); if (c.answers) answers = c.answers; } if (j.winShare && typeof j.winShare === 'object') { const c = cleanWinShare(j.winShare); if (c.win) winShare = c.win; } if (j.uefiLoader === 'ipxe' || j.uefiLoader === 'snponly') uefiLoader = j.uefiLoader; if (Array.isArray(j.isos)) isos = j.isos.filter((x) => x && typeof x.path === 'string' && /^[a-z0-9]{3,12}$/.test(x.id)).slice(0, 40); } catch (e) { /* none yet */ }
   isos.forEach((x) => { if (x.mode === 'sanboot') { try { const i = analyzeIso(x.path); if (i.mode !== 'sanboot') { x.mode = i.mode; x.kernel = i.kernel; x.initrd = i.initrd; x.squash = i.squash; x.repo = i.repo === true; } } catch (e) { /* file missing */ } } });
-  const save = () => { try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(store, JSON.stringify({ isos, allow, choice, uefiLoader, secureBoot, answers, winShare }), { mode: 0o600 }); } catch (e) { /* not saved */ } };
+  const save = () => { try { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(store, JSON.stringify({ isos, allow, choice, uefiLoader, secureBoot, dhcpSrv, answers, winShare }), { mode: 0o600 }); } catch (e) { /* not saved */ } };
 
   let running = false, ip = '', loaders = null, servers = {}, httpSrv = null;
   const logLines = [];
@@ -666,8 +713,15 @@ function create(opts) {
   const asks = new Map();                           // mac -> times it asked in the last 40 s
   const bootMode = new Map();                       // mac -> 'uefi' | 'bios': how each computer started its network boot
   const menuMacs = new Set();                       // UEFI computers whose firmware ignored the short answer: they get the classic boot-menu answer
-  function dhcpHandler(sock, isProxyPort) {
+  // A computer starting in UEFI mode only accepts an answer sent to 255.255.255.255 (it has no address yet, so it ignores
+  // "subnet broadcast" answers like 192.168.0.255), and that answer must leave through the right network connection. A socket
+  // bound to this computer's chosen address (port 67) makes the system send it out of that connection and not whichever one
+  // happens to be the default (Wi-Fi, a VPN, VirtualBox's host-only adapter...).
+  const recentMsgs = new Map();
+  function dhcpHandler(sock, isProxyPort, getOut) {
+    const out = () => (getOut && getOut()) || sock;
     return (msg, ri) => {
+      { const k = msg.toString('base64'), now = Date.now(); if (recentMsgs.has(k) && now - recentMsgs.get(k) < 400) return; recentMsgs.set(k, now); if (recentMsgs.size > 200) for (const [kk, t] of recentMsgs) if (now - t > 2000) recentMsgs.delete(kk); }
       const d = parseDhcp(msg);
       if (!d || !d.opts[53] || !isPxeClient(d)) return;
       const mt = d.opts[53][0];
@@ -693,6 +747,26 @@ function create(opts) {
       else if ((arch === 7 || arch === 9) && secureBoot && sb) file = 'shimx64.efi';
       else if (arch === 7 || arch === 9) file = (uefiLoader === 'snponly' && loaders['snponly.efi']) ? 'snponly.efi' : 'ipxe.efi';
       else { log('info', '', d.mac + ' asked for a boot type this version does not offer (code ' + arch + ').'); return; }
+      if (fullPool && !isProxyPort) {                                                 // Dashboard Hub is the DHCP server: answer completely (address + boot file)
+        if (mt === 3 && d.opts[54] && d.opts[54].length === 4 && !d.opts[54].equals(ipBuf(ip))) { leases.delete(d.mac); return; }   // it chose another DHCP server
+        let lease = leases.get(d.mac);
+        if (!lease) {
+          const used = new Set(leases.values());
+          for (let n = ipNum(fullPool.from); n <= ipNum(fullPool.to); n++) { const a = numIp(n); if (a !== ip && !used.has(a)) { lease = a; break; } }
+          if (!lease) { log('info', '', d.mac + ' asked for an address, but all addresses in your range are used. Widen the range in the DHCP server box.'); return; }
+          leases.set(d.mac, lease);
+        }
+        const sendFull = (r) => {
+          const to = testing.replyTo || '255.255.255.255';
+          out().send(r, testing.replyPort || 68, to, () => { /* best effort */ });
+          if (!testing.replyTo && ip) { const q = ip.split('.'); out().send(r, 68, q[0] + '.' + q[1] + '.' + q[2] + '.255', () => { /* best effort */ }); }
+        };
+        if (mt === 3 && d.opts[50] && d.opts[50].length === 4 && !d.opts[50].equals(ipBuf(lease))) { sendFull(buildFullReply(d, 6, ip, '0.0.0.0', '', fullPool)); return; }
+        if (mt === 1) { log('discover', d.mac, arch === 0 ? 'older BIOS mode' : arch === 7 || arch === 9 ? 'UEFI mode' : 'type ' + arch); log('offer', d.mac, file.replace(/^http:\/\/[^/]+\//, '') + ' (address ' + lease + ')'); }
+        else { const key = d.mac + 'ack' + d.xid.toString('hex'); if (!seenOnce.has(key)) { seenOnce.add(key); log('info', '', d.mac + ' accepted the address ' + lease + ' from Hub.'); } }
+        sendFull(buildFullReply(d, mt === 1 ? 2 : 5, ip, lease, file, fullPool));
+        return;
+      }
       const firmwareUefi = (arch === 7 || arch === 9) && !isIpxe(d);                  // the firmware's own PXE, not iPXE
       if (!isProxyPort && mt === 1) {
         const now = Date.now(); const h = (asks.get(d.mac) || []).filter((t) => now - t < 40000); h.push(now); asks.set(d.mac, h);
@@ -710,8 +784,8 @@ function create(opts) {
       if (!isProxyPort && mt === 3) {
         note('req67', d.mac + ' sent its follow-up request to the normal DHCP port: answered it too.');
         const to = testing.replyTo || '255.255.255.255';
-        sock.send(reply, testing.replyPort || 68, to, () => { /* best effort */ });
-        if (!testing.replyTo && ip) { const p = ip.split('.'); sock.send(reply, 68, p[0] + '.' + p[1] + '.' + p[2] + '.255', () => { /* best effort */ }); }
+        out().send(reply, testing.replyPort || 68, to, () => { /* best effort */ });
+        if (!testing.replyTo && ip) { const p = ip.split('.'); out().send(reply, 68, p[0] + '.' + p[1] + '.' + p[2] + '.255', () => { /* best effort */ }); }
         return;
       }
       if (!isProxyPort) {
@@ -719,8 +793,8 @@ function create(opts) {
         log('offer', d.mac, file.replace(/^http:\/\/[^/]+\//, ''));
         if (weakIpxe) log('info', '', d.mac + "'s built-in boot ROM cannot download over the web, so it is sent a fuller boot loader first.");
         const to = testing.replyTo || '255.255.255.255';
-        sock.send(reply, testing.replyPort || 68, to, () => { /* best effort */ });
-        if (!testing.replyTo && ip) { const p = ip.split('.'); sock.send(reply, 68, p[0] + '.' + p[1] + '.' + p[2] + '.255', () => { /* best effort */ }); }
+        out().send(reply, testing.replyPort || 68, to, () => { /* best effort */ });
+        if (!testing.replyTo && ip) { const p = ip.split('.'); out().send(reply, 68, p[0] + '.' + p[1] + '.' + p[2] + '.255', () => { /* best effort */ }); }
       } else {
         note('req4011', d.mac + ' sent its follow-up request to the boot-file port: answered it.');
         sock.send(reply, ri.port, ri.address, () => { /* best effort */ });
@@ -731,6 +805,12 @@ function create(opts) {
     const s = dgram.createSocket({ type: 'udp4', reuseAddr: true });
     s.once('error', (e) => { try { s.close(); } catch (x) { /* closed */ } reject(e); });
     s.bind(port, () => { try { s.setBroadcast(true); } catch (e) { /* not needed */ } resolve(s); });
+  });
+  // like bindUdp, but only on one address; null when that is not possible (then the normal socket is used, as before)
+  const bindUdpAt = (port, addr) => new Promise((resolve) => {
+    const s = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+    s.once('error', () => { try { s.close(); } catch (x) { /* closed */ } resolve(null); });
+    s.bind(port, addr, () => { try { s.setBroadcast(true); } catch (e) { /* not needed */ } resolve(s); });
   });
   const nice = (e, port) => {
     if (e && e.code === 'EACCES') return 'Port ' + port + ' needs more permission. ' + (process.platform === 'win32' ? 'Close Dashboard Hub and start it again with "Run as administrator".' : process.platform === 'linux' ? 'On Linux, run once in a terminal:  sudo sysctl -w net.ipv4.ip_unprivileged_port_start=67  (lasts until restart), or start Dashboard Hub with sudo.' : 'Start Dashboard Hub as an administrator.');
@@ -744,7 +824,18 @@ function create(opts) {
     if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(want)) return { ok: false, error: 'Pick which network connection of this computer the booting machine is plugged into.' };
     if (!allow.any && !allow.macs.length) return { ok: false, error: 'Add the MAC address of the computer you want to network boot first (or tick "any computer"). This keeps other computers on your network from being touched.' };
     try { loadLoaders(); } catch (e) { return { ok: false, error: 'The boot loader files are missing from this copy of Dashboard Hub.' }; }
-    ip = want;
+    ip = want; fullPool = null; leases = new Map();
+    if (dhcpSrv.on) {
+      const mask = netMaskOf(want);
+      if (!mask) return { ok: false, error: 'Could not read the network size of ' + want + ', so Dashboard Hub cannot act as the DHCP server on it.' };
+      const m = ipNum(mask);
+      const same = (a) => (ipNum(a) & m) === (ipNum(want) & m);
+      let from = dhcpSrv.from, to = dhcpSrv.to;
+      if (!from || !to) { const q = want.split('.'); from = q[0] + '.' + q[1] + '.' + q[2] + '.200'; to = q[0] + '.' + q[1] + '.' + q[2] + '.230'; }
+      if (!same(from) || !same(to) || ipNum(from) > ipNum(to)) return { ok: false, error: 'The DHCP server range ' + from + ' - ' + to + ' does not fit the network ' + want + ' is on (mask ' + mask + '). Fix the range in the DHCP server box.' };
+      if (dhcpSrv.router && !same(dhcpSrv.router)) return { ok: false, error: 'The gateway ' + dhcpSrv.router + ' is not on the same network as ' + want + '.' };
+      fullPool = { mask, from, to, router: dhcpSrv.router };
+    }
     const opened = [];
     let step = ports.http;
     try {
@@ -763,14 +854,19 @@ function create(opts) {
         }
         return tftpFiles[b];
       }, log); opened.push('tftp');
-      step = ports.dhcp; servers.dhcp = await bindUdp(ports.dhcp); servers.dhcp.on('message', dhcpHandler(servers.dhcp, false));
-      step = ports.pxe; servers.pxe = await bindUdp(ports.pxe); servers.pxe.on('message', dhcpHandler(servers.pxe, true));
+      step = ports.dhcp; servers.dhcp = await bindUdp(ports.dhcp);
+      const hDhcp = dhcpHandler(servers.dhcp, false, () => servers.dhcpOut);
+      servers.dhcp.on('message', hDhcp);
+      const outSock = await bindUdpAt(ports.dhcp, ip);
+      if (outSock) { servers.dhcpOut = outSock; outSock.on('message', (m, r) => { if (r.address !== '0.0.0.0') hDhcp(m, r); }); }   // answers leave through the chosen connection; unicast requests to it are still answered
+      else log('info', '', 'Could not tie the answers to ' + ip + ', so they leave through whichever network connection the system picks. If a computer in UEFI mode ignores Dashboard Hub, that can be the reason.');
+      step = ports.pxe; servers.pxe = await bindUdp(ports.pxe); servers.pxe.on('message', dhcpHandler(servers.pxe, true, () => servers.dhcpOut));
     } catch (e) {
       await stop(true);
       return { ok: false, error: nice(e, step) };
     }
     running = true;
-    log('info', '', 'Network boot server started on ' + ip + '. Boot the other computer from its network now.');
+    log('info', '', 'Dashboard Hub version ' + (opts.version || '?') + ' started the network boot server on ' + ip + (fullPool ? ', acting as the DHCP server (addresses ' + fullPool.from + ' - ' + fullPool.to + ')' : ' (adds boot instructions to your router\'s answers)') + '. Boot the other computer from its network now.');
     return { ok: true };
   }
   async function stop(quiet) {
@@ -779,7 +875,7 @@ function create(opts) {
     Object.keys(servers).forEach((k) => { try { servers[k].close(); } catch (e) { /* closed */ } });
     servers = {};
     if (httpSrv) { try { httpSrv.close(); if (httpSrv.closeAllConnections) httpSrv.closeAllConnections(); } catch (e) { /* closed */ } httpSrv = null; }
-    clients.clear(); seenOnce.clear(); ignored.clear(); loops.clear();
+    clients.clear(); seenOnce.clear(); ignored.clear(); loops.clear(); fullPool = null; leases = new Map();
     if (was && !quiet) log('info', '', 'Network boot server stopped.');
     return { ok: true };
   }
@@ -836,6 +932,12 @@ function create(opts) {
     } catch (e) {
       return { ok: false, error: 'Could not get the Secure Boot files: ' + String((e && e.message) || e).slice(0, 200) + ' Check your internet connection and try again.' };
     }
+  }
+  function setDhcpServer(o) {
+    const c = cleanDhcpSrv(o);
+    if ((o && o.from && !c.from) || (o && o.to && !c.to) || (o && o.router && !c.router)) return { ok: false, error: 'One of the addresses is not valid. Use the form 192.168.0.200.' };
+    if (c.on && !!c.from !== !!c.to) return { ok: false, error: 'Fill in both the first and the last address, or leave both empty to let Dashboard Hub choose.' };
+    dhcpSrv = c; save(); return { ok: true };
   }
   function setSecureBoot(on) {
     if (on && !sb) return { ok: false, error: 'Get the Secure Boot files first.' };
@@ -918,12 +1020,12 @@ function create(opts) {
   function status() {
     isos.forEach((x) => { try { fs.accessSync(x.path, fs.constants.R_OK); x.ok = true; } catch (e) { x.ok = false; } });
     return {
-      running, ip, uefiLoader, secureBoot: { on: secureBoot && !!sb, ready: !!sb, info: sb ? sb.info : null }, winShare: Object.assign({}, winShare), answers: answers ? { username: answers.username, hostname: answers.hostname, timezone: answers.timezone, keyboard: answers.keyboard, layout: answers.layout || 'auto', disk: answers.disk || 'auto', hasPassword: true } : null, allow: { macs: allow.macs.slice(), any: allow.any, choice: Object.assign({}, choice) }, ports: { dhcp: ports.dhcp, pxe: ports.pxe, tftp: ports.tftp, http: ports.http }, addresses: localAddresses(),
+      running, ip, uefiLoader, dhcpServer: Object.assign({ active: !!fullPool }, dhcpSrv), secureBoot: { on: secureBoot && !!sb, ready: !!sb, info: sb ? sb.info : null }, winShare: Object.assign({}, winShare), answers: answers ? { username: answers.username, hostname: answers.hostname, timezone: answers.timezone, keyboard: answers.keyboard, layout: answers.layout || 'auto', disk: answers.disk || 'auto', hasPassword: true } : null, allow: { macs: allow.macs.slice(), any: allow.any, choice: Object.assign({}, choice) }, ports: { dhcp: ports.dhcp, pxe: ports.pxe, tftp: ports.tftp, http: ports.http }, addresses: localAddresses(),
       isos: isos.map((x) => ({ id: x.id, name: x.name, path: x.path, mode: x.mode, size: x.size, ok: x.ok !== false })),
       clients: Array.from(clients.entries()).map(([a, c]) => ({ ip: a, last: c.last, t: c.t })), log: logLines.slice(-40)
     };
   }
-  return { start, stop, addIso, removeIso, renameIso, setAllow, setChoice, setUefiLoader, setSecureBoot, getSecureBootFiles, setAnswers, setWinShare, check, status, menuScript, _isos: () => isos };
+  return { start, stop, addIso, removeIso, renameIso, setAllow, setChoice, setUefiLoader, setSecureBoot, setDhcpServer, getSecureBootFiles, setAnswers, setWinShare, check, status, menuScript, _isos: () => isos };
 }
 
-module.exports = { xzDecode, debFile, packageEntry, kickstartText, userDataText, cleanAnswers, DISK_NAME, sha512crypt, pxeSub, create, analyzeIso, openIso, parseDhcp, buildReply, normMac, ipxeFeatures, PORTS };
+module.exports = { xzDecode, debFile, packageEntry, kickstartText, userDataText, cleanAnswers, DISK_NAME, sha512crypt, pxeSub, create, analyzeIso, openIso, parseDhcp, buildReply, buildFullReply, normMac, ipxeFeatures, PORTS };

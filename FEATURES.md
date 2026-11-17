@@ -177,6 +177,7 @@ We'd rather you hear this from us first:
 - **Operating systems**: developed and tested on Windows and Linux. macOS code paths exist but have had little real-world testing.
 - **Network boot (PXE) is new.** The protocol parts are tested against simulated computers, but not yet against real PXE hardware. It needs a cable connection, administrator rights, and a computer whose BIOS can network boot. Secure Boot usually has to be off.
 - **Secure Boot network boot:** computers with Secure Boot ON normally refuse Dashboard Hub's unsigned boot loaders. In the Network boot window, "Secure Boot computers" downloads Ubuntu's own signed shim and network grub (from Ubuntu's official archive, checked against its checksums) and hands them out instead. The computer then loads a signed Ubuntu kernel from your disc, and refuses any unsigned one. Ubuntu-style discs only. Tested with a virtual computer that has real Secure Boot firmware (Microsoft keys) and the real signed Ubuntu files; not yet on a real computer.
+- **Dashboard Hub acts as the DHCP server (advanced, off by default):** for real computers whose UEFI network boot ignores the normal answer. Dashboard Hub hands out the address and the boot file itself. Turn the router's DHCP off first. Not yet tested on real hardware.
 - Listing a machine's file shares often needs a login. On Linux it also needs the `smbclient` package.
 
 ---

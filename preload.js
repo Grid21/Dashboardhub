@@ -73,6 +73,7 @@ contextBridge.exposeInMainWorld('sshApi', {
 
 contextBridge.exposeInMainWorld('notifCenterApi', {
   open: (profileId) => ipcRenderer.invoke('notif:open', String(profileId || '')),
+  beat: (profileId, name, gapMs) => ipcRenderer.invoke('notif:heartbeat', String(profileId || ''), String(name || ''), Number(gapMs) || 0),
   record: (profileId, name, events) => ipcRenderer.invoke('notif:record', String(profileId || ''), String(name || ''), Array.isArray(events) ? events.slice(0, 500) : [])
 });
 

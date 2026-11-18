@@ -2,6 +2,12 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.23.0
+- **New: Uptime and history** (a new tab in the Notifications Center). A green/red bar for every device over the last 24 hours, 7, 30 or 90 days, a summary, and plain sentences such as "Office printer went offline at yesterday 3:12 AM, and came back at yesterday 5:20 AM (off for 2 h 8 min)". Search a device or show only the ones that went offline; hover a bar for exact times.
+- **Honest about gaps:** after every finished scan Dashboard Hub now records that it was watching. Time when it was closed, asleep or not scanning is shown as striped gray "not watched" and never counted as offline. If a device went down while Dashboard Hub was closed, the sentence says "sometime between ... and ..." instead of inventing a time. Older history from before this version has no watching record, so it shows gray except where a device was known to be online.
+- The record is stored in the existing `notifications.json` (kept up to a year, only on this computer); Clear history also clears the watching record. A running watching period is saved every 5 minutes and when the app closes.
+- Tested with made-up records (42 checks: watching periods, drops, still-offline, closed overnight, older records, flapping, junk files, limits) and with simulated scans in the real window (20 checks). Not tested over days with real devices.
+
 ## 1.22.0
 - **New (optional, off until used): "Password manager for panels..."** in the Settings menu. Pick Proton Pass, Bitwarden or another one, then choose the extension file (.zip, .crx) or folder you got from the password manager's own website. It is loaded into the panels' own browsing session only (never the app window), one extension at a time, so a panel's login page can be filled in. Includes an "Open its pop-up window" button (Dashboard Hub has no browser toolbar), a switch to turn it off, and Remove. Dashboard Hub never reads, stores or sends passwords; the extension does all of that.
 - Safety: zip/crx files are unpacked by Dashboard Hub itself and refused if a file name climbs out of the folder, is absolute, is far too large, or if there is no manifest.json; folders are copied without following links; the extension is given no access to local files.

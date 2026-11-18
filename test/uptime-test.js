@@ -1,90 +1,131 @@
 'use strict';
-//   xvfb-run -a node test/uptime-test.js      (the SNMP part needs python3 + pysnmp and UDP port 161 on 127.0.0.1)
-const path = require('path'), fs = require('fs'), os = require('os'), { spawn, spawnSync } = require('child_process');
-const { _electron } = require(process.env.PLAYWRIGHT_DIR || '/home/claude/.npm-global/lib/node_modules/playwright');
-const ROOT = path.join(__dirname, '..');
+//   node test/uptime-test.js
+// Uptime and history: the logic that turns connect/disconnect records and "Dashboard Hub was watching" periods into
+// coloured timelines and plain sentences. Pure logic with made-up records, no network.
+process.env.TZ = 'UTC';
+const h = require('../notif-history.js');
 let passed = 0, failed = 0;
-function check(n, ok, d) { if (ok) { passed++; console.log('  ok    ' + n); } else { failed++; console.log('  FAIL  ' + n + (d !== undefined ? '   -> ' + d : '')); } }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-(async () => {
-  // ---- 1. a real SNMP answer carries the device's own uptime
-  let snmpSelf = null;
-  if (spawnSync('python3', ['-c', 'import pysnmp']).status === 0) {
-    const cn = require(path.join(ROOT, 'connectors.js'));
-    const mib = { '1.3.6.1.2.1.1.5.0': ['s', 'Core switch'], '1.3.6.1.2.1.1.1.0': ['s', 'HPE OfficeConnect 1820 48G Switch J9984A'], '1.3.6.1.2.1.1.2.0': ['x', '2b06010401'], '1.3.6.1.2.1.1.3.0': ['t', 27360000] };
-    const mf = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'up-')), 'mib.json'); fs.writeFileSync(mf, JSON.stringify(mib));
-    const py = spawn('python3', [path.join(__dirname, 'snmp-mock.py'), '161', 'homelab', mf]);
-    await new Promise((r) => { py.stdout.on('data', (d) => { if (/ready/.test(String(d))) r(); }); setTimeout(r, 4000); });
-    const r = await cn.poll({ type: 'snmp', host: '127.0.0.1', port: 161, password: 'homelab', snmpVersion: 2 });
-    py.kill();
-    snmpSelf = r && r.self;
-    check('SNMP: the device\'s own uptime is read (3 days 4 h = 273600 s)', r.ok && r.self && r.self.uptimeSec === 273600, JSON.stringify(r).slice(0, 300));
-  } else console.log('  pysnmp missing: SNMP part skipped');
+const check = (n, ok, d) => { if (ok) { passed++; console.log('  ok    ' + n); } else { failed++; console.log('  FAIL  ' + n + (d !== undefined ? '   -> ' + d : '')); } };
+const MIN = 60000, HR = 3600000;
+const T = (day, hh, mm) => Date.UTC(2026, 10, day, hh, mm || 0);            // Nov <day> 2026, UTC
+const hhmm = (t) => new Date(t).toISOString().slice(11, 16);
+const fmt = (t) => new Date(t).toISOString().slice(5, 16).replace('T', ' ');
+const NAMES = {};          // the map always sends the device's current name, so remember it per device like the app does
+const ev = (kind, key, t, extra) => { if (extra && extra.name) NAMES[key] = extra.name; return Object.assign({ kind, key, t, mac: key, ip: '10.0.0.5', name: NAMES[key] || key, os: 'linux', vendor: '' }, extra || {}); };
+const fresh = () => ({ profiles: {} });
+// watch continuously from a to b with a scan every 'step' minutes
+function watch(store, a, b, stepMin) { for (let t = a; t <= b; t += (stepMin || 1) * MIN) h.heartbeat(store, 'p1', 'Home', 3 * MIN * 3, t); }
+const prof = (st) => st.profiles.p1;
+const segText = (d) => d.segments.map((s) => s[2] + '@' + hhmm(s[0]) + '-' + hhmm(s[1])).join(' ');
 
-  // ---- 2. the map keeps and shows the counts
-  const app = await _electron.launch({ executablePath: path.join(ROOT, 'node_modules/electron/dist/electron'), args: [ROOT, '--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--user-data-dir=' + fs.mkdtempSync(path.join(os.tmpdir(), 'upu-'))] });
-  const page = await app.firstWindow(); await page.setViewportSize({ width: 1400, height: 900 });
-  const errors = []; page.on('pageerror', (e) => { errors.push(String(e)); console.log('  PAGEERROR ' + String(e).slice(0, 200)); });
-  await page.waitForSelector('#tabMap');
-  await app.evaluate(({ ipcMain }) => { ipcMain.removeHandler('net:interfaces'); ipcMain.handle('net:interfaces', () => ({ ok: true, interfaces: [{ name: 'eth0', address: '10.7.0.9', cidr: '10.7.0.0/24' }], gateway: '10.7.0.1', gatewayMac: 'aa:aa:aa:00:00:01', speeds: {} })); });
-  await page.click('#tabMap'); await sleep(400);
-  await page.evaluate(() => { state.profiles[0].fp = null; saveState(); }); await page.evaluate(() => window.hubNetmap.guardCheck()); await sleep(300);
-  const M = 'aa:bb:cc:00:00:';
-  const now = Date.now(), DAY = 86400000;
-  const dev = (n, extra) => Object.assign({ key: M + n, mac: M + n, ip: '10.7.0.' + (40 + Number(n)), label: 'dev' + n, online: true, os: { id: 'linux', label: 'linux', confidence: 'high', reasons: [] }, pos: { x: -10 + Number(n) * 3, y: 0, z: 6 } }, extra);
-  const map = () => ({ router: '10.7.0.1', cidr: '10.7.0.0/24', scannedOnce: true, showOffline: true, presenceAt: now - 60000,
-    devices: { router: { key: 'router', ip: '10.7.0.1', isRouter: true, online: true },
-      [M + '01']: dev('01', { lastSeen: now - 60000, onlineSince: now - 3 * DAY - 5 * 3600000, firstSeen: now - 20 * DAY }),   // watched for 3 days 5 h
-      [M + '02']: dev('02', { lastSeen: now - 5 * 3600000, onlineSince: now - 9 * DAY }),                                    // app was closed 5 h: count starts again
-      [M + '03']: dev('03', { online: false, lastSeen: now - 3600000, onlineSince: now - DAY }),                           // offline: no count
-      [M + '04']: dev('04', { lastSeen: now - 1000 }) },                                                                    // never counted before: starts now
-    links: ['01', '02', '03', '04'].map((n) => ({ a: 'router', b: M + n, auto: true })) });
-  await page.evaluate((d) => window.hubNetmap.importData(d, true), map());
-  await sleep(800); await page.evaluate(() => window.__hubMap.sync()); await sleep(400);
-  const data = () => page.evaluate(() => window.hubNetmap.exportData().devices);
-  let d = await data();
-  check('a count that was watched without a gap is kept', Math.abs(d[M + '01'].onlineSince - (now - 3 * DAY - 5 * 3600000)) < 1000);
-  check('a long pause in watching (over 2 hours) starts the count again', d[M + '02'].onlineSince === null || d[M + '02'].onlineSince > now - 60000, String(d[M + '02'].onlineSince));
-  const sel = async (k) => { const p = await page.evaluate((k) => window.__hubMap.screenOf(k), k); await page.mouse.click(p.x, p.y); await sleep(600); };
-  const side = () => page.evaluate(() => document.querySelector('#mapSide').innerText);
-  await page.evaluate(() => window.hubNetmap.exportData());      // (a save has run by now, so every online machine has a start time)
-  await sel(M + '01'); let t = await side();
-  check('pane says "Seen online for 3 days 5 h"', /Seen online for 3 days 5 h/.test(t), t.slice(0, 400));
-  check('pane says when it was first seen', /First seen/.test(t));
-  check('pane says it only counts while the app watches', /Counted only while Dashboard Hub is running/.test(t));
-  check('pane says an ordinary PC does not report its own uptime', /does not report its own uptime/.test(t));
-  await sel(M + '04'); t = await side();
-  check('a machine with no earlier count starts at "under a minute"', /Seen online for under a minute/.test(t), t.slice(0, 300));
-  await sel(M + '03'); t = await side();
-  check('an offline machine shows no "online for" line', !/Seen online for/.test(t), t.slice(0, 300));
+console.log('Watching periods');
+{
+  const st = fresh();
+  check('first scan starts a watching period', h.heartbeat(st, 'p1', 'Home', 600000, T(10, 8, 0)) === 'new' && prof(st).watch.length === 1);
+  check('a later scan inside the gap extends it', h.heartbeat(st, 'p1', 'Home', 600000, T(10, 8, 5)) === 'extended' && prof(st).watch.length === 1 && prof(st).watch[0].b === T(10, 8, 5));
+  check('a long pause starts a new period', h.heartbeat(st, 'p1', 'Home', 600000, T(10, 12, 0)) === 'new' && prof(st).watch.length === 2);
+  check('the pause is not counted as watched', h.watchPeriods(prof(st), T(10, 12, 0))[0][1] === T(10, 8, 5));
+  check('a clock that goes backwards is ignored', h.heartbeat(st, 'p1', 'Home', 600000, T(10, 11, 0)) === '' && prof(st).watch.length === 2);
+  check('bad profile id is refused', h.heartbeat(st, '../x', 'Home', 600000, T(10, 12, 1)) === '');
+  h.heartbeat(st, 'p1', 'Home', 1, T(10, 12, 1)); check('the allowed pause is never shorter than 10 minutes', prof(st).gap === h.MIN_GAP);
+  h.heartbeat(st, 'p1', 'Home', 99 * HR, T(10, 12, 2)); check('...or longer than 6 hours', prof(st).gap === h.MAX_GAP);
+  const round = h.cleanStore(JSON.parse(JSON.stringify(st)));
+  check('watching periods survive saving and loading', round.profiles.p1.watch.length === 2 && round.profiles.p1.watchSince === prof(st).watchSince && round.profiles.p1.gap === h.MAX_GAP);
+  const junk = h.cleanStore({ profiles: { p1: { name: 'x', sessions: [], watch: [{ a: 'x', b: 1 }, null, { a: T(10, 9), b: T(10, 8) }, { a: T(10, 8), b: T(10, 9) }, 5], gap: 'abc', watchSince: -4 } } });
+  check('junk in the saved file is dropped, good entries kept', junk.profiles.p1.watch.length === 1 && junk.profiles.p1.gap === h.MIN_GAP && junk.profiles.p1.watchSince === T(10, 8));
+  const big = fresh(); for (let i = 0; i < h.MAX_WATCH + 50; i++) h.heartbeat(big, 'p1', 'Home', 600000, T(1, 0) + i * 2 * HR);
+  check('the list of watching periods is capped', prof(big).watch.length <= h.MAX_WATCH);
+  const old = fresh(); h.heartbeat(old, 'p1', 'Home', 600000, T(10, 0) - 400 * 24 * HR); h.heartbeat(old, 'p1', 'Home', 600000, T(10, 0));
+  check('periods older than a year are removed', prof(old).watch.length === 1);
+}
 
-  // router / switch check results: SNMP uptime, UniFi gear uptime, UniFi client connection time
-  const conn = { ok: true, host: '10.7.0.45', type: 'snmp', self: Object.assign({ name: 'Closet switch', brand: 'HPE', kind: 'switch', portTable: [], uptimeSec: (snmpSelf && snmpSelf.uptimeSec) || 273600 }, {}), clients: [], gear: [] };
-  await page.evaluate((m) => { const x = window.hubNetmap.exportData(); x.router = '10.7.0.1'; x.cidr = '10.7.0.0/24'; x.scannedOnce = true; x.devices[m + '05'] = { key: m + '05', mac: m + '05', ip: '10.7.0.45', label: 'Closet switch', online: true, pos: { x: 8, y: 0, z: 6 } }; x.links.push({ a: 'router', b: m + '05', auto: true }); window.hubNetmap.importData(x, true); }, M);
-  await sleep(500);
-  await page.evaluate((c) => window.hubNetmap.applyConnector(c), conn); await sleep(500);
-  await page.evaluate(() => window.__hubMap.sync()); await sleep(300);
-  await sel(M + '05'); t = await side();
-  check('SNMP switch: pane says the device has been running 3 days 4 h', /has been running for 3 days 4 h/.test(t), t.slice(0, 500));
-  const unifi = { ok: true, host: '10.7.0.2', type: 'unifi', self: null, gear: [], clients: [{ mac: M + '04', ip: '10.7.0.44', name: 'dev04', wireless: true, via: 'Wi-Fi', connSec: 90000 }] };
-  await page.evaluate((c) => window.hubNetmap.applyConnector(c), unifi); await sleep(500);
-  await page.evaluate(() => window.__hubMap.sync()); await sleep(300);
-  await sel(M + '04'); t = await side();
-  check('UniFi client: "Connected to the network for 1 day 1 h"', /Connected to the network for 1 day 1 h/.test(t), t.slice(0, 500));
-  // going offline drops both counts, and coming back starts a fresh one
-  await app.evaluate(({ ipcMain, BrowserWindow }) => {
-    ipcMain.removeHandler('net:scan');
-    ipcMain.handle('net:scan', (e, o) => { setTimeout(() => { const w = BrowserWindow.getAllWindows()[0]; w.webContents.send('net:event', { type: 'done' }); }, 150); return { ok: true, cidr: o.cidr }; });
-  });
-  await page.evaluate(() => { const i = document.querySelector('#mapIface'); if (!Array.from(i.options).some((o) => o.value === '10.7.0.0/24')) { const o = document.createElement('option'); o.value = '10.7.0.0/24'; o.textContent = '10.7.0.0/24'; i.appendChild(o); } i.value = '10.7.0.0/24'; i.dispatchEvent(new Event('change')); });
-  await page.click('#mapScan'); await sleep(1500);
-  d = await data();
-  check('a machine the scan no longer finds loses its counts', d[M + '01'].online === false && d[M + '01'].onlineSince === null && d[M + '01'].upInfo === null, JSON.stringify([d[M + '01'].online, d[M + '01'].onlineSince, d[M + '01'].upInfo]));
-  check('"first seen" is kept', d[M + '01'].firstSeen > 0);
-  // the saved file keeps the fields (survives restart: goes through the sanitiser in the main program)
-  const saved = await page.evaluate(() => JSON.stringify(window.hubNetmap.exportData().devices));
-  check('counts survive export / import', /firstSeen/.test(saved));
-  check('no page errors', errors.length === 0, errors.join(' | ').slice(0, 300));
-  await app.close();
-  console.log('\n' + passed + ' passed, ' + failed + ' failed'); process.exit(failed ? 1 : 0);
-})().catch((e) => { console.log('CRASH', e); process.exit(1); });
+console.log('\nA device that drops off while Dashboard Hub is watching');
+{
+  const st = fresh();
+  watch(st, T(10, 0), T(10, 12), 1);
+  h.apply(st, 'p1', 'Home', [ev('seen', 'printer', T(10, 0, 0), { name: 'Office printer', os: 'printer' })], T(10, 12));
+  h.apply(st, 'p1', 'Home', [ev('left', 'printer', T(10, 3, 12))], T(10, 12));
+  h.apply(st, 'p1', 'Home', [ev('back', 'printer', T(10, 5, 20))], T(10, 12));
+  const now = T(10, 12), tl = h.timeline(prof(st), T(10, 0), now, now), d = tl.devices[0];
+  check('one device in the report', tl.devices.length === 1 && d.name === 'Office printer');
+  check('its stretches are up, down, up', d.segments.map((s) => s[2]).join(',') === 'up,down,up', segText(d));
+  check('the red stretch is exactly the time it was off', d.segments[1][0] === T(10, 3, 12) && d.segments[1][1] === T(10, 5, 20), segText(d));
+  check('time down is 2 h 8 min', d.downMs === 128 * MIN, d.downMs);
+  check('uptime percent is worked out from watched time only', Math.abs(d.pct - Math.round(1000 * (720 - 128) / 720) / 10) < 0.2, d.pct);
+  const lines = h.story(tl, now, fmt);
+  check('one plain sentence tells the story', lines.length === 1 && lines[0].text === 'Office printer went offline at 11-10 03:12, and came back at 11-10 05:20 (off for 2 h 8 min).', lines[0] && lines[0].text);
+  check('the summary says what happened', /1 device watched · 1 time a device went offline \(1 device\) · Dashboard Hub was watching 100% of this period/.test(h.summary(tl, now)), h.summary(tl, now));
+  check('the default wording says "today 3:12 AM"', /went offline at today 3:12 AM/.test(h.story(tl, now)[0].text), h.story(tl, now)[0].text);
+  const later = h.story(h.timeline(prof(st), T(10, 0), T(11, 12), T(11, 12)), T(11, 12))[0].text;
+  check('...and "yesterday" a day later', /yesterday 3:12 AM/.test(later), later);
+}
+
+console.log('\nStill offline');
+{
+  const st = fresh(); watch(st, T(10, 0), T(10, 12), 1);
+  h.apply(st, 'p1', 'Home', [ev('seen', 'nas', T(10, 0, 0), { name: 'NAS' }), ev('left', 'nas', T(10, 9))], T(10, 12));
+  const now = T(10, 12), tl = h.timeline(prof(st), T(10, 0), now, now), l = h.story(tl, now, fmt);
+  check('it says the device has not come back and for how long', l.length === 1 && l[0].text === 'NAS went offline at 11-10 09:00, and has not come back yet (off for 3 h so far).', l[0] && l[0].text);
+  check('the red stretch runs to now', tl.devices[0].segments[tl.devices[0].segments.length - 1][2] === 'down' && !tl.devices[0].online);
+  check('the summary counts it as offline right now', /1 offline right now/.test(h.summary(tl, now)));
+}
+
+console.log('\nDashboard Hub was closed overnight');
+{
+  const st = fresh();
+  watch(st, T(10, 18), T(10, 22), 1);                      // watched until 22:00, then closed
+  h.apply(st, 'p1', 'Home', [ev('seen', 'cam', T(10, 18, 0), { name: 'Camera' }), ev('seen', 'tv', T(10, 18, 0), { name: 'TV' })], T(10, 22));
+  watch(st, T(11, 8), T(11, 9), 1);                        // opened again at 08:00
+  h.apply(st, 'p1', 'Home', [ev('left', 'cam', T(11, 8, 1))], T(11, 9));      // the camera was off by then
+  const now = T(11, 9), tl = h.timeline(prof(st), T(10, 18), now, now);
+  const cam = tl.devices.find((x) => x.name === 'Camera'), tv = tl.devices.find((x) => x.name === 'TV');
+  check('the closed hours are gray (unknown), never green or red', cam.segments.some((s) => s[2] === 'unknown' && s[0] === T(10, 22) && s[1] >= T(11, 7, 59)) && tv.segments.some((s) => s[2] === 'unknown'), segText(cam));
+  check('the TV that stayed on is green before and after the gap', tv.segments[0][2] === 'up' && tv.segments[tv.segments.length - 1][2] === 'up', segText(tv));
+  check('the TV has no "went offline" sentence', tv.downs.length === 0 && h.story(tl, now, fmt).every((x) => !/TV/.test(x.text)));
+  const cl = h.story(tl, now, fmt).find((x) => /Camera/.test(x.text));
+  check('the camera sentence says "sometime between", not a made-up time', cl && /stopped answering sometime between 11-10 22:00 and 11-11 08:01, while Dashboard Hub was not watching/.test(cl.text), cl && cl.text);
+  check('the camera turns red only when watching resumed', cam.segments[cam.segments.length - 1][2] === 'down' && cam.segments[cam.segments.length - 1][0] <= T(11, 8, 1) && cam.segments[cam.segments.length - 1][0] >= T(11, 7, 59), segText(cam));
+  check('the unwatched night hours do not count as down time (only the hour after watching resumed does)', cam.downMs > 55 * MIN && cam.downMs < 65 * MIN, cam.downMs);
+  check('the report says how much of the period was watched', tl.watchedPct > 20 && tl.watchedPct < 40, tl.watchedPct);
+}
+
+console.log('\nRecords from before this feature');
+{
+  const st = fresh();
+  h.apply(st, 'p1', 'Home', [ev('seen', 'old', T(1, 8), { name: 'Old laptop' }), ev('left', 'old', T(1, 12))], T(1, 13));
+  const now = T(5, 0), tl = h.timeline(prof(st), T(1, 0), now, now), d = tl.devices[0];
+  check('known online hours show as green', d.segments.some((s) => s[2] === 'up' && s[0] === T(1, 8) && s[1] === T(1, 12)), segText(d));
+  check('time after it left is gray, not red, as nobody was recording', d.segments[d.segments.length - 1][2] === 'unknown' && d.downMs === 0, segText(d));
+}
+
+console.log('\nOther cases');
+{
+  const st = fresh(); watch(st, T(10, 0), T(10, 12), 1);
+  h.apply(st, 'p1', 'Home', [ev('new', 'phone', T(10, 6), { name: 'Phone', os: 'android' })], T(10, 12));
+  const now = T(10, 12), d = h.timeline(prof(st), T(10, 0), now, now).devices[0];
+  check('before a device was first seen it is "not known", not red', d.segments[0][2] === 'none' && d.segments[1][2] === 'up' && d.downMs === 0, segText(d));
+  check('uptime is 100% when it never dropped', d.pct === 100);
+  // flapping
+  const f = fresh(); watch(f, T(10, 0), T(10, 12), 1);
+  const evs = [ev('seen', 'bulb', T(10, 0, 1), { name: 'Bulb' })];
+  [[1, 2], [3, 4], [5, 6], [7, 8]].forEach(([a, b]) => { evs.push(ev('left', 'bulb', T(10, a))); evs.push(ev('back', 'bulb', T(10, b))); });
+  h.apply(f, 'p1', 'Home', evs, T(10, 12));
+  const tl = h.timeline(prof(f), T(10, 0), now, now);
+  check('four drops give four sentences, newest first', h.story(tl, now, fmt).length === 4 && h.story(tl, now, fmt)[0].at > h.story(tl, now, fmt)[3].at);
+  check('the summary counts them', /4 times a device went offline \(1 device\)/.test(h.summary(tl, now)), h.summary(tl, now));
+  // nothing watched at all
+  const e = fresh(); h.apply(e, 'p1', 'Home', [ev('seen', 'x', T(10, 1))], T(10, 2));
+  const tl2 = h.timeline(prof(e), T(10, 0), T(10, 12), T(10, 12));
+  check('with no watching periods nothing is shown as down', tl2.devices.every((x) => x.downMs === 0) && tl2.watchedPct === 0);
+  check('a window with no devices gives an honest summary', /No devices watched/.test(h.summary(h.timeline(prof(f), T(1, 0), T(1, 6), now), now)));
+  // junk in the window
+  check('a silly window does not crash', (() => { try { h.timeline(prof(f), NaN, undefined, now); h.timeline(prof(f), 5, -9, now); return true; } catch (x) { return false; } })());
+  check('story with no devices is empty', h.story({ devices: [] }, now).length === 0);
+  // device names are text, not markup, and long lists are capped
+  const many = fresh(); watch(many, T(10, 0), T(10, 2), 1);
+  const batch = []; for (let i = 0; i < 400; i++) batch.push(ev('seen', 'm' + i, T(10, 0, 1), { name: '<b>dev' + i + '</b>', mac: ('aa:bb:cc:00:' + (i >> 8).toString(16).padStart(2, '0') + ':' + (i & 255).toString(16).padStart(2, '0')) }));
+  for (let i = 0; i < 400; i += 50) h.apply(many, 'p1', 'Home', batch.slice(i, i + 50), T(10, 2));
+  const tlm = h.timeline(prof(many), T(10, 0), T(10, 2), T(10, 2));
+  check('at most 300 devices are drawn', tlm.devices.length === 300, tlm.devices.length);
+}
+console.log(failed ? 'FAILED ' + failed : 'All ' + passed + ' passed'); process.exit(failed ? 1 : 0);

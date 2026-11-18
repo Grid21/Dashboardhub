@@ -118,6 +118,13 @@
           'Pick which network profile to look at. Export list (CSV) saves what you see as a spreadsheet file. Clear history deletes the finished records of that profile.',
           'Times are when Dashboard Hub noticed the change, in your computer\'s time zone. It notices changes when it scans, so turn on Live update on the Network Map for the most exact times.',
           'History is kept on this computer only, for up to a year or 5,000 connections per profile.'
+        ] },
+        'The Notifications Center also has an Uptime and history tab: a coloured bar for every device over the last 24 hours, 7, 30 or 90 days, plus plain sentences such as "Office printer went offline at yesterday 3:12 AM, and came back at yesterday 5:20 AM (off for 2 h 8 min)":',
+        { list: [
+          'Green is online, red is offline, and striped gray means Dashboard Hub was not watching (closed, asleep, or not scanning). Gray is never counted as offline.',
+          'If Dashboard Hub was closed when a device went down, the sentence says "sometime between" two times instead of making up one. Keep Live update on for the most exact times.',
+          'Search a device, or tick Only devices that went offline. The percentage is online time divided by watched time. Hover a bar for exact times.',
+          'History from before this feature has no watching record, so older time shows as gray except where a device was known to be online.'
         ] }
       ]
     },

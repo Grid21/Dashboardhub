@@ -13,6 +13,8 @@ const OS_IDS = ['windows', 'linux', 'apple', 'android', 'iot', 'console', 'print
 const MAX_SESSIONS = 5000;           // per network profile
 const KEEP_MS = 365 * 24 * 3600 * 1000;
 const MAX_IPS = 8;
+const MAX_WATCH = 3000;              // watching periods kept per profile
+const MIN_GAP = 10 * 60 * 1000, MAX_GAP = 6 * 3600 * 1000;
 
 const str = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, n) : '');
 const validIp = (v) => typeof v === 'string' && /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(v) && v.split('.').every((p) => Number(p) <= 255);
@@ -34,7 +36,9 @@ function cleanEvent(e, now) {
   };
 }
 
-function emptyProfile(name) { return { name: str(name, 60) || 'Network', seq: 0, sessions: [] }; }
+// watch: the stretches of time Dashboard Hub was really scanning this network ({a, b}); gap: how long a pause still counts as "watching"
+// watchSince: when watching was first recorded (older sessions come from before this record existed)
+function emptyProfile(name) { return { name: str(name, 60) || 'Network', seq: 0, sessions: [], watch: [], gap: MIN_GAP, watchSince: 0 }; }
 
 // load whatever is on disk and keep only well-formed data
 function cleanStore(raw) {
@@ -46,6 +50,12 @@ function cleanStore(raw) {
     if (!p || typeof p !== 'object') return;
     const prof = emptyProfile(p.name);
     prof.seq = Number.isInteger(p.seq) && p.seq >= 0 ? p.seq : 0;
+    prof.gap = Number.isFinite(p.gap) ? Math.min(MAX_GAP, Math.max(MIN_GAP, Math.round(p.gap))) : MIN_GAP;
+    (Array.isArray(p.watch) ? p.watch : []).slice(-MAX_WATCH).forEach((w) => {
+      if (w && Number.isFinite(w.a) && Number.isFinite(w.b) && w.a > 946684800000 && w.b >= w.a) prof.watch.push({ a: Math.round(w.a), b: Math.round(w.b) });
+    });
+    prof.watch.sort((x, y) => x.a - y.a);
+    prof.watchSince = Number.isFinite(p.watchSince) && p.watchSince > 946684800000 ? Math.round(p.watchSince) : (prof.watch.length ? prof.watch[0].a : 0);
     (Array.isArray(p.sessions) ? p.sessions : []).slice(0, MAX_SESSIONS).forEach((s) => {
       if (!s || typeof s !== 'object') return;
       const key = str(s.key, 80);
@@ -158,6 +168,146 @@ function humanDuration(ms) {
   return d + ' d' + (h % 24 ? ' ' + (h % 24) + ' h' : '');
 }
 
+// ---------- uptime and history ----------
+// Called after every finished scan. Returns 'new' when a new watching period started, 'extended' when the current one grew, '' if nothing was done.
+function heartbeat(store, id, name, gapMs, now) {
+  now = Number.isFinite(now) ? now : Date.now();
+  id = profileId(id);
+  if (!id) return '';
+  if (!store.profiles[id]) {
+    if (Object.keys(store.profiles).length >= 50) return '';
+    store.profiles[id] = emptyProfile(name);
+  }
+  const prof = store.profiles[id];
+  if (str(name, 60)) prof.name = str(name, 60);
+  prof.gap = Number.isFinite(gapMs) ? Math.min(MAX_GAP, Math.max(MIN_GAP, Math.round(gapMs))) : MIN_GAP;
+  const last = prof.watch[prof.watch.length - 1];
+  if (last && now >= last.b && now - last.b <= prof.gap) { last.b = now; return 'extended'; }
+  if (last && now < last.b) return '';                                   // the clock went backwards: ignore
+  prof.watch.push({ a: now - 45000, b: now });                             // a scan takes a little while: the period starts just before it ended
+  if (!prof.watchSince) prof.watchSince = now - 45000;
+  keepOnly(prof.watch, (w) => now - w.b < KEEP_MS);
+  if (prof.watch.length > MAX_WATCH) prof.watch.splice(0, prof.watch.length - MAX_WATCH);
+  return 'new';
+}
+
+// the watching periods as [a, b] pairs; the newest one runs up to "now" while it is still current
+function watchPeriods(prof, now) {
+  const w = prof.watch.map((x) => [x.a, x.b]);
+  const l = w[w.length - 1];
+  if (l && now > l[1] && now - l[1] <= prof.gap) l[1] = now;
+  return w;
+}
+
+// For every device: coloured stretches between "from" and "to" ('up', 'down', 'unknown' = not watched, 'none' = not known yet),
+// how long it was up and down, and every time it went offline. Nothing is guessed: time when Dashboard Hub was not watching stays 'unknown'.
+function timeline(prof, from, to, now) {
+  now = Number.isFinite(now) ? now : Date.now();
+  to = Math.min(Number.isFinite(to) ? to : now, now);
+  from = Number.isFinite(from) ? Math.min(from, to - 60000) : to - 86400000;
+  const W = watchPeriods(prof, now);
+  const legacyBefore = prof.watchSince || Infinity;                      // before watching was recorded, only the known online stretches are certain
+  const inW = (m) => W.some((w) => m >= w[0] && m <= w[1]);
+  // When a device is first found missing right after Dashboard Hub was closed for a while, it went down some time in that unwatched
+  // stretch: the red part starts when watching resumed, and the sentence says "sometime between".
+  const endInfo = (s) => {
+    if (s.end === null) return { end: null, shown: null, gapFrom: null };
+    const k = W.findIndex((w) => w[0] <= s.end && s.end <= w[1]);
+    if (k > 0 && s.end - W[k][0] <= 10 * 60000 && W[k][0] - W[k - 1][1] > prof.gap && (s.start === null || s.start <= W[k - 1][1])) return { end: s.end, shown: W[k][0], gapFrom: W[k - 1][1] };
+    return { end: s.end, shown: s.end, gapFrom: null };
+  };
+  const groups = new Map();
+  prof.sessions.forEach((s) => { const k = s.mac || s.key; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(Object.assign({}, s, { _i: endInfo(s) })); });
+  const out = [];
+  groups.forEach((list, k) => {
+    list.sort((a, b) => (a.start === null ? -Infinity : a.start) - (b.start === null ? -Infinity : b.start));
+    const first = list[0].start === null ? -Infinity : list[0].start;
+    const cuts = new Set([from, to]);
+    const add = (t) => { if (t !== null && t > from && t < to) cuts.add(t); };
+    W.forEach((w) => { add(w[0]); add(w[1]); });
+    add(legacyBefore === Infinity ? null : legacyBefore);
+    list.forEach((s) => { add(s.start); add(s._i.shown); });
+    const pts = Array.from(cuts).sort((a, b) => a - b);
+    const segs = [];
+    let up = 0, down = 0, touched = false;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const x = pts[i], y = pts[i + 1], m = (x + y) / 2;
+      const inSess = list.some((s) => (s.start === null || s.start <= m) && (s._i.shown === null || s._i.shown > m));
+      let st;
+      if (m < legacyBefore) st = inSess ? 'up' : 'unknown';
+      else if (!inW(m)) st = 'unknown';
+      else if (inSess) st = 'up';
+      else st = first <= m ? 'down' : 'none';
+      if (st === 'up') { up += y - x; touched = true; } else if (st === 'down') { down += y - x; touched = true; }
+      const l = segs[segs.length - 1];
+      if (l && l[2] === st) l[1] = y; else segs.push([x, y, st]);
+    }
+    if (!touched) return;
+    // every time it went offline inside the period
+    const downs = [];
+    list.forEach((s, i) => {
+      if (s.end === null || s.end < from || s.end > to) return;
+      const nxt = list.slice(i + 1).find((q) => q.start !== null && q.start >= s.end) || null;
+      downs.push({ at: s.end, back: nxt ? nxt.start : null, lenMs: nxt ? Math.max(0, nxt.start - s._i.shown) : Math.max(0, to - s._i.shown), gapFrom: s._i.gapFrom });
+    });
+    const latest = list[list.length - 1];
+    const named = list.slice().reverse().find((s) => s.name) || latest;
+    out.push({
+      key: k, name: named.name || latest.ips[latest.ips.length - 1] || latest.mac || latest.key, os: (list.slice().reverse().find((s) => s.os !== 'unknown') || latest).os,
+      mac: latest.mac, ip: latest.ips[latest.ips.length - 1] || '', online: list.some((s) => s.end === null), segments: segs,
+      upMs: up, downMs: down, pct: up + down > 0 ? Math.round(1000 * up / (up + down)) / 10 : null, downs: downs
+    });
+  });
+  out.sort((a, b) => b.downs.length - a.downs.length || (a.pct === null ? 101 : a.pct) - (b.pct === null ? 101 : b.pct) || String(a.name).toLowerCase().localeCompare(String(b.name).toLowerCase()));
+  let watched = 0;
+  W.forEach((w) => { watched += Math.max(0, Math.min(w[1], to) - Math.max(w[0], from)); });
+  return { from: from, to: to, devices: out.slice(0, 300), watchedMs: watched, watchedPct: Math.round(1000 * Math.min(1, watched / Math.max(1, to - from))) / 10, since: prof.watchSince || 0 };
+}
+
+// "today 3:12 AM", "yesterday 11:40 PM", "Mon, Nov 9, 3:12 AM"
+function friendlyTime(now) {
+  return (t) => {
+    const d = new Date(t), n = new Date(now);
+    const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const clock = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const diff = Math.round((day(n) - day(d)) / 86400000);
+    if (diff === 0) return 'today ' + clock;
+    if (diff === 1) return 'yesterday ' + clock;
+    return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) + ', ' + clock;
+  };
+}
+
+// The sentences, newest first. fmt turns a time into words (tests give their own).
+function story(tl, now, fmt) {
+  fmt = fmt || friendlyTime(now);
+  const lines = [];
+  tl.devices.forEach((d) => {
+    d.downs.forEach((x) => {
+      let t;
+      if (x.gapFrom !== null) t = d.name + ' stopped answering sometime between ' + fmt(x.gapFrom) + ' and ' + fmt(x.at) + ', while Dashboard Hub was not watching';
+      else t = d.name + ' went offline at ' + fmt(x.at);
+      if (x.back !== null) t += ', and came back at ' + fmt(x.back) + ' (off for ' + (x.gapFrom !== null ? 'at least ' : '') + humanDuration(x.lenMs) + ').';
+      else t += d.online ? '.' : ', and has not come back yet (off for ' + humanDuration(x.lenMs) + ' so far).';
+      lines.push({ at: x.at, key: d.key, text: t });
+    });
+  });
+  lines.sort((a, b) => b.at - a.at);
+  return lines.slice(0, 200);
+}
+
+function summary(tl, now) {
+  const total = tl.devices.length;
+  const withDowns = tl.devices.filter((d) => d.downs.length);
+  const drops = withDowns.reduce((n, d) => n + d.downs.length, 0);
+  const notOnline = tl.devices.filter((d) => !d.online).length;
+  const parts = [];
+  parts.push(total ? total + ' device' + (total === 1 ? '' : 's') + ' watched' : 'No devices watched in this period');
+  if (total) parts.push(drops ? drops + ' time' + (drops === 1 ? '' : 's') + ' a device went offline (' + withDowns.length + ' device' + (withDowns.length === 1 ? '' : 's') + ')' : 'no device went offline');
+  if (notOnline) parts.push(notOnline + ' offline right now');
+  parts.push('Dashboard Hub was watching ' + tl.watchedPct + '% of this period');
+  return parts.join(' · ');
+}
+
 const csvCell = (v) => {
   let t = v === null || v === undefined ? '' : String(v);
   if (/^[=+\-@\t\r]/.test(t)) t = "'" + t;               // a spreadsheet must never treat a name as a formula
@@ -175,4 +325,4 @@ function toCsv(sessions, now) {
   return [head].concat(rows).map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
-module.exports = { KINDS, OS_IDS, MAX_SESSIONS, profileId, cleanEvent, cleanStore, apply, prune, duration, humanDuration, toCsv, csvCell };
+module.exports = { KINDS, OS_IDS, MAX_SESSIONS, MAX_WATCH, MIN_GAP, MAX_GAP, profileId, cleanEvent, cleanStore, apply, prune, duration, humanDuration, toCsv, csvCell, heartbeat, watchPeriods, timeline, story, summary, friendlyTime };

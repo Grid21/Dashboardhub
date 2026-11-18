@@ -141,6 +141,24 @@ ipcMain.handle('notif:data', (event, profileId) => {
   const pid = notifLib.profileId(String(profileId || ''));
   return { ok: true, now: Date.now(), profiles: profiles, profile: pid, sessions: pid && store.profiles[pid] ? store.profiles[pid].sessions : [] };
 });
+let notifBeatSaved = 0;
+ipcMain.handle('notif:heartbeat', (event, profileId, name, gapMs) => {
+  checkSender(event);
+  const r = notifLib.heartbeat(notifData(), String(profileId || ''), String(name || ''), Number(gapMs));
+  if (r === 'new') notifSave();
+  else if (r === 'extended' && Date.now() - notifBeatSaved > 5 * 60000) { notifBeatSaved = Date.now(); notifSave(); }   // a growing period is saved every 5 minutes (and when the app closes)
+  return { ok: true };
+});
+ipcMain.handle('notif:uptime', (event, profileId, rangeMs) => {
+  notifSender(event);
+  const pid = notifLib.profileId(String(profileId || ''));
+  const store = notifData();
+  if (!pid || !store.profiles[pid]) return { ok: true, empty: true, now: Date.now() };
+  const now = Date.now();
+  const range = Math.min(366 * 86400000, Math.max(3600000, Number(rangeMs) || 86400000));
+  const tl = notifLib.timeline(store.profiles[pid], now - range, now, now);
+  return { ok: true, now: now, from: tl.from, to: tl.to, since: tl.since, watchedPct: tl.watchedPct, summary: notifLib.summary(tl, now), lines: notifLib.story(tl, now), devices: tl.devices };
+});
 ipcMain.handle('notif:clear', async (event, profileId) => {
   notifSender(event);
   const pid = notifLib.profileId(String(profileId || ''));
@@ -151,6 +169,7 @@ ipcMain.handle('notif:clear', async (event, profileId) => {
   // devices that are online now stay listed, so their disconnect time can still be recorded
   const list = store.profiles[pid].sessions;
   for (let i = list.length - 1; i >= 0; i--) if (list[i].end !== null) list.splice(i, 1);
+  store.profiles[pid].watch.length = 0; store.profiles[pid].watchSince = 0;     // the uptime history goes with it
   notifWriteNow();
   return { ok: true };
 });

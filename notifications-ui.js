@@ -118,10 +118,74 @@
     state.profile = pid || '';
     fillProfiles();
     render();
+    if (up.active) upLoad();
   }
 
+  // ---------- Uptime and history ----------
+  const up = { range: 86400000, shown: 40, data: null, active: false };
+  const clockTime = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const STATE_WORDS = { up: 'Online', down: 'Offline', unknown: 'Not watched' };
+  function upRender() {
+    const d = up.data;
+    const empty = $('upEmpty');
+    const none = !d || d.empty;
+    empty.classList.toggle('hidden', !none && d.devices.length > 0);
+    $('upStoryBox').classList.toggle('hidden', none);
+    $('upDevices').classList.toggle('hidden', none || !d.devices.length);
+    if (none) { empty.textContent = state.profile ? 'Nothing recorded for this network yet. Scan it on the Network Map and turn on Live update: this view then shows when each device was online and offline.' : 'No network history yet. Open the Network Map in Dashboard Hub and scan your network.'; $('upSummary').textContent = ''; return; }
+    $('upSummary').textContent = d.summary;
+    const q = $('upSearch').value.trim().toLowerCase(), onlyDown = $('upOnlyDown').checked;
+    const devs = d.devices.filter((x) => (!onlyDown || x.downs.length) && (!q || (x.name + ' ' + x.ip + ' ' + x.mac).toLowerCase().includes(q)));
+    const keep = new Set(devs.map((x) => x.key));
+    const lines = d.lines.filter((l) => keep.has(l.key));
+    empty.classList.toggle('hidden', devs.length > 0 || lines.length > 0);
+    if (!devs.length && !lines.length) empty.textContent = d.devices.length ? 'Nothing matches the search.' : 'No device was watched in this period yet.';
+    const ul = $('upStory'); ul.textContent = '';
+    lines.slice(0, up.shown).forEach((l) => { const li = el('li', '', l.text); li.title = 'Noticed ' + clockTime(l.at); ul.appendChild(li); });
+    if (!lines.length) ul.appendChild(el('li', 'nc-unknown', d.devices.length ? 'No device went offline in this period.' : ''));
+    $('upMore').classList.toggle('hidden', lines.length <= up.shown);
+    $('upFrom').textContent = clockTime(d.from); $('upTo').textContent = clockTime(d.to);
+    const span = Math.max(1, d.to - d.from), rows = $('upRows'); rows.textContent = '';
+    devs.forEach((x) => {
+      const row = el('div', 'up-row');
+      const nm = el('div', 'up-name', x.name); nm.title = x.name;
+      nm.appendChild(el('span', 'up-sub', (OS_NAMES[x.os] || 'Unknown') + (x.ip ? ' · ' + x.ip : '') + (x.online ? '' : ' · offline now')));
+      const bar = el('div', 'up-bar');
+      x.segments.forEach((sg) => {
+        if (sg[2] === 'none') return;
+        const s = el('div', 'up-seg ' + sg[2]);
+        s.style.left = (100 * (sg[0] - d.from) / span) + '%'; s.style.width = (100 * (sg[1] - sg[0]) / span) + '%';
+        s.title = STATE_WORDS[sg[2]] + ': ' + clockTime(sg[0]) + ' to ' + clockTime(sg[1]) + ' (' + human(sg[1] - sg[0]) + ')';
+        bar.appendChild(s);
+      });
+      const pct = el('div', 'up-pct', (x.pct === null ? 'not enough watching' : x.pct + '% online') + (x.downs.length ? ' · ' + x.downs.length + (x.downs.length === 1 ? ' drop' : ' drops') : ''));
+      row.appendChild(nm); row.appendChild(bar); row.appendChild(pct);
+      rows.appendChild(row);
+    });
+  }
+  async function upLoad() {
+    if (!api || !api.uptime) return;
+    const r = await api.uptime(state.profile, up.range);
+    if (r && r.ok) { up.data = r; upRender(); }
+  }
+  function showTab(which) {
+    up.active = which === 'up';
+    $('ncListView').classList.toggle('hidden', up.active);
+    $('ncUpView').classList.toggle('hidden', !up.active);
+    $('ncTabList').classList.toggle('active', !up.active); $('ncTabUp').classList.toggle('active', up.active);
+    $('ncTabList').setAttribute('aria-pressed', String(!up.active)); $('ncTabUp').setAttribute('aria-pressed', String(up.active));
+    if (up.active) upLoad();
+  }
+  $('ncTabList').addEventListener('click', () => showTab('list'));
+  $('ncTabUp').addEventListener('click', () => showTab('up'));
+  $('upRange').addEventListener('change', (e) => { up.range = Number(e.target.value); up.shown = 40; upLoad(); });
+  $('upSearch').addEventListener('input', upRender);
+  $('upOnlyDown').addEventListener('change', upRender);
+  $('upMore').addEventListener('click', () => { up.shown += 60; upRender(); });
+  setInterval(() => { if (up.active && !document.hidden) upLoad(); }, 60000);
+
   let timer = null;
-  const soon = () => { if (timer) return; timer = setTimeout(() => { timer = null; load(); }, 300); };
+  const soon = () => { if (timer) return; timer = setTimeout(() => { timer = null; load().then(() => { if (up.active) upLoad(); }); }, 300); };
 
   const q = new URLSearchParams(location.search);
   const first = (q.get('profile') || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
@@ -157,5 +221,5 @@
   setInterval(() => { if (!document.hidden) render(); }, 30000);       // keeps "so far" times fresh
   state.profile = first;
   load(first);
-  window.hubNotifTest = { state: state, render: render };
+  window.hubNotifTest = { state: state, render: render, up: up, upLoad: upLoad };
 })();

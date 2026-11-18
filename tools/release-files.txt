@@ -140,6 +140,7 @@ test/updater-test.js
 test/updater-ui-test.js
 test/updwin-test.js
 test/uptime-test.js
+test/uptime-ui-test.js
 test/versions-test.js
 test/versions-ui-test.js
 test/wake-test.js

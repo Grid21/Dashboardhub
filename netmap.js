@@ -2770,6 +2770,12 @@
   // ---------- what routers and switches told us (see connections-ui.js) ----------
   const scanDoneHooks = [];
   scanDoneHooks.push(() => { dnsSweep(false); });
+  // every finished scan means "Dashboard Hub was watching this network just now": the Uptime view uses it to tell "offline" from "not watched"
+  scanDoneHooks.push(() => {
+    const prof = activeProf();
+    if (!prof || !net || !window.notifCenterApi || !window.notifCenterApi.beat) return;
+    try { window.notifCenterApi.beat(prof.id, prof.name, 3 * (net.autoSeconds || 0) * 1000).catch(() => {}); } catch (e) { /* history is a convenience */ }
+  });
   function applyConnector(res) {
     if (!res || !res.ok || !net) return { clients: 0, created: 0 };
     if (guardStopped()) return { clients: 0, created: 0 };

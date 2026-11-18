@@ -36,6 +36,30 @@ tbody tr:hover { background: #20262e; }
 .nc-dot.on { background: var(--good); }
 #ncEmpty { padding: 40px 20px; text-align: center; color: var(--dim); }
 .nc-msg { margin: 6px 16px 0; min-height: 1.3em; font-size: 13px; color: var(--good); } .nc-msg.bad { color: var(--bad); }
+.nc-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+#ncTabs { display: flex; gap: 4px; padding: 8px 16px 0; border-bottom: 1px solid var(--line); }
+#ncTabs button { border-radius: 6px 6px 0 0; border-bottom: none; background: transparent; color: var(--dim); }
+#ncTabs button.active { background: var(--panel); color: var(--text); border-color: var(--accent); }
+#upBar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; flex-wrap: wrap; }
+#upSearch { flex: 1 1 220px; min-width: 160px; }
+#upSummary { margin: 0; padding: 0 16px 4px; font-size: 13px; }
+.up-legend { display: flex; gap: 14px; padding: 0 16px 8px; color: var(--dim); font-size: 12px; flex-wrap: wrap; }
+.up-sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -2px; }
+.sw-up { background: var(--good); } .sw-down { background: var(--bad); } .sw-unknown { background: repeating-linear-gradient(45deg, #3a4250, #3a4250 3px, #2b323c 3px, #2b323c 6px); }
+#upWrap { flex: 1; min-height: 0; overflow: auto; margin: 0 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 10px 14px; }
+#upWrap h3 { margin: 6px 0; font-size: 14px; }
+#upStory { margin: 0 0 14px; padding: 0; list-style: none; }
+#upStory li { padding: 4px 0; border-bottom: 1px solid #232a33; font-size: 13px; }
+#upMore { margin: 6px 0 12px; }
+.up-row { display: grid; grid-template-columns: minmax(130px, 220px) 1fr 150px; gap: 10px; align-items: center; padding: 5px 0; border-bottom: 1px solid #232a33; }
+.up-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .up-sub { color: var(--dim); font-size: 11px; font-weight: normal; display: block; }
+.up-bar { position: relative; height: 16px; border-radius: 4px; background: #232a33; overflow: hidden; }
+.up-seg { position: absolute; top: 0; bottom: 0; min-width: 1px; }
+.up-seg.up { background: var(--good); } .up-seg.down { background: var(--bad); } .up-seg.unknown { background: repeating-linear-gradient(45deg, #3a4250, #3a4250 3px, #2b323c 3px, #2b323c 6px); }
+.up-pct { font-size: 12px; color: var(--dim); text-align: right; }
+.up-axis { display: grid; grid-template-columns: minmax(130px, 220px) 1fr 150px; gap: 10px; color: var(--dim); font-size: 11px; padding-bottom: 2px; }
+.up-axis .ends { display: flex; justify-content: space-between; }
+@media (max-width: 760px) { .up-row, .up-axis { grid-template-columns: 1fr; } .up-pct { text-align: left; } }
 .nc-foot { margin: 4px 16px 12px; color: var(--dim); font-size: 12px; }
   </style>
 </head>
@@ -46,6 +70,11 @@ tbody tr:hover { background: #20262e; }
       <select id="ncProfile" aria-label="Network profile"></select>
     </label>
   </header>
+  <nav id="ncTabs" aria-label="Views">
+    <button type="button" id="ncTabList" class="active" aria-pressed="true">Connections list</button>
+    <button type="button" id="ncTabUp" aria-pressed="false">Uptime and history</button>
+  </nav>
+  <div id="ncListView" class="nc-view">
   <div id="ncBar">
     <input id="ncSearch" type="search" placeholder="Search name, MAC address or IP address" autocomplete="off" aria-label="Search the history" maxlength="80">
     <select id="ncKind" aria-label="Type of device"></select>
@@ -83,8 +112,28 @@ tbody tr:hover { background: #20262e; }
     </table>
     <div id="ncEmpty" class="hidden"></div>
   </div>
+  </div>
+  <div id="ncUpView" class="nc-view hidden">
+    <div id="upBar">
+      <select id="upRange" aria-label="Time period">
+        <option value="86400000">Last 24 hours</option>
+        <option value="604800000">Last 7 days</option>
+        <option value="2592000000">Last 30 days</option>
+        <option value="7776000000">Last 90 days</option>
+      </select>
+      <input id="upSearch" type="search" placeholder="Search a device name or address" autocomplete="off" aria-label="Search devices" maxlength="80">
+      <label><input type="checkbox" id="upOnlyDown"> Only devices that went offline</label>
+    </div>
+    <p id="upSummary" aria-live="polite"></p>
+    <div class="up-legend"><span><span class="up-sw sw-up"></span>Online</span><span><span class="up-sw sw-down"></span>Offline</span><span><span class="up-sw sw-unknown"></span>Not watched (Dashboard Hub was closed, asleep or not scanning)</span></div>
+    <div id="upWrap">
+      <div id="upEmpty" class="nc-unknown hidden"></div>
+      <div id="upStoryBox"><h3>What happened</h3><ul id="upStory"></ul><button type="button" id="upMore" class="hidden">Show more</button></div>
+      <div id="upDevices"><h3>Every device</h3><div class="up-axis"><span></span><span class="ends"><span id="upFrom"></span><span id="upTo"></span></span><span></span></div><div id="upRows"></div></div>
+    </div>
+  </div>
   <p id="ncMsg" class="nc-msg" role="status"></p>
-  <p class="nc-foot">Times are when Dashboard Hub noticed a change, in your computer's time zone. It notices changes when it scans your network, so turn on Live update on the Network Map for the most exact times. A device already online when watching began shows "already online". Records are kept for a year and stored only on this computer.</p>
+  <p class="nc-foot">Times are when Dashboard Hub noticed a change, in your computer's time zone. It notices changes when it scans your network, so turn on Live update on the Network Map for the most exact times. A device already online when watching began shows "already online". The Uptime view only counts time when Dashboard Hub was really scanning: other time is shown as "not watched", never as offline, and a time given as "sometime between" means Dashboard Hub was closed when it happened. Records are kept for a year and stored only on this computer.</p>
   <script src="notifications-ui.js"></script>
 </body>
 </html>

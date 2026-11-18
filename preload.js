@@ -80,6 +80,14 @@ contextBridge.exposeInMainWorld('remoteViewApi', {
   open: () => ipcRenderer.invoke('remote:open', '')
 });
 
+contextBridge.exposeInMainWorld('pmApi', {
+  status: () => ipcRenderer.invoke('pm:status'),
+  pick: (key, kind) => ipcRenderer.invoke('pm:pick', String(key || ''), kind === 'folder' ? 'folder' : 'file'),
+  remove: () => ipcRenderer.invoke('pm:remove'),
+  enable: (on) => ipcRenderer.invoke('pm:enable', on === true),
+  popup: () => ipcRenderer.invoke('pm:popup')
+});
+
 contextBridge.exposeInMainWorld('pxeApi', {
   status: () => ipcRenderer.invoke('pxe:status'),
   start: (ip) => ipcRenderer.invoke('pxe:start', { ip: String(ip || '') }),

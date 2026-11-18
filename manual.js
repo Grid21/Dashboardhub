@@ -230,6 +230,20 @@
       ]
     },
     {
+      id: 'pm', title: 'Password manager for panels',
+      words: 'password manager proton pass bitwarden extension login fill autofill panel chrome',
+      body: [
+        'Bring your own password manager into the panels (optional, off until you set it up). Open Settings, then Password manager for panels... Pick yours (Proton Pass, Bitwarden or another one), then choose the extension file (.zip or .crx) or folder you got from its own website.',
+        'It is loaded into the panels only, so a panel\'s login page can be filled in. Dashboard Hub never sees, stores or sends your passwords. Dashboard Hub is not a browser: there is no extension store and only one slot.',
+        { list: [
+          'After installing, reload the panels (the ↻ button), open the extension\'s pop-up window from the same window and log in to your own account there.',
+          'It may not work fully: only part of a browser\'s extension system exists inside Dashboard Hub. Extensions that need a separate desktop app to unlock will not work.',
+          'An extension can read every page in your panels. Only use the real one from the password manager\'s own website. Remove it any time from the same window.',
+          'Tested with a stand-in extension, not yet with the real Proton Pass or Bitwarden.'
+        ] }
+      ]
+    },
+    {
       id: 'pxe', title: 'Network boot (PXE)',
       words: 'pxe network boot ubuntu iso install usb uefi bios rocky alma fedora windows unattended autoinstall kickstart netboot.xyz tftp dhcp',
       body: [

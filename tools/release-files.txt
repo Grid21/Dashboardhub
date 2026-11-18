@@ -94,6 +94,7 @@ test/offline-lines-test.js
 test/panel-sleep-test.js
 test/perf-probe.js
 test/ping-count-test.js
+test/pm-ext-test.js
 test/ports-shot.png
 test/ports-test.js
 test/ports2-test.js

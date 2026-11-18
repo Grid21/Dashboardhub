@@ -2,6 +2,11 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.22.0
+- **New (optional, off until used): "Password manager for panels..."** in the Settings menu. Pick Proton Pass, Bitwarden or another one, then choose the extension file (.zip, .crx) or folder you got from the password manager's own website. It is loaded into the panels' own browsing session only (never the app window), one extension at a time, so a panel's login page can be filled in. Includes an "Open its pop-up window" button (Dashboard Hub has no browser toolbar), a switch to turn it off, and Remove. Dashboard Hub never reads, stores or sends passwords; the extension does all of that.
+- Safety: zip/crx files are unpacked by Dashboard Hub itself and refused if a file name climbs out of the folder, is absolute, is far too large, or if there is no manifest.json; folders are copied without following links; the extension is given no access to local files.
+- Tested with a stand-in extension written for the test (install from zip, .crx, folder and a zip with an outer folder; fills a panel's login at startup too; pop-up window; off; remove; restart; unsafe files refused). **Not tested with the real Proton Pass or Bitwarden**: only part of a browser's extension system exists inside Dashboard Hub, so they may only partly work. Extensions that need a desktop app to unlock cannot work. Dashboard Hub does not download extensions itself, because the official download locations could not be checked.
+
 ## 1.21.1
 - Wording only: the new DHCP server box, its messages and the manual now say "Dashboard Hub" instead of just "Hub". No other changes.
 

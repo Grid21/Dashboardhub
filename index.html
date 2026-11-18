@@ -48,6 +48,7 @@
           <button type="button" id="profileRemove" role="menuitem">Remove profile</button>
           <div class="profile-menu-sep"></div>
           <button type="button" id="bmcMenuBtn" role="menuitem" title="Status and power control for servers with iLO, iDRAC or another BMC">Server management (iLO / iDRAC)...</button>
+          <button type="button" id="pmMenuBtn" role="menuitem" title="Bring your own password manager into the panels (optional)">Password manager for panels...</button>
           <button type="button" id="pxeMenuBtn" role="menuitem" title="Boot another computer from this one over the network (PXE): live and rescue discs, no USB stick needed">Network boot (PXE)...</button>
           <button type="button" id="toolsMenuBtn" role="menuitem" title="Unpack a .hubupdate file into its source files, or pack a folder back into a .hubupdate file">Update file tools (unpack / pack)...</button>
           <button type="button" id="securityMenuBtn" role="menuitem" title="Choose what panels may do, and limit scanning, router connections and SNMP">Security settings...</button>
@@ -383,6 +384,25 @@
     <div class="dialog-buttons"><button type="button" id="aboutClose" class="primary">Close</button></div>
   </dialog>
 
+  <dialog id="pmDialog">
+    <h3>Password manager for panels</h3>
+    <p class="hint">Want to bring your password manager into Dashboard Hub? Pick yours below, then choose the extension file or folder you got from its own website. It is loaded into the <b>panels only</b>, so a panel's login page can be filled in the way you do in your browser. Dashboard Hub never sees, stores or sends your passwords: the extension does all of that itself. This is <b>off</b> until you do it, and Dashboard Hub is not a browser: there is no extension store, only this one slot.</p>
+    <p class="hint"><b>Be careful:</b> an extension can read every page in your panels. Only use the real one from the password manager's own website. It may not work fully in Dashboard Hub, because only part of a browser's extension system exists here (log in with your account in its pop-up, then reload the panel).</p>
+    <label class="check-inline">Password manager: <select id="pmKey"></select></label>
+    <p class="hint" id="pmCost"></p>
+    <div class="pxe-row">
+      <button type="button" id="pmFile">Choose the extension file (.zip / .crx)...</button>
+      <button type="button" id="pmFolder">Choose its folder...</button>
+    </div>
+    <p class="hint" id="pmState">Nothing installed.</p>
+    <div class="pxe-row">
+      <label class="check-inline"><input type="checkbox" id="pmOn" disabled> Use it in the panels</label>
+      <button type="button" id="pmPopup" disabled>Open its pop-up window</button>
+      <button type="button" id="pmRemove" disabled>Remove</button>
+    </div>
+    <p class="hint" id="pmMsg" role="status"></p>
+    <div class="dialog-buttons"><span class="spacer"></span><button type="button" id="pmClose">Close</button></div>
+  </dialog>
   <dialog id="pxeDialog" class="wide">
     <h3>Network boot (PXE)</h3>
     <p class="hint">Starts another computer from <b>this</b> one, over the network cable, with no USB stick. Choose a disc image (ISO) or the netboot.xyz menu on that computer's boot screen.

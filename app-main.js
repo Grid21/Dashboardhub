@@ -477,6 +477,37 @@ let armedUpdateFile = '', armedUntil = 0;       // a downloaded update waiting t
 })();
 
 // ---------- Network boot (PXE): boot another computer from this one. Off until Start is pressed; stops when the app quits ----------
+const pmLib = require('./security').pmExt;
+const pmExt = pmLib.create({
+  dataDir: app.getPath('userData'),
+  getSession: () => require('electron').session.fromPartition('persist:panels'),
+  openPopupWindow: (ses, url, id) => {
+    const w = new BrowserWindow({ width: 400, height: 640, title: 'Password manager', autoHideMenuBar: true, webPreferences: { session: ses, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    w.removeMenu();
+    w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    w.webContents.on('will-navigate', (e, u) => { if (!String(u).startsWith('chrome-extension://' + id + '/')) e.preventDefault(); });
+    w.loadURL(url);
+    return w;
+  }
+});
+ipcMain.handle('pm:status', (event) => { checkSender(event); return Object.assign({ ok: true }, pmExt.status()); });
+ipcMain.handle('pm:pick', async (event, key, kind) => {
+  checkSender(event);
+  try {
+    let chosen = process.env.DASHBOARD_HUB_TEST_PICK || '';   // only the automatic tests set this
+    if (!chosen) {
+      const pick = await dialog.showOpenDialog(mainWindow, kind === 'folder'
+        ? { title: 'Choose the extension\'s folder (the one with manifest.json in it)', defaultPath: lastFolder('pmExt', 'downloads'), properties: ['openDirectory'] }
+        : { title: 'Choose the extension file (.zip or .crx)', defaultPath: lastFolder('pmExt', 'downloads'), properties: ['openFile'], filters: [{ name: 'Browser extension', extensions: ['zip', 'crx', 'xpi'] }] });
+      if (pick.canceled || !pick.filePaths || !pick.filePaths[0]) return { ok: false, canceled: true };
+      chosen = pick.filePaths[0]; rememberFolder('pmExt', chosen);
+    }
+    return await pmExt.install(String(key || ''), chosen);
+  } catch (e) { return { ok: false, error: 'That could not be installed.' }; }
+});
+ipcMain.handle('pm:remove', async (event) => { checkSender(event); return pmExt.remove(); });
+ipcMain.handle('pm:enable', async (event, on) => { checkSender(event); return pmExt.setEnabled(on === true); });
+ipcMain.handle('pm:popup', (event) => { checkSender(event); return pmExt.openPopup(); });
 const pxeLib = require('./pxe');
 const pxeMod = pxeLib.create({ dataDir: app.getPath('userData'), version: app.getVersion() });
 ipcMain.handle('pxe:status', (event) => { checkSender(event); try { return Object.assign({ ok: true }, pxeMod.status()); } catch (e) { return { ok: false, error: 'Could not read the network boot state.' }; } });
@@ -1428,7 +1459,7 @@ app.whenReady().then(() => {
   settings = readSettings();
   startWithLock((locked) => {
     if (locked) { app.on('second-instance', showWindow); ensureTray(); }
-    createWindow();
+    pmExt.load().catch(() => {}).then(() => createWindow());   // the password manager extension (if any) is ready before the panels load
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });

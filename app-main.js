@@ -149,15 +149,15 @@ ipcMain.handle('notif:heartbeat', (event, profileId, name, gapMs) => {
   else if (r === 'extended' && Date.now() - notifBeatSaved > 5 * 60000) { notifBeatSaved = Date.now(); notifSave(); }   // a growing period is saved every 5 minutes (and when the app closes)
   return { ok: true };
 });
-ipcMain.handle('notif:uptime', (event, profileId, rangeMs) => {
+ipcMain.handle('notif:uptime', (event, profileId, rangeMs, minDropMs) => {
   notifSender(event);
   const pid = notifLib.profileId(String(profileId || ''));
   const store = notifData();
   if (!pid || !store.profiles[pid]) return { ok: true, empty: true, now: Date.now() };
   const now = Date.now();
   const range = Math.min(366 * 86400000, Math.max(3600000, Number(rangeMs) || 86400000));
-  const tl = notifLib.timeline(store.profiles[pid], now - range, now, now);
-  return { ok: true, now: now, from: tl.from, to: tl.to, since: tl.since, watchedPct: tl.watchedPct, summary: notifLib.summary(tl, now), lines: notifLib.story(tl, now), devices: tl.devices };
+  const tl = notifLib.hideShort(notifLib.timeline(store.profiles[pid], now - range, now, now), Math.min(3600000, Math.max(0, Number(minDropMs) || 0)));
+  return { ok: true, now: now, from: tl.from, to: tl.to, since: tl.since, watchedPct: tl.watchedPct, summary: notifLib.summary(tl, now), lines: notifLib.story(tl, now), linesAll: notifLib.story(tl, now, undefined, true), devices: tl.devices };
 });
 ipcMain.handle('notif:clear', async (event, profileId) => {
   notifSender(event);

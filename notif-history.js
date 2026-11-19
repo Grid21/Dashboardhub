@@ -258,10 +258,19 @@ function timeline(prof, from, to, now) {
       upMs: up, downMs: down, pct: up + down > 0 ? Math.round(1000 * up / (up + down)) / 10 : null, downs: downs
     });
   });
-  out.sort((a, b) => b.downs.length - a.downs.length || (a.pct === null ? 101 : a.pct) - (b.pct === null ? 101 : b.pct) || String(a.name).toLowerCase().localeCompare(String(b.name).toLowerCase()));
+  out.sort((a, b) => (a.online ? 1 : 0) - (b.online ? 1 : 0) || b.downs.length - a.downs.length || (a.pct === null ? 101 : a.pct) - (b.pct === null ? 101 : b.pct) || String(a.name).toLowerCase().localeCompare(String(b.name).toLowerCase()));
   let watched = 0;
   W.forEach((w) => { watched += Math.max(0, Math.min(w[1], to) - Math.max(w[0], from)); });
   return { from: from, to: to, devices: out.slice(0, 300), watchedMs: watched, watchedPct: Math.round(1000 * Math.min(1, watched / Math.max(1, to - from))) / 10, since: prof.watchSince || 0 };
+}
+
+// Many small gadgets (lamps, plugs, phones asleep) drop off for a minute or two all day. This leaves out drops shorter than ms from the
+// sentences and counts (a device that is still offline is always kept). The coloured bars are not changed: they stay truthful.
+function hideShort(tl, ms) {
+  if (!(ms > 0)) return tl;
+  const devices = tl.devices.map((d) => Object.assign({}, d, { downs: d.downs.filter((x) => x.back === null || x.lenMs >= ms) }));
+  devices.sort((a, b) => (a.online ? 1 : 0) - (b.online ? 1 : 0) || b.downs.length - a.downs.length || (a.pct === null ? 101 : a.pct) - (b.pct === null ? 101 : b.pct) || String(a.name).toLowerCase().localeCompare(String(b.name).toLowerCase()));
+  return Object.assign({}, tl, { devices: devices });
 }
 
 // "today 3:12 AM", "yesterday 11:40 PM", "Mon, Nov 9, 3:12 AM"
@@ -278,21 +287,36 @@ function friendlyTime(now) {
 }
 
 // The sentences, newest first. fmt turns a time into words (tests give their own).
-function story(tl, now, fmt) {
+// A device that keeps dropping for a few minutes and coming back gets ONE line for the whole bout, not one line per drop.
+const BRIEF_MS = 10 * 60000, BOUT_GAP_MS = 60 * 60000;
+function story(tl, now, fmt, every) {        // every = true: one sentence per drop, nothing grouped
   fmt = fmt || friendlyTime(now);
   const lines = [];
+  const one = (d, x) => {
+    let t;
+    if (x.gapFrom !== null) t = d.name + ' stopped answering sometime between ' + fmt(x.gapFrom) + ' and ' + fmt(x.at) + ', while Dashboard Hub was not watching';
+    else t = d.name + ' went offline at ' + fmt(x.at);
+    if (x.back !== null) t += ', and came back at ' + fmt(x.back) + ' (off for ' + (x.gapFrom !== null ? 'at least ' : '') + humanDuration(x.lenMs) + ').';
+    else t += d.online ? '.' : ', and has not come back yet (off for ' + humanDuration(x.lenMs) + ' so far).';
+    return { at: x.at, key: d.key, count: 1, text: t };
+  };
   tl.devices.forEach((d) => {
-    d.downs.forEach((x) => {
-      let t;
-      if (x.gapFrom !== null) t = d.name + ' stopped answering sometime between ' + fmt(x.gapFrom) + ' and ' + fmt(x.at) + ', while Dashboard Hub was not watching';
-      else t = d.name + ' went offline at ' + fmt(x.at);
-      if (x.back !== null) t += ', and came back at ' + fmt(x.back) + ' (off for ' + (x.gapFrom !== null ? 'at least ' : '') + humanDuration(x.lenMs) + ').';
-      else t += d.online ? '.' : ', and has not come back yet (off for ' + humanDuration(x.lenMs) + ' so far).';
-      lines.push({ at: x.at, key: d.key, text: t });
+    const bouts = [];
+    let cur = null;
+    d.downs.slice().sort((a, b) => a.at - b.at).forEach((x) => {
+      const brief = x.back !== null && x.gapFrom === null && x.lenMs < BRIEF_MS;
+      if (!brief || every) { lines.push(one(d, x)); cur = null; return; }
+      if (cur && x.at - cur.lastBack <= BOUT_GAP_MS) { cur.list.push(x); cur.lastBack = x.back; } else { cur = { list: [x], lastBack: x.back }; bouts.push(cur); }
+    });
+    bouts.forEach((c) => {
+      if (c.list.length === 1) { lines.push(one(d, c.list[0])); return; }
+      const total = c.list.reduce((n, x) => n + x.lenMs, 0), longest = c.list.reduce((n, x) => Math.max(n, x.lenMs), 0);
+      lines.push({ at: c.list[c.list.length - 1].at, key: d.key, count: c.list.length,
+        text: d.name + ' dropped off ' + c.list.length + ' times between ' + fmt(c.list[0].at) + ' and ' + fmt(c.lastBack) + ' (' + humanDuration(total) + ' offline in total, none longer than ' + humanDuration(longest) + ').' });
     });
   });
   lines.sort((a, b) => b.at - a.at);
-  return lines.slice(0, 200);
+  return lines.slice(0, every ? 600 : 200);
 }
 
 function summary(tl, now) {
@@ -325,4 +349,4 @@ function toCsv(sessions, now) {
   return [head].concat(rows).map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
-module.exports = { KINDS, OS_IDS, MAX_SESSIONS, MAX_WATCH, MIN_GAP, MAX_GAP, profileId, cleanEvent, cleanStore, apply, prune, duration, humanDuration, toCsv, csvCell, heartbeat, watchPeriods, timeline, story, summary, friendlyTime };
+module.exports = { KINDS, OS_IDS, MAX_SESSIONS, MAX_WATCH, MIN_GAP, MAX_GAP, profileId, cleanEvent, cleanStore, apply, prune, duration, humanDuration, toCsv, csvCell, heartbeat, watchPeriods, timeline, story, summary, friendlyTime, hideShort };

@@ -122,32 +122,41 @@
   }
 
   // ---------- Uptime and history ----------
-  const up = { range: 86400000, shown: 40, data: null, active: false };
+  const up = { range: 86400000, shown: 40, data: null, active: false, focus: '', minDrop: 0 };
   const clockTime = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   const STATE_WORDS = { up: 'Online', down: 'Offline', unknown: 'Not watched' };
   function upRender() {
     const d = up.data;
+    const keepScroll = [$('upWrap').scrollTop, $('upStory').scrollTop];
     const empty = $('upEmpty');
-    const none = !d || d.empty;
+    const none = !d || d.empty === true;      // must be true/false: toggle() with undefined would FLIP the box on every refresh
     empty.classList.toggle('hidden', !none && d.devices.length > 0);
-    $('upStoryBox').classList.toggle('hidden', none);
-    $('upDevices').classList.toggle('hidden', none || !d.devices.length);
+    $('upStoryBox').classList.toggle('hidden', !!none);
+    $('upDevices').classList.toggle('hidden', !!(none || !d.devices.length));
     if (none) { empty.textContent = state.profile ? 'Nothing recorded for this network yet. Scan it on the Network Map and turn on Live update: this view then shows when each device was online and offline.' : 'No network history yet. Open the Network Map in Dashboard Hub and scan your network.'; $('upSummary').textContent = ''; return; }
     $('upSummary').textContent = d.summary;
     const q = $('upSearch').value.trim().toLowerCase(), onlyDown = $('upOnlyDown').checked;
     const devs = d.devices.filter((x) => (!onlyDown || x.downs.length) && (!q || (x.name + ' ' + x.ip + ' ' + x.mac).toLowerCase().includes(q)));
     const keep = new Set(devs.map((x) => x.key));
-    const lines = d.lines.filter((l) => keep.has(l.key));
+    if (up.focus && !keep.has(up.focus)) up.focus = '';
+    const everyEvent = $('upAllEvents').checked;
+    const lines = up.focus ? d.linesAll.filter((l) => l.key === up.focus) : everyEvent ? d.linesAll.filter((l) => keep.has(l.key)) : d.lines.filter((l) => keep.has(l.key));     // grouped by default; one device (or "every event") shows each drop
+    const fd = up.focus ? devs.find((x) => x.key === up.focus) : null;
+    $('upFocus').classList.toggle('hidden', !fd); $('upFocusName').textContent = fd ? fd.name : '';
     empty.classList.toggle('hidden', devs.length > 0 || lines.length > 0);
     if (!devs.length && !lines.length) empty.textContent = d.devices.length ? 'Nothing matches the search.' : 'No device was watched in this period yet.';
     const ul = $('upStory'); ul.textContent = '';
-    lines.slice(0, up.shown).forEach((l) => { const li = el('li', '', l.text); li.title = 'Noticed ' + clockTime(l.at); ul.appendChild(li); });
-    if (!lines.length) ul.appendChild(el('li', 'nc-unknown', d.devices.length ? 'No device went offline in this period.' : ''));
+    lines.slice(0, up.shown).forEach((l) => {
+      const li = el('li', '', l.text); li.title = 'Noticed ' + clockTime(l.at);
+      ul.appendChild(li);
+    });
+    if (!lines.length) ul.appendChild(el('li', 'nc-unknown', !d.devices.length ? '' : fd ? fd.name + ' did not go offline in this period.' : 'No device went offline in this period.'));
     $('upMore').classList.toggle('hidden', lines.length <= up.shown);
     $('upFrom').textContent = clockTime(d.from); $('upTo').textContent = clockTime(d.to);
     const span = Math.max(1, d.to - d.from), rows = $('upRows'); rows.textContent = '';
     devs.forEach((x) => {
-      const row = el('div', 'up-row');
+      const row = el('div', 'up-row' + (up.focus === x.key ? ' picked' : ''));
+      row.title = 'Click to see only this device\'s story'; row.addEventListener('click', () => { up.focus = up.focus === x.key ? '' : x.key; up.shown = 40; upRender(); });
       const nm = el('div', 'up-name', x.name); nm.title = x.name;
       nm.appendChild(el('span', 'up-sub', (OS_NAMES[x.os] || 'Unknown') + (x.ip ? ' · ' + x.ip : '') + (x.online ? '' : ' · offline now')));
       const bar = el('div', 'up-bar');
@@ -162,10 +171,11 @@
       row.appendChild(nm); row.appendChild(bar); row.appendChild(pct);
       rows.appendChild(row);
     });
+    $('upWrap').scrollTop = keepScroll[0]; $('upStory').scrollTop = keepScroll[1];     // a refresh must not make the page jump
   }
   async function upLoad() {
     if (!api || !api.uptime) return;
-    const r = await api.uptime(state.profile, up.range);
+    const r = await api.uptime(state.profile, up.range, up.minDrop);
     if (r && r.ok) { up.data = r; upRender(); }
   }
   function showTab(which) {
@@ -181,6 +191,9 @@
   $('upRange').addEventListener('change', (e) => { up.range = Number(e.target.value); up.shown = 40; upLoad(); });
   $('upSearch').addEventListener('input', upRender);
   $('upOnlyDown').addEventListener('change', upRender);
+  $('upAllEvents').addEventListener('change', () => { up.shown = 40; upRender(); });
+  $('upMinDrop').addEventListener('change', (e) => { up.minDrop = Number(e.target.value) || 0; up.shown = 40; upLoad(); });
+  $('upFocusX').addEventListener('click', () => { up.focus = ''; upRender(); });
   $('upMore').addEventListener('click', () => { up.shown += 60; upRender(); });
   setInterval(() => { if (up.active && !document.hidden) upLoad(); }, 60000);
 

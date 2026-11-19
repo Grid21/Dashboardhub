@@ -2,6 +2,13 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.23.1
+- **Fixed: the sentence list in Uptime and history popped on and off** at every refresh (a coding mistake in 1.23.0 flipped it between shown and hidden each time), which also pushed the "Every device" list around. It now stays put, and the scroll position is kept when the page refreshes. A test now refreshes the page six times in a row to make sure.
+- **Tidier layout:** the device bars come first (devices that are offline now at the top), then "What happened" in a box with a fixed height that scrolls inside. Click a device to read only its own drops, one sentence each; "show every event" lists everything ungrouped.
+- **Less noise from gadgets that keep dropping:** quick drops (under 10 minutes) that repeat within the hour become one line, for example "Office Lamp dropped off 14 times between 3:23 PM and 4:08 PM (22 min offline in total, none longer than 6 min)". Longer drops always keep their own sentence.
+- **New: a "Hide drops under 2 / 5 / 15 min" choice** that leaves short drops out of the sentences and counts (a device that is still offline is always kept). The coloured bars are never changed by it.
+- Tested: 55 checks on the logic (grouping, hiding short drops, closed-overnight cases, older records) and 31 in the real window (including six refreshes in a row and keeping the scroll position).
+
 ## 1.23.0
 - **New: Uptime and history** (a new tab in the Notifications Center). A green/red bar for every device over the last 24 hours, 7, 30 or 90 days, a summary, and plain sentences such as "Office printer went offline at yesterday 3:12 AM, and came back at yesterday 5:20 AM (off for 2 h 8 min)". Search a device or show only the ones that went offline; hover a bar for exact times.
 - **Honest about gaps:** after every finished scan Dashboard Hub now records that it was watching. Time when it was closed, asleep or not scanning is shown as striped gray "not watched" and never counted as offline. If a device went down while Dashboard Hub was closed, the sentence says "sometime between ... and ..." instead of inventing a time. Older history from before this version has no watching record, so it shows gray except where a device was known to be online.

@@ -128,4 +128,40 @@ console.log('\nOther cases');
   const tlm = h.timeline(prof(many), T(10, 0), T(10, 2), T(10, 2));
   check('at most 300 devices are drawn', tlm.devices.length === 300, tlm.devices.length);
 }
+
+console.log('\nHiding short drops');
+{
+  const st = fresh(); watch(st, T(10, 0), T(10, 12), 1);
+  const evs = [ev('seen', 'lamp', T(10, 0, 0), { name: 'Lamp' }), ev('seen', 'nas', T(10, 0, 0), { name: 'NAS' })];
+  evs.push(ev('left', 'lamp', T(10, 1, 0)), ev('back', 'lamp', T(10, 1, 1)), ev('left', 'lamp', T(10, 2, 0)), ev('back', 'lamp', T(10, 2, 3)), ev('left', 'lamp', T(10, 3, 0)), ev('back', 'lamp', T(10, 3, 10)));
+  evs.push(ev('left', 'nas', T(10, 5, 0)));                     // still off
+  h.apply(st, 'p1', 'Home', evs, T(10, 12));
+  const now = T(10, 12), tl = h.timeline(prof(st), T(10, 0), now, now);
+  check('before hiding: the lamp has 3 drops', tl.devices.find((d) => d.name === 'Lamp').downs.length === 3);
+  const two = h.hideShort(tl, 2 * MIN);
+  check('drops under 2 minutes are left out of the counts', two.devices.find((d) => d.name === 'Lamp').downs.length === 2 && h.story(two, now, fmt).filter((x) => /Lamp/.test(x.text)).length === 2);
+  check('a device that is still offline is always kept', two.devices.find((d) => d.name === 'NAS').downs.length === 1);
+  check('the bars (segments) are not touched', JSON.stringify(two.devices.find((d) => d.name === 'Lamp').segments) === JSON.stringify(tl.devices.find((d) => d.name === 'Lamp').segments));
+  check('the original report is not changed', tl.devices.find((d) => d.name === 'Lamp').downs.length === 3);
+  const five = h.hideShort(tl, 5 * MIN);
+  check('a 5 minute limit keeps only the lamp\'s 10 minute drop', five.devices.find((d) => d.name === 'Lamp').downs.length === 1);
+  const big = h.hideShort(tl, 15 * MIN);
+  check('a longer limit hides more and re-sorts', big.devices[0].name === 'NAS' && big.devices.find((d) => d.name === 'Lamp').downs.length === 0, big.devices.map((d) => d.name + d.downs.length).join());
+  check('0 means show everything', h.hideShort(tl, 0) === tl);
+}
+
+console.log('\nRepeated short drops are grouped');
+{
+  const st = fresh(); watch(st, T(10, 0), T(10, 23), 1);
+  const evs = [ev('seen', 'bulb', T(10, 0, 0), { name: 'Bulb' })];
+  [[1, 1, 3], [1, 20, 22], [1, 40, 41], [5, 0, 3], [5, 30, 52]].forEach(([hh, a, b]) => { evs.push(ev('left', 'bulb', T(10, hh, a))); evs.push(ev('back', 'bulb', T(10, hh, b))); });
+  h.apply(st, 'p1', 'Home', evs, T(10, 23));
+  const now = T(10, 23), tl = h.timeline(prof(st), T(10, 0), now, now);
+  const grouped = h.story(tl, now, fmt), every = h.story(tl, now, fmt, true);
+  check('every drop has its own sentence when asked', every.length === 5, every.length);
+  check('by default the three quick drops in one hour become one line', grouped.length === 3 && grouped.some((x) => /^Bulb dropped off 3 times between 11-10 01:01 and 11-10 01:41 \(.+ offline in total, none longer than 2 min\)\.$/.test(x.text)), JSON.stringify(grouped.map((x) => x.text)));
+  check('a drop of 10 minutes or more is never hidden inside a group', grouped.some((x) => /Bulb went offline at 11-10 05:30, and came back at 11-10 05:52 \(off for 22 min\)/.test(x.text)));
+  check('a lone short drop hours later keeps its own sentence', grouped.some((x) => /Bulb went offline at 11-10 05:00, and came back at 11-10 05:03/.test(x.text)));
+  check('the grouped line is placed at the time of its last drop', grouped[grouped.length - 1].at === T(10, 1, 40));
+}
 console.log(failed ? 'FAILED ' + failed : 'All ' + passed + ' passed'); process.exit(failed ? 1 : 0);

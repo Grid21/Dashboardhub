@@ -31,9 +31,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.evaluate(() => { const c = document.getElementById('mapCidr'); c.value = '10.8.0.0/24'; c.dispatchEvent(new Event('change')); }); await sleep(300);
   await page.evaluate(() => { const l = document.getElementById('mapLive'); l.value = '0'; l.dispatchEvent(new Event('change')); }); await sleep(300);
   // three manual scans: everyone there, then "office-pc" is missing
-  await scan([[5, 'linux', 'nas'], [6, 'windows', 'office-pc'], [7, 'iot', '<b>plug</b>']]);
-  await scan([[5, 'linux', 'nas'], [6, 'windows', 'office-pc'], [7, 'iot', '<b>plug</b>']]);
-  await scan([[5, 'linux', 'nas'], [7, 'iot', '<b>plug</b>']]);
+  const ALL = [[5, 'linux', 'nas'], [6, 'windows', 'office-pc'], [7, 'iot', '<b>plug</b>']], PLUG = [5, 'linux', 'nas'], PL = [7, 'iot', '<b>plug</b>'];
+  await scan(ALL); await scan(ALL);
+  await scan([PLUG, PL]);            // office-pc leaves and never returns
+  await scan([PLUG]); await scan([PLUG, PL]);       // the plug drops off and comes back, three times
+  await scan([PLUG]); await scan([PLUG, PL]);
+  await scan([PLUG]); await scan([PLUG, PL]);
   await page.click('#mapAlertTypes'); await sleep(300); await page.click('#alertTypesCenter');
   const win = await findCenter();
   check('the Notifications Center opens', !!win);
@@ -44,23 +47,59 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.click('#ncTabUp'); await sleep(800);
   check('the Uptime tab shows and the list hides', await win.evaluate(() => !document.getElementById('ncUpView').classList.contains('hidden') && document.getElementById('ncListView').classList.contains('hidden')));
   const sum = await win.textContent('#upSummary');
-  check('the summary counts 3 devices and 1 drop', /3 devices watched/.test(sum) && /1 time a device went offline \(1 device\)/.test(sum) && /offline right now/.test(sum), sum);
+  check('the summary counts 3 devices and 4 drops', /3 devices watched/.test(sum) && /4 times a device went offline \(2 devices\)/.test(sum) && /1 offline right now/.test(sum), sum);
   check('the summary says how much was watched', /Dashboard Hub was watching \d+(\.\d)?% of this period/.test(sum), sum);
   const story = await win.evaluate(() => Array.from(document.querySelectorAll('#upStory li')).map((l) => l.textContent));
-  check('a plain sentence says office-pc went offline', story.length === 1 && /^office-pc went offline at today \d{1,2}:\d{2}\s?[AP]M, and has not come back yet \(off for (under 1 min|\d+ min) so far\)\.$/i.test(story[0]), JSON.stringify(story));
+  check('a device that keeps dropping briefly gets ONE line, not a sentence each', story.length === 2 && /^<b>plug<\/b> dropped off 3 times between today .+ and today .+ \(.+ offline in total, none longer than .+\)\.$/.test(story[0]), JSON.stringify(story));
+  check('a device that dropped once keeps its plain sentence', /^office-pc went offline at today \d{1,2}:\d{2}\s?[AP]M, and has not come back yet \(off for (under 1 min|\d+ min) so far\)\.$/i.test(story[1]), story[1]);
   const rows = await win.evaluate(() => Array.from(document.querySelectorAll('#upRows .up-row')).map((r) => ({ name: r.querySelector('.up-name').firstChild.textContent, pct: r.querySelector('.up-pct').textContent, segs: Array.from(r.querySelectorAll('.up-seg')).map((s) => s.className.replace('up-seg ', '')) })));
   check('every device has a row', rows.length === 3, JSON.stringify(rows));
   const off = rows.find((r) => r.name === 'office-pc');
-  check('office-pc is gray (before watching began), then green, then red', off && off.segs.join(',') === 'unknown,up,down' && /1 drop/.test(off.pct), JSON.stringify(off));
-  check('the devices that stayed on are gray (before watching began) and then green', rows.filter((r) => r.name !== 'office-pc').every((r) => r.segs.join(',') === 'unknown,up' && /^100% online$/.test(r.pct)), JSON.stringify(rows));
-  check('the device with the most drops is listed first', rows[0].name === 'office-pc');
+  check('office-pc is gray (before watching began), then green, then red', off && off.segs.join(',') === 'unknown,up,down' && /1 drop$/.test(off.pct), JSON.stringify(off));
+  const plug = rows.find((r) => r.name === '<b>plug</b>');
+  check('the plug shows three red stretches', plug && plug.segs.filter((x) => x === 'down').length === 3 && /3 drops/.test(plug.pct), JSON.stringify(plug));
+  check('the NAS that stayed on is gray (before watching began) and then green', rows.find((r) => r.name === 'nas').segs.join(',') === 'unknown,up' && /^100% online$/.test(rows.find((r) => r.name === 'nas').pct), JSON.stringify(rows));
+  check('devices that are offline now come first, then the ones with the most drops', rows[0].name === 'office-pc' && rows[1].name === '<b>plug</b>' && rows[2].name === 'nas', JSON.stringify(rows.map((r) => r.name + ' ' + r.pct)));
   check('a device name is shown as text, never as markup', await win.evaluate(() => document.querySelectorAll('#upRows b, #upStory b').length === 0) && rows.some((r) => r.name === '<b>plug</b>'), JSON.stringify(rows.map((r) => r.name)));
   const widths = await win.evaluate(() => Array.from(document.querySelectorAll('#upRows .up-row')).find((r) => /office-pc/.test(r.textContent)).querySelectorAll('.up-seg').length && Array.from(document.querySelectorAll('#upRows .up-row')).find((r) => /office-pc/.test(r.textContent)).querySelector('.up-bar').getBoundingClientRect().width);
   check('the bars have a real size on screen', widths > 100, widths);
+  if (process.env.UPTIME_SHOT) await win.screenshot({ path: process.env.UPTIME_SHOT });
   // filters
   await win.check('#upOnlyDown'); await sleep(200);
-  check('"only devices that went offline" leaves just office-pc', await win.evaluate(() => document.querySelectorAll('#upRows .up-row').length === 1));
-  await win.uncheck('#upOnlyDown'); await win.fill('#upSearch', 'nas'); await sleep(200);
+  check('"only devices that went offline" leaves the two that dropped', await win.evaluate(() => document.querySelectorAll('#upRows .up-row').length === 2));
+  await win.uncheck('#upOnlyDown'); await sleep(200);
+  // regression: the sentence box must stay put through many refreshes (it once flipped on and off at every refresh)
+  const seen = [];
+  for (let i = 0; i < 6; i++) { await win.evaluate(() => window.hubNotifTest.upLoad()); await sleep(350); seen.push(await win.evaluate(() => !document.getElementById('upStoryBox').classList.contains('hidden') && !document.getElementById('upDevices').classList.contains('hidden') && document.querySelectorAll('#upStory li').length)); }
+  check('six refreshes in a row: sentences and devices stay visible every time', seen.every((x) => x === 2), JSON.stringify(seen));
+  await win.fill('#upSearch', 'a'); await win.fill('#upSearch', ''); await sleep(200);
+  check('typing in the search and clearing it keeps them visible', await win.evaluate(() => !document.getElementById('upStoryBox').classList.contains('hidden')));
+  // layout: the devices come first and the sentence list never grows past its box
+  const lay = await win.evaluate(() => ({ devTop: document.getElementById('upDevices').getBoundingClientRect().top, storyTop: document.getElementById('upStoryBox').getBoundingClientRect().top, maxH: getComputedStyle(document.getElementById('upStory')).maxHeight }));
+  check('the device bars come before the sentences', lay.devTop < lay.storyTop, JSON.stringify(lay));
+  check('the sentence list has a fixed maximum height and scrolls inside', lay.maxH !== 'none' && parseInt(lay.maxH, 10) > 0, lay.maxH);
+  // click the device's row: only its own drops, one sentence each
+  await win.evaluate(() => { Array.from(document.querySelectorAll('#upRows .up-row')).find((r) => /plug/.test(r.textContent)).click(); }); await sleep(300);
+  const foc = await win.evaluate(() => ({ chip: !document.getElementById('upFocus').classList.contains('hidden') && document.getElementById('upFocusName').textContent, lines: Array.from(document.querySelectorAll('#upStory li')).map((l) => l.textContent), picked: document.querySelectorAll('#upRows .up-row.picked').length }));
+  check('clicking a device shows each of its drops as its own sentence', foc.chip === '<b>plug</b>' && foc.lines.length === 3 && foc.lines.every((t) => /^<b>plug<\/b> went offline at today .+, and came back at today .+\(off for .+\)\.$/.test(t)) && foc.picked === 1, JSON.stringify(foc));
+  await win.click('#upFocusX'); await sleep(200);
+  await win.check('#upAllEvents'); await sleep(200);
+  check('"show every event" lists all four sentences', (await win.evaluate(() => document.querySelectorAll('#upStory li').length)) === 4);
+  await win.uncheck('#upAllEvents'); await sleep(200);
+  // hiding short drops: the plug's drops last seconds, office-pc is still offline and stays
+  await win.selectOption('#upMinDrop', '120000'); await sleep(900);
+  const hid = { story: await win.evaluate(() => Array.from(document.querySelectorAll('#upStory li')).map((l) => l.textContent)), sum: await win.textContent('#upSummary') };
+  check('hiding short drops removes the plug\'s but keeps the device that is still offline', hid.story.length === 1 && /^office-pc went offline/.test(hid.story[0]) && /1 time a device went offline \(1 device\)/.test(hid.sum), JSON.stringify(hid));
+  check('the bars are not changed by it (they stay truthful)', await win.evaluate(() => Array.from(document.querySelectorAll('#upRows .up-row')).find((r) => /plug/.test(r.textContent)).querySelectorAll('.up-seg.down').length === 3));
+  await win.selectOption('#upMinDrop', '0'); await sleep(900);
+  // a refresh does not make the lists jump
+  await win.evaluate(() => { document.getElementById('upStory').style.maxHeight = '40px'; });
+  await win.check('#upAllEvents'); await sleep(200);
+  await win.evaluate(() => { document.getElementById('upStory').scrollTop = 30; });
+  await win.evaluate(() => window.hubNotifTest.upLoad()); await sleep(600);
+  check('after a refresh the list is still scrolled where it was', (await win.evaluate(() => document.getElementById('upStory').scrollTop)) === 30);
+  await win.uncheck('#upAllEvents'); await win.evaluate(() => { document.getElementById('upStory').style.maxHeight = ''; }); await sleep(200);
+  await win.fill('#upSearch', 'nas'); await sleep(200);
   check('the search narrows the devices', await win.evaluate(() => document.querySelectorAll('#upRows .up-row').length === 1 && /nas/.test(document.getElementById('upRows').textContent)));
   await win.fill('#upSearch', 'zzz'); await sleep(200);
   check('a search with no match says so', /Nothing matches/.test(await win.textContent('#upEmpty')));
@@ -79,7 +118,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.click('#mapAlertTypes'); await sleep(300); await page.click('#alertTypesCenter');
   const win2 = await findCenter(); await sleep(800);
   await win2.click('#ncTabUp'); await sleep(800);
-  check('after a restart the history is still there', /3 devices watched/.test(await win2.textContent('#upSummary')) && (await win2.evaluate(() => document.querySelectorAll('#upStory li').length)) === 1);
+  check('after a restart the history is still there', /3 devices watched/.test(await win2.textContent('#upSummary')) && (await win2.evaluate(() => document.querySelectorAll('#upStory li').length)) === 2);
   check('no script errors', errs.length === 0 && werrs.length === 0, errs.concat(werrs).join(' | '));
   console.log(failed ? '\nFAILED ' + failed : '\nAll ' + passed + ' passed'); await app.close(); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log('ERR', e); process.exit(2); });

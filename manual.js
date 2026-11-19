@@ -123,6 +123,7 @@
         { list: [
           'Green is online, red is offline, and striped gray means Dashboard Hub was not watching (closed, asleep, or not scanning). Gray is never counted as offline.',
           'If Dashboard Hub was closed when a device went down, the sentence says "sometime between" two times instead of making up one. Keep Live update on for the most exact times.',
+          'Devices are listed with the ones that are offline now first. Click a device to read only its own drops. Gadgets that keep dropping for a minute or two (lamps, plugs, phones asleep) are grouped into one line; tick show every event to see each one, or use Hide drops under 2, 5 or 15 min to leave short drops out of the sentences and counts (the bars are not changed).',
           'Search a device, or tick Only devices that went offline. The percentage is online time divided by watched time. Hover a bar for exact times.',
           'History from before this feature has no watching record, so older time shows as gray except where a device was known to be online.'
         ] }

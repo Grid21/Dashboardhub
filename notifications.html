@@ -48,9 +48,15 @@ tbody tr:hover { background: #20262e; }
 .sw-up { background: var(--good); } .sw-down { background: var(--bad); } .sw-unknown { background: repeating-linear-gradient(45deg, #3a4250, #3a4250 3px, #2b323c 3px, #2b323c 6px); }
 #upWrap { flex: 1; min-height: 0; overflow: auto; margin: 0 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 10px 14px; }
 #upWrap h3 { margin: 6px 0; font-size: 14px; }
-#upStory { margin: 0 0 14px; padding: 0; list-style: none; }
+#upStory { margin: 0 0 8px; padding: 0 6px 0 0; list-style: none; max-height: 240px; overflow-y: auto; border-top: 1px solid #232a33; }
+#upStoryBox { margin-top: 14px; }
+.up-hint { color: var(--dim); font-size: 11px; font-weight: normal; }
+.up-chip { display: inline-flex; align-items: center; gap: 4px; background: #232a33; border-radius: 10px; padding: 1px 4px 1px 9px; font-size: 12px; font-weight: normal; margin-left: 8px; }
+.up-chip button { padding: 0 6px; border: none; background: transparent; color: var(--dim); cursor: pointer; font-size: 14px; line-height: 1; }
+.up-row { cursor: pointer; } .up-row:hover { background: #1c222b; } .up-row.picked { background: #1f2a38; outline: 1px solid var(--accent); }
 #upStory li { padding: 4px 0; border-bottom: 1px solid #232a33; font-size: 13px; }
 #upMore { margin: 6px 0 12px; }
+#upStory li.up-click { cursor: pointer; } #upStory li.up-click:hover { background: #1c222b; }
 .up-row { display: grid; grid-template-columns: minmax(130px, 220px) 1fr 150px; gap: 10px; align-items: center; padding: 5px 0; border-bottom: 1px solid #232a33; }
 .up-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .up-sub { color: var(--dim); font-size: 11px; font-weight: normal; display: block; }
 .up-bar { position: relative; height: 16px; border-radius: 4px; background: #232a33; overflow: hidden; }
@@ -123,13 +129,19 @@ tbody tr:hover { background: #20262e; }
       </select>
       <input id="upSearch" type="search" placeholder="Search a device name or address" autocomplete="off" aria-label="Search devices" maxlength="80">
       <label><input type="checkbox" id="upOnlyDown"> Only devices that went offline</label>
+      <select id="upMinDrop" aria-label="Short drops">
+        <option value="0">Show every drop</option>
+        <option value="120000">Hide drops under 2 min</option>
+        <option value="300000">Hide drops under 5 min</option>
+        <option value="900000">Hide drops under 15 min</option>
+      </select>
     </div>
     <p id="upSummary" aria-live="polite"></p>
     <div class="up-legend"><span><span class="up-sw sw-up"></span>Online</span><span><span class="up-sw sw-down"></span>Offline</span><span><span class="up-sw sw-unknown"></span>Not watched (Dashboard Hub was closed, asleep or not scanning)</span></div>
     <div id="upWrap">
       <div id="upEmpty" class="nc-unknown hidden"></div>
-      <div id="upStoryBox"><h3>What happened</h3><ul id="upStory"></ul><button type="button" id="upMore" class="hidden">Show more</button></div>
-      <div id="upDevices"><h3>Every device</h3><div class="up-axis"><span></span><span class="ends"><span id="upFrom"></span><span id="upTo"></span></span><span></span></div><div id="upRows"></div></div>
+      <div id="upDevices"><h3>Every device <span class="up-hint">(click a device to see only its story)</span></h3><div class="up-axis"><span></span><span class="ends"><span id="upFrom"></span><span id="upTo"></span></span><span></span></div><div id="upRows"></div></div>
+      <div id="upStoryBox"><h3>What happened <label class="up-hint"><input type="checkbox" id="upAllEvents"> show every event, not a summary per device</label> <span id="upFocus" class="up-chip hidden"><span id="upFocusName"></span> <button type="button" id="upFocusX" aria-label="Show every device again">&times;</button></span></h3><ul id="upStory"></ul><button type="button" id="upMore" class="hidden">Show more</button></div>
     </div>
   </div>
   <p id="ncMsg" class="nc-msg" role="status"></p>

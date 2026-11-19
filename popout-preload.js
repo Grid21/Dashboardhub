@@ -19,7 +19,7 @@ if (page === 'remote.html') {
   contextBridge.exposeInMainWorld('notifApi', {
     data: (profileId) => ipcRenderer.invoke('notif:data', String(profileId || '')),
     clear: (profileId) => ipcRenderer.invoke('notif:clear', String(profileId || '')),
-    uptime: (profileId, rangeMs) => ipcRenderer.invoke('notif:uptime', String(profileId || ''), Number(rangeMs) || 0),
+    uptime: (profileId, rangeMs, minDropMs) => ipcRenderer.invoke('notif:uptime', String(profileId || ''), Number(rangeMs) || 0, Number(minDropMs) || 0),
     export: (profileId, ids) => ipcRenderer.invoke('notif:export', String(profileId || ''), Array.isArray(ids) ? ids.slice(0, 20000).map(String) : []),
     onChanged: (fn) => on('notif:changed', fn),
     onProfile: (fn) => on('notif:profile', fn)

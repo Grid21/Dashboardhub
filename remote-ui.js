@@ -84,7 +84,7 @@
     const wv = document.createElement('webview');
     wv.setAttribute('partition', 'persist:remote'); wv.setAttribute('src', webUrl(d));
     const fail = card((el) => {});
-    fail.classList.add('hidden'); fail.style.background = 'rgba(20,23,28,.94)'; fail.style.zIndex = 2;
+    fail.classList.add('hidden'); fail.style.background = 'var(--bg)'; fail.style.zIndex = 2;
     const retry = () => { fail.classList.add('hidden'); try { wv.reload(); } catch (e) { /* not ready */ } };
     wv.addEventListener('did-fail-load', (e) => {
       if (e.errorCode === -3 || e.isMainFrame === false) return;            // -3 = cancelled by a newer load

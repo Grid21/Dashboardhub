@@ -101,14 +101,14 @@
     const ticks = sv('g', {}); s.appendChild(ticks);
     for (let i = 0; i <= 10; i++) {
       const a = Math.PI * (1 - i / 10), r0 = R - 8, r1 = R - (i % 5 === 0 ? 15 : 12);
-      ticks.appendChild(sv('line', { x1: cx + r0 * Math.cos(a), y1: cy - r0 * Math.sin(a), x2: cx + r1 * Math.cos(a), y2: cy - r1 * Math.sin(a), stroke: '#6b7587', 'stroke-width': i % 5 === 0 ? 1.6 : 1 }));
+      ticks.appendChild(sv('line', { x1: cx + r0 * Math.cos(a), y1: cy - r0 * Math.sin(a), x2: cx + r1 * Math.cos(a), y2: cy - r1 * Math.sin(a), class: 'bw-tickline', 'stroke-width': i % 5 === 0 ? 1.6 : 1 }));
     }
     const l0 = sv('text', { x: 24, y: 118, class: 'bw-tick' }); l0.textContent = '0'; s.appendChild(l0);
     const l1 = sv('text', { x: 176, y: 118, class: 'bw-tick', 'text-anchor': 'end' }); s.appendChild(l1);
     const needle = sv('g', { class: 'bw-needle' });
-    needle.appendChild(sv('polygon', { points: '97,100 100,32 103,100', fill: '#67e8f9' }));
+    needle.appendChild(sv('polygon', { points: '97,100 100,32 103,100', class: 'bw-needlepoly' }));
     s.appendChild(needle);
-    s.appendChild(sv('circle', { cx: 100, cy: 100, r: 6, fill: '#1b1f27', stroke: '#67e8f9', 'stroke-width': 2 }));
+    s.appendChild(sv('circle', { cx: 100, cy: 100, r: 6, class: 'bw-hub', 'stroke-width': 2 }));
     box.appendChild(s);
     const val = el('div', 'bw-gval', '0'); box.appendChild(val);
     return { box: box, needle: needle, max: l1, val: val };

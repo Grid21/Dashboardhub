@@ -941,6 +941,11 @@ async function doImport() {
   const hint = document.getElementById('trayHint');
   const msg = document.getElementById('settingsMsg');
   if (!chk || !window.settingsApi) return;
+  const tsel = document.getElementById('themeSelect');
+  if (tsel) tsel.addEventListener('change', async () => {
+    let r; try { r = await window.settingsApi.setTheme(tsel.value); } catch (e) { r = { ok: false }; }
+    msg.textContent = r && r.ok ? '' : 'The setting could not be saved.';
+  });
   const gchk = document.getElementById('gpuCheck'), ghint = document.getElementById('gpuHint'), grestart = document.getElementById('gpuRestart');
   window.settingsApi.get().then((r) => { window.hubBackground = !!(r && r.closeToTray); }).catch(() => {});
   // while the window cannot be seen (hidden in the tray, minimised) nothing is drawn, and animations stand still
@@ -954,6 +959,7 @@ async function doImport() {
     try {
       const r = await window.settingsApi.get();
       chk.checked = !!(r && r.closeToTray);
+      if (tsel && r && r.theme) tsel.value = r.theme;
       window.hubBackground = chk.checked;
       hint.textContent = r && r.platform === 'linux'
         ? 'Needs a system tray (GNOME needs the "AppIndicator" extension).'

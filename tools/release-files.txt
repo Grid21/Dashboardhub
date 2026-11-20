@@ -128,6 +128,7 @@ test/speed-test.js
 test/speed-ui-test.js
 test/ssh-test.js
 test/ssh-ui-test.js
+test/theme-test.js
 test/tools-test.js
 test/tray-notify-test.js
 test/tray-test.js

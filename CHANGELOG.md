@@ -2,6 +2,12 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.24.0
+- **New: light and dark mode.** Settings now has a **Colours** choice: *Automatic (follow my computer)*, *Light* or *Dark*. Automatic is the default, so Dashboard Hub looks like your computer. Every window follows at once (panels, Network Map and its 3D view, speed gauges, Notifications Center with Uptime and history, Remote view, dialogs), and the choice is remembered after a restart.
+- Dark looks exactly as before. The light colours were chosen to keep text easy to read; a test checks the text colour against the background in every window in both modes.
+- Websites inside panels also see your choice, so sites that have their own light and dark look will follow it.
+- Tested: 35 checks in the real windows (choice saved and restored, every window painted in the right colours, readable text in both modes). Tested on a simulated desktop only, not on a real Windows or Linux desktop that switches theme.
+
 ## 1.23.1
 - **Fixed: the sentence list in Uptime and history popped on and off** at every refresh (a coding mistake in 1.23.0 flipped it between shown and hidden each time), which also pushed the "Every device" list around. It now stays put, and the scroll position is kept when the page refreshes. A test now refreshes the page six times in a row to make sure.
 - **Tidier layout:** the device bars come first (devices that are offline now at the top), then "What happened" in a box with a fixed height that scrolls inside. Click a device to read only its own drops, one sentence each; "show every event" lists everything ungrouped.

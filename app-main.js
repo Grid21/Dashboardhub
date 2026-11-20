@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, safeStorage, dialog, Tray, nativeImage, Notification, shell } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, safeStorage, dialog, Tray, nativeImage, Notification, shell, nativeTheme } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -61,7 +61,7 @@ function openRemoteWindow(openId) {
   remoteList();
   if (remoteWin && !remoteWin.isDestroyed()) { if (remoteWin.isMinimized()) remoteWin.restore(); remoteWin.show(); remoteWin.focus(); return; }
   remoteWin = new BrowserWindow({
-    width: 1280, height: 860, minWidth: 720, minHeight: 480, backgroundColor: '#14171c', title: 'Dashboard Hub - Remote view', autoHideMenuBar: true,
+    width: 1280, height: 860, minWidth: 720, minHeight: 480, backgroundColor: winBg(), title: 'Dashboard Hub - Remote view', autoHideMenuBar: true,
     webPreferences: { webviewTag: true, nodeIntegration: false, contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'popout-preload.js') }
   });
   const wc = remoteWin.webContents;
@@ -115,7 +115,7 @@ function openNotifWindow(profileId) {
     return;
   }
   notifWin = new BrowserWindow({
-    width: 1180, height: 720, minWidth: 760, minHeight: 420, backgroundColor: '#14171c', title: 'Dashboard Hub - Notifications Center', autoHideMenuBar: true,
+    width: 1180, height: 720, minWidth: 760, minHeight: 420, backgroundColor: winBg(), title: 'Dashboard Hub - Notifications Center', autoHideMenuBar: true,
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'popout-preload.js') }
   });
   const wc = notifWin.webContents;
@@ -1248,15 +1248,24 @@ app.on('web-contents-created', (event, wc) => {
 // ---------- settings and the system tray ("close button keeps it running in the background") ----------
 const TRAY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAaklEQVR42u3XzQoAEBAE4H0vb+edUS6Uq7+INWXU3tR8B2lHZHCM9enEyMo5FbqFuR0+RGiFNxHa4RUCEuBCnM7O3QrQ02kACoIAAgiABaj9hrAAvgECCPgH8Hwl41YMUUwgqhlEOX1RzzOrN4Ba/Ln20gAAAABJRU5ErkJggg==';
 function settingsFile() { return path.join(app.getPath('userData'), 'settings.json'); }
+const THEMES = ['auto', 'light', 'dark'];
+function cleanTheme(t) { return THEMES.indexOf(t) >= 0 ? t : 'auto'; }
+// 'auto' follows the computer's light / dark choice; the pages see it as prefers-color-scheme, so every window follows.
+function applyTheme(t) { try { nativeTheme.themeSource = cleanTheme(t) === 'auto' ? 'system' : cleanTheme(t); } catch (e) { /* older system: stays as is */ } }
+// Windows are told the chosen colours by a tiny script (not only through the system setting, which some Linux desktops do not pass on).
+function themeScript() { const t = cleanTheme(settings && settings.theme); return "(function(){var d=document.documentElement;" + (t === 'auto' ? "d.removeAttribute('data-theme');" : "d.setAttribute('data-theme','" + t + "');") + "window.dispatchEvent(new Event('hub-theme'));})()"; }
+function pushTheme(wc) { try { if (wc && !wc.isDestroyed() && wc.getType() === 'window') wc.executeJavaScript(themeScript()).catch(() => {}); } catch (e) { /* page is closing */ } }
+app.on('web-contents-created', (e, wc) => { wc.on('dom-ready', () => pushTheme(wc)); });
+function winBg() { try { const t = cleanTheme(settings && settings.theme); if (t === 'light') return '#edf0f5'; if (t === 'dark') return '#14171c'; return nativeTheme.shouldUseDarkColors ? '#14171c' : '#edf0f5'; } catch (e) { return '#14171c'; } }
 function readSettings() {
-  try { const j = JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); return { closeToTray: j && j.closeToTray === true, gpu: !(j && j.gpu === false), gpuAutoOff: !!(j && j.gpu === false && j.gpuAutoOff === true) }; } catch (e) { return { closeToTray: false, gpu: true, gpuAutoOff: false }; }
+  try { const j = JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); return { closeToTray: j && j.closeToTray === true, gpu: !(j && j.gpu === false), gpuAutoOff: !!(j && j.gpu === false && j.gpuAutoOff === true), theme: cleanTheme(j && j.theme) }; } catch (e) { return { closeToTray: false, gpu: true, gpuAutoOff: false, theme: 'auto' }; }
 }
 function writeSettings(s) {
   const tmp = settingsFile() + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify({ closeToTray: s.closeToTray === true, gpu: s.gpu !== false, gpuAutoOff: s.gpu === false && s.gpuAutoOff === true }));
+  fs.writeFileSync(tmp, JSON.stringify({ closeToTray: s.closeToTray === true, gpu: s.gpu !== false, gpuAutoOff: s.gpu === false && s.gpuAutoOff === true, theme: cleanTheme(s.theme) }));
   fs.renameSync(tmp, settingsFile());
 }
-let settings = { closeToTray: false, gpu: true, gpuAutoOff: false };
+let settings = { closeToTray: false, gpu: true, gpuAutoOff: false, theme: 'auto' };
 let tray = null;
 let quitting = false;
 function showWindow() {
@@ -1295,7 +1304,16 @@ ipcMain.handle('app:settings:get', (event) => { checkSender(event); let gpuState
       gpuState = v.some((x) => /^enabled/.test(x)) ? 'on' : (v.length ? 'software' : 'unknown');
     }
   } catch (e) { /* unknown */ }
-  return { ok: true, closeToTray: settings.closeToTray, platform: process.platform, gpu: settings.gpu !== false, gpuRunning: gpuWanted, gpuState: gpuState, gpuAutoOff: settings.gpu === false && settings.gpuAutoOff === true };
+  return { ok: true, closeToTray: settings.closeToTray, platform: process.platform, gpu: settings.gpu !== false, gpuRunning: gpuWanted, gpuState: gpuState, gpuAutoOff: settings.gpu === false && settings.gpuAutoOff === true, theme: cleanTheme(settings.theme) };
+});
+ipcMain.handle('app:theme:set', (event, t) => {
+  checkSender(event);
+  if (THEMES.indexOf(t) < 0) return { ok: false, error: 'Bad request' };
+  settings.theme = t;
+  applyTheme(t);
+  try { writeSettings(settings); } catch (e) { return { ok: false, error: 'The setting could not be saved.' }; }
+  try { BrowserWindow.getAllWindows().forEach((w) => { if (!w.isDestroyed()) w.setBackgroundColor(winBg()); pushTheme(w.webContents); }); } catch (e) { /* cosmetic only */ }
+  return { ok: true, theme: settings.theme };
 });
 // Desktop notices are sent from here (not from the page) so they still appear while the window is hidden in the tray.
 let lastNoticeAt = 0;
@@ -1370,7 +1388,7 @@ function createWindow() {
     y: place.bounds ? place.bounds.y : undefined,
     minWidth: 700,
     minHeight: 500,
-    backgroundColor: '#14171c',
+    backgroundColor: winBg(),
     title: 'Dashboard Hub',
     autoHideMenuBar: true,
     webPreferences: {
@@ -1476,6 +1494,7 @@ function createWindow() {
 app.whenReady().then(() => {
   setTimeout(() => { try { versionArchive.archive(runningVersionNow()); } catch (e) { /* safety net only */ } }, 4000);
   settings = readSettings();
+  applyTheme(settings.theme);
   startWithLock((locked) => {
     if (locked) { app.on('second-instance', showWindow); ensureTray(); }
     pmExt.load().catch(() => {}).then(() => createWindow());   // the password manager extension (if any) is ready before the panels load

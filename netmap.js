@@ -415,6 +415,10 @@
   // ---------- 3D scene ----------
   let renderer = null, scene = null, camera = null, controls = null, raycaster = null, canvas = null;
   let webglFailed = false, softwareGl = false, glLost = false, glLostTimer = null;
+  // light or dark: the chosen colours (Settings) first, otherwise whatever the computer uses
+  function hubIsLight() { const t = document.documentElement.getAttribute('data-theme'); if (t === 'light' || t === 'dark') return t === 'light'; return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches); }
+  const edgeColor = () => (hubIsLight() ? 0x1f2937 : 0xffffff);
+  function refreshEdges() { nodes.forEach((n) => { if (n.edges && n.edges.material) n.edges.material.color.setHex(edgeColor()); }); }
   const nodes = new Map();      // device key -> { group, mesh, edges, sprite, sig }
   const linkObjs = new Map();   // link id -> { group, vis, pick, a, b }
   let nodeGeo, routerGeo, switchGeo, linkGeo, svcGeo;
@@ -475,9 +479,19 @@
     fill.position.set(-30, 10, -20);
     scene.add(fill);
 
-    const grid = new THREE.GridHelper(160, 32, 0x2c3340, 0x1c2330);
-    grid.position.y = FLOOR_Y;
-    scene.add(grid);
+    let grid = null;
+    const lightMq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+    const isLightTheme = () => hubIsLight();
+    const buildGrid = () => {            // the floor grid and selection outlines follow light / dark mode
+      if (grid) { scene.remove(grid); grid.geometry.dispose(); grid.material.dispose(); }
+      grid = isLightTheme() ? new THREE.GridHelper(160, 32, 0x9aa5b8, 0xcdd3de) : new THREE.GridHelper(160, 32, 0x2c3340, 0x1c2330);
+      grid.position.y = FLOOR_Y;
+      scene.add(grid);
+    };
+    buildGrid();
+    const retheme = () => { buildGrid(); refreshEdges(); };
+    if (lightMq && lightMq.addEventListener) lightMq.addEventListener('change', retheme);
+    window.addEventListener('hub-theme', retheme);
 
     nodeGeo = new THREE.BoxGeometry(3.2, 2, 2);
     routerGeo = new THREE.BoxGeometry(5.6, 1.7, 3.6);
@@ -653,7 +667,7 @@
       const mat = new THREE.MeshStandardMaterial({ color: 0x888888, emissive: 0x000000, roughness: 0.45, metalness: 0.15, transparent: true });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.userData.key = d.key;
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0xffffff }));
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: edgeColor() }));
       edges.scale.setScalar(1.14);
       edges.visible = false;
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false }));
@@ -695,7 +709,7 @@
     const isSel = selected && selected.type === 'node' && selected.key === d.key;
     const isPending = pending === d.key;
     n.edges.visible = !!(isSel || isPending);
-    n.edges.material.color.setHex(isPending ? 0xf59e0b : 0xffffff);
+    n.edges.material.color.setHex(isPending ? 0xf59e0b : edgeColor());
 
     const lines = [
       title(d),

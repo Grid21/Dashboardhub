@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('settingsApi', {
   set: (s) => ipcRenderer.invoke('app:settings:set', s),
   notify: (text) => ipcRenderer.invoke('app:notify', text),
   setGpu: (on) => ipcRenderer.invoke('app:gpu:set', on),
+  setTheme: (t) => ipcRenderer.invoke('app:theme:set', t),
   restart: () => ipcRenderer.invoke('app:restart'),
   // told when the window is hidden, minimised or shown again, so the page can stop drawing while nobody can see it
   onVisible: (cb) => { if (typeof cb === 'function') ipcRenderer.on('window:visible', (e, v) => cb(v === true)); }

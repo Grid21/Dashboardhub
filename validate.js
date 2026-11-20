@@ -268,7 +268,7 @@ function parseBackup(text) {
   if (obj.layout && typeof obj.layout === 'object') {
     const columns = String(obj.layout.columns);
     const height = String(obj.layout.height);
-    if (['1', '2', '3'].includes(columns) && ['400', '600', '800', 'full'].includes(height)) {
+    if (['1', '2', '3', 'carousel'].includes(columns) && ['400', '600', '800', 'full'].includes(height)) {
       layout = { columns: columns, height: height };
     }
   }

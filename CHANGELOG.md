@@ -2,6 +2,16 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.25.1
+- Carousel now sets Panel height to Full screen automatically (details under 1.25.0 below).
+
+## 1.25.0
+- **New: Carousel.** The Columns menu (1, 2, 3) now has a fourth choice, **Carousel**. It shows one panel at a time, with an arrow button at the left and one at the right of the screen to step to the previous or next panel (after the last one it starts again at the first). Alt + Left / Right arrow work too, a small label shows which panel you are on ("Beta · 2 of 5"), and clicking a panel name in the top bar jumps to it.
+- The panels you are not looking at stay loaded, so flipping back is instant and nothing reloads. The arrows hide while a panel is full screen and on the Network Map.
+- **Carousel always uses the "Full screen" panel height** (the Panel height menu switches to Full screen and is locked while Carousel is on). Your own height choice comes back when you pick 1, 2 or 3 columns again.
+- The choice is remembered after a restart and kept in backups.
+- Tested: 23 checks in the real window with simulated panels (flipping, wrapping round, keys, top-bar jump, full screen, removing a panel, restart, backup).
+
 ## 1.24.0
 - **New: light and dark mode.** Settings now has a **Colours** choice: *Automatic (follow my computer)*, *Light* or *Dark*. Automatic is the default, so Dashboard Hub looks like your computer. Every window follows at once (panels, Network Map and its 3D view, speed gauges, Notifications Center with Uptime and history, Remote view, dialogs), and the choice is remembered after a restart.
 - Dark looks exactly as before. The light colours were chosen to keep text easy to read; a test checks the text colour against the background in every window in both modes.

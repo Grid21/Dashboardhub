@@ -85,13 +85,60 @@ function newId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
+// ---------- carousel: one panel at a time, arrow buttons at the sides of the screen ----------
+let carId = null;
+const carPrev = document.getElementById('carPrev'), carNext = document.getElementById('carNext'), carInfo = document.getElementById('carInfo');
+function inCarousel() { return state.columns === 'carousel'; }
+function applyCarousel() {
+  const on = inCarousel();
+  document.body.classList.toggle('carousel', on);
+  const ids = state.panels.map((p) => p.id);
+  if (on && ids.length && ids.indexOf(carId) < 0) carId = ids[0];
+  Object.keys(panelEls).forEach((id) => { panelEls[id].classList.toggle('car-off', on && id !== carId); });
+  Object.keys(chipEls).forEach((id) => { chipEls[id].classList.toggle('car-current', on && id === carId); });
+  const show = on && ids.length > 1;
+  [carPrev, carNext, carInfo].forEach((b) => { if (b) b.classList.toggle('hidden', !show); });
+  if (carInfo && show) { const i = ids.indexOf(carId); carInfo.textContent = (state.panels[i] ? state.panels[i].name + '  ·  ' : '') + (i + 1) + ' of ' + ids.length; }
+}
+function carStep(d) {
+  const ids = state.panels.map((p) => p.id);
+  if (!inCarousel() || ids.length < 2) return;
+  const wasFull = !!maximizedId;
+  carId = ids[(ids.indexOf(carId) + d + ids.length) % ids.length];
+  applyCarousel();
+  if (wasFull) carFull(carId);
+  window.scrollTo({ top: 0 });
+  try { const s = panelSleepers[carId]; if (s && s.asleep && s.asleep() && window.hubPanelsShown && window.hubPanelsShown()) s.wake(); } catch (e) { /* not important */ }
+  window.dispatchEvent(new Event('resize'));       // the page inside the panel that just appeared re-fits itself
+}
+// full screen follows the carousel: the panel that is shown fills the window
+function carFull(id) {
+  if (!id || !panelEls[id] || !panelEls[id]._applyMax) return false;
+  if (maximizedId === id) return true;
+  if (maximizedId && panelEls[maximizedId]) exitMaximized();
+  maximizedId = id; panelEls[id]._applyMax(true);
+  return true;
+}
+carPrev.addEventListener('click', () => carStep(-1));
+carNext.addEventListener('click', () => carStep(1));
+document.addEventListener('keydown', (e) => {
+  if (!e.altKey || e.ctrlKey || e.metaKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+  if (document.body.classList.contains('view-map') || document.querySelector('dialog[open]') || !inCarousel()) return;
+  e.preventDefault(); carStep(e.key === 'ArrowLeft' ? -1 : 1);
+});
+
 function applyLayout() {
-  grid.style.setProperty('--cols', state.columns);
+  grid.style.setProperty('--cols', inCarousel() ? 1 : state.columns);
   // "Full screen" makes each panel about one window tall, so it works like a page you scroll to
-  const h = state.height === 'full' ? 'calc(100vh - var(--toolbar-h, 56px) - 84px)' : state.height + 'px';
+  // Carousel always uses the "Full screen" panel height (your own choice is kept for the other column choices)
+  const fullH = state.height === 'full' || inCarousel();
+  const h = fullH ? 'calc(100vh - var(--toolbar-h, 56px) - 84px)' : state.height + 'px';
   grid.style.setProperty('--panel-h', h);
   columnsSelect.value = state.columns;
-  heightSelect.value = state.height;
+  heightSelect.value = inCarousel() ? 'full' : state.height;
+  heightSelect.disabled = inCarousel();
+  heightSelect.title = inCarousel() ? 'Carousel always uses the Full screen panel height' : '';
+  applyCarousel();
 }
 
 function makeButton(label, tip, extraClass) {
@@ -113,6 +160,7 @@ function updateNotesBadge(id) {
 
 // Scroll so the panel sits just below the pinned top bar (whatever height the bar has right now)
 function jumpToPanel(el) {
+  if (inCarousel()) { const id = Object.keys(panelEls).find((k) => panelEls[k] === el); if (id) { carId = id; applyCarousel(); window.scrollTo({ top: 0 }); window.dispatchEvent(new Event('resize')); } return; }
   const top = el.getBoundingClientRect().top + window.scrollY - toolbar.offsetHeight - 12;
   window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
 }
@@ -347,6 +395,7 @@ function render() {
     });
     wv.addEventListener('did-stop-loading', () => { if (!loadFailed) { tries = 0; if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; } } });
   });
+  applyCarousel();
 }
 
 // Leaves full screen and shows the dashboard again.

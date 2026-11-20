@@ -59,6 +59,7 @@ test/backup-profiles-test.js
 test/bandwidth-test.js
 test/bmc-test.js
 test/bw-shot.png
+test/carousel-test.js
 test/conn-profiles-test.js
 test/console-test.js
 test/corrupt-data-test.js

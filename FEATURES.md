@@ -148,6 +148,7 @@ Most of us run a network with a pile of separate tools: a browser full of bookma
 - **Security settings** (Settings menu): choose whether panels may use self-signed certificates, open pop-up windows, or use the camera, microphone, notifications and clipboard; switch off the thorough scan, router connections or Cisco Meraki; and require SNMP version 3. "Standard" and "Strictest" buttons set everything at once. The protections that must never be off (page isolation, update-file checks, local-network-only scanning) are fixed on purpose.
 - **Run in the background**: an option to hide in the system tray when you close the window (Windows and Linux), with notifications and live scans carrying on.
 - **Graphics card (GPU) switch** with a status line, for machines with driver trouble.
+- **Carousel** (Columns menu): show one panel at a time, with arrow buttons on the left and right of the screen (or Alt + Left / Right arrow) to step through them. Panel height switches to Full screen automatically while Carousel is on. The choice is remembered and kept in backups.
 - **Light and dark mode** (Settings, Colours): Automatic follows your computer's light or dark setting, or force Light or Dark. Every window changes together (panels list, Network Map and 3D view, speed gauges, Notifications Center, Remote view), and the choice is remembered.
 - A tidy **Settings menu** that holds profiles, backup, server management, colours and the tray and GPU options.
 - Dark interface with clear plain-language messages.

@@ -22,6 +22,7 @@
           <option value="1">1</option>
           <option value="2">2</option>
           <option value="3">3</option>
+          <option value="carousel" title="One panel at a time, with arrow buttons on the left and right of the screen">Carousel</option>
         </select>
       </label>
       <label class="panels-only">Panel height
@@ -92,6 +93,9 @@
   </div>
 
   <main id="grid" class="grid"></main>
+  <button type="button" id="carPrev" class="car-arrow car-prev panels-only hidden" title="Previous panel (Alt + Left arrow)" aria-label="Previous panel">&#10094;</button>
+  <button type="button" id="carNext" class="car-arrow car-next panels-only hidden" title="Next panel (Alt + Right arrow)" aria-label="Next panel">&#10095;</button>
+  <div id="carInfo" class="car-info panels-only hidden" aria-live="polite"></div>
 
   <div id="empty" class="empty hidden">
     <h2>No panels yet</h2>

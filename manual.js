@@ -190,6 +190,7 @@
       body: [
         'A profile keeps everything for one network separate: its map, panels, SSH servers, notes, router links and server logins. Use one per site or home.',
         { list: [
+          'Carousel: in the Columns menu, pick Carousel to see one panel at a time. Arrow buttons at the left and right of the screen (or Alt + Left / Right arrow) step to the previous or next panel, and clicking a panel name in the top bar jumps to it. Panel height switches to Full screen by itself while Carousel is on (your own choice returns with 1, 2 or 3 columns). The other panels keep running quietly.',
           'Colours: Settings has a Colours choice. Automatic follows your computer\'s light or dark setting; Light and Dark force one. Every Dashboard Hub window changes at once, and the choice is remembered.',
           'Settings shows the profile list. New, Duplicate, Rename, Lock map and Remove profile are in the same menu.',
           'Network Guard recognises the network you are plugged into by the router\'s fingerprint. If you are on the wrong profile it asks whether to switch, and it stops one network\'s scan overwriting another\'s map.',

@@ -10,10 +10,11 @@ WORKDIR /app
 # only what the Docker version needs (no Electron, no desktop window)
 COPY package.json scanner.js discovery.js notif-history.js remote.js ./
 COPY vendor/oui.json ./vendor/oui.json
-COPY docker/server.js ./docker/server.js
+COPY docker/server.js docker/updater.js docker/boot.js ./docker/
 
 ENV DASHBOARD_HUB_SRC=/app \
     DASHBOARD_HUB_DATA=/data \
+    DASHBOARD_HUB_BASE=1 \
     NODE_ENV=production
 
 VOLUME /data
@@ -22,4 +23,4 @@ EXPOSE 8787
 HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=3 \
   CMD node -e "const p=process.env.DASHBOARD_HUB_PORT||8787;require('http').get('http://127.0.0.1:'+p+'/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 
-CMD ["node", "docker/server.js"]
+CMD ["node", "docker/boot.js"]

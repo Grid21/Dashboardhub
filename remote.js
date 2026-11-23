@@ -399,6 +399,16 @@ function createRemoteHubs(o) {
       if (r.code === 404 || r.code === 405) return { ok: false, error: 'That server cannot change its settings. Update it to the newest Docker version first.' };
       return r.json && r.json.error ? { ok: false, error: r.json.error } : { ok: false, error: why(r) };
     },
+    async update(id, apply) {
+      const h = find(id); if (!h) return { ok: false, error: 'Not found' };
+      const doIt = async (cookie) => request(h, 'POST', '/api/action/update', { apply: apply !== false }, cookie, { 'X-Dashboard-Hub': '1' });
+      let s = await session(h, false); if (!s.ok) return s;
+      let r = await doIt(s.cookie);
+      if (r.code === 401) { s = await session(h, true); if (!s.ok) return s; r = await doIt(s.cookie); }
+      if (r.code === 200 && r.json) return r.json;
+      if (r.code === 404 || r.code === 405) return { ok: false, error: 'That server cannot update itself yet. Rebuild it once from the newest Docker bundle.' };
+      return r.json && r.json.error ? { ok: false, error: r.json.error } : { ok: false, error: why(r) };
+    },
     async openInfo(id) {
       const h = find(id); if (!h) return { ok: false, error: 'Not found' };
       const s = await session(h, true); if (!s.ok) return s;

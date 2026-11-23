@@ -12,13 +12,13 @@ const dir = path.join(tmp, name);
 fs.mkdirSync(path.join(dir, 'vendor'), { recursive: true });
 ['scanner.js', 'discovery.js', 'notif-history.js', 'remote.js', 'package.json'].forEach((f) => fs.copyFileSync(path.join(ROOT, f), path.join(dir, f)));
 fs.copyFileSync(path.join(ROOT, 'vendor', 'oui.json'), path.join(dir, 'vendor', 'oui.json'));
-fs.copyFileSync(path.join(ROOT, 'docker', 'server.js'), path.join(dir, 'server.js'));
+['server.js', 'updater.js', 'boot.js'].forEach((f) => fs.copyFileSync(path.join(ROOT, 'docker', f), path.join(dir, f)));
 fs.copyFileSync(path.join(ROOT, 'docker', 'README-DOCKER.md'), path.join(dir, 'README-DOCKER.md'));
 fs.copyFileSync(path.join(ROOT, 'LICENSE'), path.join(dir, 'LICENSE'));
 // the same Dockerfile and compose file, with the paths of this flat folder
 fs.writeFileSync(path.join(dir, 'Dockerfile'), fs.readFileSync(path.join(ROOT, 'docker', 'Dockerfile'), 'utf8')
   .replace('Build from the folder ABOVE this one (docker-compose.yml does that for you).', 'Build from this folder (docker-compose.yml does that for you).')
-  .replace('COPY docker/server.js ./docker/server.js', 'COPY server.js ./docker/server.js'));
+  .replace('COPY docker/server.js docker/updater.js docker/boot.js ./docker/', 'COPY server.js updater.js boot.js ./docker/'));
 fs.writeFileSync(path.join(dir, 'docker-compose.yml'), fs.readFileSync(path.join(ROOT, 'docker', 'docker-compose.yml'), 'utf8')
   .replace('context: ..', 'context: .').replace('dockerfile: docker/Dockerfile', 'dockerfile: Dockerfile'));
 fs.writeFileSync(path.join(dir, '.dockerignore'), '*.md\n*.tar.gz\n');
@@ -30,5 +30,8 @@ fs.writeFileSync(path.join(dir, 'README-DOCKER.md'), readme);
 fs.mkdirSync(out, { recursive: true });
 const file = path.join(out, name + '-' + version + '.tar.gz');
 cp.execFileSync('tar', ['-czf', file, '-C', tmp, name]);
+const sha = require('crypto').createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+const BASE = Number((/DASHBOARD_HUB_BASE=(\d+)/.exec(fs.readFileSync(path.join(ROOT, 'docker', 'Dockerfile'), 'utf8')) || [])[1]) || 1;
+fs.writeFileSync(path.join(out, name + '-latest.json'), JSON.stringify({ version: version, file: name + '-' + version + '.tar.gz', sha256: sha, base: BASE, notes: String(process.env.DOCKER_NOTES || '').slice(0, 300) }, null, 1) + '\n');
 console.log('Bundle: ' + file + ' (' + Math.round(fs.statSync(file).size / 1024) + ' KB)');
 fs.rmSync(tmp, { recursive: true, force: true });

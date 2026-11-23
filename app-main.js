@@ -609,6 +609,7 @@ ipcMain.handle('hubs:status', (event, id) => { checkSender(event); return hubsMa
 ipcMain.handle('hubs:scan', (event, id) => { checkSender(event); return hubsMake().scan(String(id || '')); });
 ipcMain.handle('hubs:getConfig', (event, id) => { checkSender(event); return hubsMake().getConfig(String(id || '')); });
 ipcMain.handle('hubs:setConfig', (event, id, cfg) => { checkSender(event); return hubsMake().setConfig(String(id || ''), cfg && typeof cfg === 'object' ? cfg : {}); });
+ipcMain.handle('hubs:update', (event, id, apply) => { checkSender(event); return hubsMake().update(String(id || ''), apply !== false); });
 ipcMain.handle('hubs:open', async (event, id) => {
   checkSender(event);
   const r = await hubsMake().openInfo(String(id || ''));

@@ -217,7 +217,31 @@
     $('hcScan').value = String(c.scanSeconds);
     if (!Array.from($('hcScan').options).some((o) => o.value === String(c.scanSeconds))) { const o = document.createElement('option'); o.value = String(c.scanSeconds); o.textContent = Math.round(c.scanSeconds / 60) + ' minutes'; $('hcScan').appendChild(o); $('hcScan').value = String(c.scanSeconds); }
     $('hcPanels').textContent = ''; (c.panels || []).forEach((p) => panelRow(p));
+    $('hcUpdate').value = c.update || 'auto'; updHint(info.update);
   }
+  function updHint(u) {
+    const h = $('hcUpdHint'), b = $('hcUpdNow');
+    if (!u) { h.textContent = 'This server is too old to update itself. Rebuild it once from the newest Docker bundle.'; b.hidden = true; return; }
+    b.hidden = false;
+    let t = 'Running ' + u.version + '.';
+    if (u.error) t += ' Last check: ' + u.error;
+    else if (u.available && u.needsRebuild) t += ' Version ' + u.latest + ' is ready but needs a one-time rebuild of the container.';
+    else if (u.available) t += ' Version ' + u.latest + ' is ready' + (u.canInstall ? '.' : ', but this container must be rebuilt once before it can install updates by itself.');
+    else if (u.latest) t += ' This is the newest version.';
+    else t += ' Not checked yet.';
+    h.textContent = t; b.textContent = u.available && u.canInstall && !u.needsRebuild ? 'Install ' + u.latest + ' now' : 'Check now';
+    b.dataset.install = u.available && u.canInstall && !u.needsRebuild ? '1' : '';
+  }
+  $('hcUpdNow').addEventListener('click', async () => {
+    if (!cfgHub) return;
+    const install = !!$('hcUpdNow').dataset.install;
+    $('hcUpdHint').textContent = install ? 'Installing...' : 'Checking...';
+    const r = await api.update(cfgHub.id, install);
+    if (!r || r.ok === false) { $('hcUpdHint').textContent = (r && r.error) || 'Could not check.'; return; }
+    if (r.updated) { $('hcUpdHint').textContent = r.message + ' Give it a minute, then press Check on the server list.'; $('hcUpdNow').hidden = true; return; }
+    if (r.message && !r.status) { $('hcUpdHint').textContent = r.message; return; }
+    updHint(r.status); if (r.message) $('hcUpdHint').textContent += ' ' + r.message;
+  });
   async function openCfg(h) {
     cfgHub = h; cmsg('Loading...'); $('hubCfgTitle').textContent = 'Settings of ' + h.name;
     const r = await api.getConfig(h.id);
@@ -234,7 +258,7 @@
     const net = $('hcNet').value === 'custom' ? $('hcNetCustom').value.trim() : $('hcNet').value;
     const router = $('hcRouter').value === 'custom' ? $('hcRouterCustom').value.trim() : 'auto';
     cmsg('Saving...');
-    const r = await api.setConfig(cfgHub.id, { name: $('hcName').value, network: net, router: router, scanSeconds: Number($('hcScan').value), panels: panels });
+    const r = await api.setConfig(cfgHub.id, { name: $('hcName').value, network: net, router: router, scanSeconds: Number($('hcScan').value), update: $('hcUpdate').value, panels: panels });
     if (r && r.ok) { cmsg(r.rescanning ? 'Saved. The server is scanning the network again.' : 'Saved.', true); } else cmsg((r && r.error) || 'Could not save.');
   });
   async function load() { const r = await api.list(); list = (r && r.list) || []; if (r && r.encrypted === false) say('This computer cannot encrypt saved codes, so they are kept only until Dashboard Hub closes.'); draw(); }

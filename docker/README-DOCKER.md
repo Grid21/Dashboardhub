@@ -44,13 +44,19 @@ Your data (the device list, the history, the access code hash) is kept in the `d
 - The container drops all extra permissions except the one `ping` needs, and runs with a read-only file system.
 
 ## Update
-If you built it from a Git repository in **Portainer** (Stacks > Add stack > Repository, compose path `docker/docker-compose.yml`, with "GitOps updates" turned on), Portainer rebuilds it by itself when you push a new version. Put your access code in Portainer's Environment variables, not in a file in the repository.
+**Automatic (from version 1.29.1 on).** **Every time the container starts** (for example when you press Restart in Portainer) it first looks for a newer version, installs it and runs that. While it keeps running it also checks your GitHub repository every 6 hours (and a couple of minutes after it starts) for a file called `dashboard-hub-docker-latest.json`. When it lists a newer version, the server downloads `dashboard-hub-docker-<version>.tar.gz` from the same place, checks its fingerprint, unpacks it into its data folder and restarts itself. Nothing to rebuild and Portainer is not involved.
+- **To publish an update:** upload both files that come with each Docker bundle (`dashboard-hub-docker-<version>.tar.gz` and `dashboard-hub-docker-latest.json`) to the top folder of your repository (`Grid21/Dashboardhub`, branch `main`). Replace the old `latest.json`.
+- **Setting:** in Dashboard Hub Desktop, Settings > Remote servers > Settings > Updates: *Install new versions by itself*, *Only tell me* (then press "Install ... now" yourself) or *Off*. The starting value is `DASHBOARD_HUB_UPDATE` in the compose file. `DASHBOARD_HUB_UPDATE_REPO` picks another repository.
+- **Safe:** a file whose fingerprint does not match is not installed. If a new version stops within 30 seconds of starting, the server goes back to the version inside the image and skips the bad one.
+- **Rebuild once:** a container built before 1.29.0 has no way to update itself, so rebuild it once from the 1.29.0 bundle. Later, an update that changes the Linux part of the image says so ("needs a one-time rebuild") and is not installed by itself.
+- It trusts whatever is in that repository, so keep the repository yours.
+
+**By hand.** If you built it from a Git repository in from a Git repository in **Portainer** (Stacks > Add stack > Repository, compose path `docker/docker-compose.yml`, with "GitOps updates" turned on), Portainer rebuilds it by itself when you push a new version. Put your access code in Portainer's Environment variables, not in a file in the repository.
 
 Otherwise, copy the newer source folder over the old one and run `docker compose up -d --build` again in the `docker` folder. Your data stays.
 
 ## What it cannot do yet
 - Editing device names and groups, and editing from the browser page (Desktop can edit the name, network, router, scan time and panels). Planned next.
-- Updating the server from Dashboard Hub Desktop (for now: rebuild it, see Update).
 - Alerts and notifications, SSH, 3D map.
 - The Windows desktop program and the Docker version keep separate histories.
 - It was tested on a simulated network, not yet in a real container on a real home network. If something does not work, send me `docker compose logs`.

@@ -33,8 +33,10 @@ dns-probe.js
 docker/Dockerfile
 docker/Dockerfile.dockerignore
 docker/README-DOCKER.md
+docker/boot.js
 docker/docker-compose.yml
 docker/server.js
+docker/updater.js
 hubupdate-tools.js
 index.html
 main.js
@@ -72,6 +74,7 @@ test/dialog-fit-test.js
 test/dialog-shot.png
 test/dns-test.js
 test/docker-server-test.js
+test/docker-update-test.js
 test/ensure-node-test.sh
 test/filter-test.js
 test/find-test.js

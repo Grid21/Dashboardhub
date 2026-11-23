@@ -35,6 +35,10 @@ services:
       DASHBOARD_HUB_PORT: "${DASHBOARD_HUB_PORT:-8787}"
       # Your panels, written Name=address and separated by |   (easier: add them in Dashboard Hub Desktop)
       DASHBOARD_HUB_PANELS: "${DASHBOARD_HUB_PANELS:-}"
+      # Updates from your GitHub: auto (install by itself), check (only tell me in Dashboard Hub Desktop) or off
+      DASHBOARD_HUB_UPDATE: "${DASHBOARD_HUB_UPDATE:-auto}"
+      # The GitHub repository that holds dashboard-hub-docker-latest.json and the newest dashboard-hub-docker-<version>.tar.gz
+      DASHBOARD_HUB_UPDATE_REPO: "${DASHBOARD_HUB_UPDATE_REPO:-Grid21/Dashboardhub}"
     volumes:
       - dashboard-hub-data:/data
 

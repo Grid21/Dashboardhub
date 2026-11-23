@@ -90,7 +90,8 @@ contextBridge.exposeInMainWorld('hubsApi', {
   scan: (id) => ipcRenderer.invoke('hubs:scan', String(id || '')),
   open: (id) => ipcRenderer.invoke('hubs:open', String(id || '')),
   getConfig: (id) => ipcRenderer.invoke('hubs:getConfig', String(id || '')),
-  setConfig: (id, cfg) => ipcRenderer.invoke('hubs:setConfig', String(id || ''), cfg)
+  setConfig: (id, cfg) => ipcRenderer.invoke('hubs:setConfig', String(id || ''), cfg),
+  update: (id, apply) => ipcRenderer.invoke('hubs:update', String(id || ''), apply !== false)
 });
 
 contextBridge.exposeInMainWorld('webApi', {

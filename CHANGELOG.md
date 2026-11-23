@@ -2,6 +2,15 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.29.1
+- **Docker version: restarting it now updates it.** Every time the container starts (also when you press Restart in Portainer), it first looks for a newer version on your GitHub and, if there is one, installs it and starts that instead (with "Install new versions by itself" on). Nothing is served from the old version first. If GitHub cannot be reached it just starts normally.
+- Tested: 25 checks with a pretend GitHub, including a restart that updates and a start with no connection.
+
+## 1.29.0
+- **Docker version: it updates itself.** The server looks in your GitHub repository for `dashboard-hub-docker-latest.json` (shipped next to each Docker bundle), downloads the newer `.tar.gz`, checks its fingerprint, unpacks it into its data folder and restarts itself. A new version that will not start is rolled back and skipped. Settings: Settings > Remote servers > Settings > **Updates** (install by itself / only tell me / off), plus a "Check now / Install ... now" button and the status line. A small starter (`docker/boot.js`) runs the program; `docker/updater.js` does the updating.
+- A container built before this version must be rebuilt once from the 1.29.0 bundle. Changes to the Linux part of the image still need a rebuild (the update says so).
+- Tested: 22 checks with a pretend GitHub (install, restart, wrong fingerprint, rebuild needed, rollback of a broken version, only-tell-me, Desktop install, unsafe file). Not tested: the real GitHub, a real container.
+
 ## 1.28.0
 - **Docker version, stage 2: settings and panels from Dashboard Hub Desktop.** In Settings > Remote servers each server now has a **Settings** button: change the server's name, the network to scan (Automatic, one of the server's own networks, or type it), the router address (Automatic or type it, with a hint of what the server found), how often it scans, and its panels (add, rename, reorder, remove). The settings are kept on the server and stay after a restart.
 - The compose file's settings are now only the **starting** settings. Once you change something in Desktop, the saved settings win. (The access code still always comes from `DASHBOARD_HUB_CODE` when it is set.) The compose file no longer contains example panels, and its settings can come from a `.env` file or Portainer's Environment variables.

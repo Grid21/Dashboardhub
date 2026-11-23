@@ -10,6 +10,7 @@ const SRC = process.env.DASHBOARD_HUB_SRC || path.join(__dirname, '..');
 const scanner = require(path.join(SRC, 'scanner.js'));
 const notifLib = require(path.join(SRC, 'notif-history.js'));
 const remote = require(path.join(SRC, 'remote.js'));
+const createUpdater = require('./updater.js');
 let VERSION = '0.0.0';
 try { VERSION = JSON.parse(fs.readFileSync(path.join(SRC, 'package.json'), 'utf8')).version; } catch (e) { /* unknown */ }
 
@@ -21,7 +22,7 @@ const log = (m) => console.log(new Date().toISOString().replace('T', ' ').slice(
 // config.json (in the data folder) holds the settings. The first time the server starts, the DASHBOARD_HUB_* environment settings
 // (from docker-compose.yml) are used to create it. From then on config.json wins, so changes made in Dashboard Hub Desktop stick.
 // The access code is the exception: DASHBOARD_HUB_CODE always applies when it is set.
-const DEFAULTS = { name: 'Dashboard Hub (Docker)', network: 'auto', router: 'auto', scanSeconds: 300, port: remote.WEB_DEFAULT_PORT, panels: [] };
+const DEFAULTS = { name: 'Dashboard Hub (Docker)', network: 'auto', router: 'auto', scanSeconds: 300, port: remote.WEB_DEFAULT_PORT, panels: [], update: 'auto' };
 function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return fallback; } }
 function writeJson(file, obj, mode) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -47,7 +48,8 @@ function cleanConfig(c) {
     router: validIp(c.router) ? c.router : 'auto',
     scanSeconds: secs >= 60 && secs <= 86400 ? secs : DEFAULTS.scanSeconds,
     port: port >= 1024 && port <= 65535 ? port : DEFAULTS.port,
-    panels: cleanPanels(c.panels)
+    panels: cleanPanels(c.panels),
+    update: ['auto', 'check', 'off'].includes(c.update) ? c.update : DEFAULTS.update
   };
 }
 const configFile = () => path.join(DATA, 'config.json');
@@ -60,6 +62,7 @@ function loadConfig() {
   if (e.DASHBOARD_HUB_ROUTER) c.router = e.DASHBOARD_HUB_ROUTER;
   if (e.DASHBOARD_HUB_SCAN_SECONDS) c.scanSeconds = e.DASHBOARD_HUB_SCAN_SECONDS;
   if (e.DASHBOARD_HUB_PORT) c.port = e.DASHBOARD_HUB_PORT;
+  if (e.DASHBOARD_HUB_UPDATE) c.update = String(e.DASHBOARD_HUB_UPDATE).toLowerCase();
   if (e.DASHBOARD_HUB_PANELS) {      // Name=address|Name=address
     c.panels = String(e.DASHBOARD_HUB_PANELS).split('|').map((x) => { const i = x.indexOf('='); return i > 0 ? { name: x.slice(0, i).trim(), url: x.slice(i + 1).trim() } : { name: '', url: x.trim() }; });
   }
@@ -257,14 +260,14 @@ function uptimeFor(rangeMs, minDropMs) {
 }
 function info() {
   const ds = devList().filter((d) => !d.isRouter);
-  return { mode: 'docker', name: config.name, network: ST.cidr || state.cidr, router: ST.router || state.router, scanSeconds: config.scanSeconds, running: ST.running, progress: ST.scanning, lastScanAt: ST.lastAt, lastScanMs: ST.lastMs, nextScanAt: ST.nextAt, scans: state.scans,
+  return { mode: 'docker', version: VERSION, name: config.name, network: ST.cidr || state.cidr, router: ST.router || state.router, scanSeconds: config.scanSeconds, running: ST.running, progress: ST.scanning, lastScanAt: ST.lastAt, lastScanMs: ST.lastMs, nextScanAt: ST.nextAt, scans: state.scans,
     devices: ds.length, online: ds.filter((d) => d.online !== false).length, offline: ds.filter((d) => d.online === false).length, error: ST.lastError, uptimeSeconds: Math.round(process.uptime()) };
 }
 
 // ---------- settings that Dashboard Hub Desktop can read and change ----------
 function getConfigInfo() {
   let ifs = []; try { ifs = scanner.listInterfaces().map((i) => ({ name: i.name, address: i.address, cidr: i.cidr })); } catch (e) { ifs = []; }
-  return { config: { name: config.name, network: config.network, router: config.router, scanSeconds: config.scanSeconds, panels: config.panels }, detected: { network: ST.detectedCidr || '', router: ST.detectedRouter || '' }, interfaces: ifs, port: config.port };
+  return { config: { name: config.name, network: config.network, router: config.router, scanSeconds: config.scanSeconds, panels: config.panels, update: config.update }, update: updater ? updater.status() : null, detected: { network: ST.detectedCidr || '', router: ST.detectedRouter || '' }, interfaces: ifs, port: config.port };
 }
 function changeConfig(a) {
   const errs = [], next = Object.assign({}, config);
@@ -275,6 +278,7 @@ function changeConfig(a) {
   }
   if (a.router !== undefined) { const r = String(a.router).trim(); if (r === 'auto') next.router = 'auto'; else if (validIp(r) && scanner.parseCidr(r + '/32').ok) next.router = r; else errs.push('The router address must be a home network address like 192.168.0.1, or Automatic.'); }
   if (a.scanSeconds !== undefined) { const n = parseInt(a.scanSeconds, 10); if (n >= 60 && n <= 86400) next.scanSeconds = n; else errs.push('Scan every: 60 seconds to 24 hours.'); }
+  if (a.update !== undefined) { if (['auto', 'check', 'off'].includes(a.update)) next.update = a.update; else errs.push('Updates must be Automatic, Only tell me, or Off.'); }
   if (a.panels !== undefined) {
     if (!Array.isArray(a.panels) || a.panels.length > 200) errs.push('Too many panels.');
     else {
@@ -294,14 +298,35 @@ function changeConfig(a) {
 }
 
 // ---------- start ----------
-let web = null;
+let web = null, updater = null;
+function updateNow(a) {
+  if (!updater) return Promise.resolve({ ok: false, error: 'Updates are not available.' });
+  if (a && a.apply === false) return updater.check().then(() => ({ status: updater.status() }));
+  return updater.apply().then((r) => {
+    if (r.updated) setTimeout(() => shutdown(42), 1500);
+    return Object.assign({}, r, { status: updater.status() });
+  });
+}
 async function main() {
   fs.mkdirSync(DATA, { recursive: true });
   config = loadConfig();
   loadState();
+  updater = createUpdater({
+    dataDir: DATA, version: VERSION, base: Number(process.env.DASHBOARD_HUB_BASE) || 1, supervised: process.env.DASHBOARD_HUB_BOOT === '1',
+    repo: process.env.DASHBOARD_HUB_UPDATE_REPO || 'Grid21/Dashboardhub', branch: process.env.DASHBOARD_HUB_UPDATE_BRANCH || 'main', baseUrl: process.env.DASHBOARD_HUB_UPDATE_URL || '',
+    getMode: () => config.update, log: log, firstMs: Number(process.env.DASHBOARD_HUB_UPDATE_FIRST_MS) || 120000, everyMs: Number(process.env.DASHBOARD_HUB_UPDATE_EVERY_MS) || 0,
+    restart: () => shutdown(42)
+  });
+  // On every start (also when you press Restart in Portainer or Docker): look for a newer version FIRST and install it before anything else.
+  if (config.update === 'auto' && process.env.DASHBOARD_HUB_BOOT === '1') {
+    log('Looking for a newer version...');
+    const r = await Promise.race([updater.apply(), new Promise((res) => setTimeout(() => res(null), 45000))]).catch(() => null);
+    if (r && r.updated) { log('Updated to ' + r.version + '. Starting it now.'); process.exit(42); }
+    if (r && r.ok === false) log('No update installed: ' + r.error);
+  }
   web = remote.createWebAccess({
     file: path.join(DATA, 'web-access.json'), version: VERSION, getSnapshot: snapshot, getUptime: uptimeFor, getInfo: info, getConfig: getConfigInfo,
-    actions: { config: changeConfig, scan: () => { if (ST.running) return { started: false, message: 'A scan is already running.' }; runScan('requested').catch(() => {}); return { started: true }; } }
+    actions: { config: changeConfig, update: updateNow, scan: () => { if (ST.running) return { started: false, message: 'A scan is already running.' }; runScan('requested').catch(() => {}); return { started: true }; } }
   });
   // the access code: from DASHBOARD_HUB_CODE, or one that was set before, or a new one shown once in the log
   const envCode = process.env.DASHBOARD_HUB_CODE;
@@ -320,17 +345,20 @@ async function main() {
   if (!st.on) { console.error('The web page could not start: ' + st.error); process.exit(3); }
   log('Dashboard Hub ' + VERSION + ' (Docker) is running. Open http://<this computer>:' + config.port + '/ in a browser.');
   runScan('start').catch((e) => log('Scan problem: ' + (e && e.message)));
+  updater.start();
 }
-function shutdown() {
+function shutdown(code) {
+  code = typeof code === 'number' ? code : 0;
   if (stopping) return; stopping = true;
+  if (updater) updater.stop();
   if (timer) clearTimeout(timer);
   try { if (session) session.cancel(); } catch (e) { /* ending anyway */ }
   try { flushHistory(); } catch (e) { /* ending anyway */ }
   saveNow(); saveHistoryNow();
-  Promise.resolve(web ? web.stop() : null).then(() => process.exit(0), () => process.exit(0));
-  setTimeout(() => process.exit(0), 3000).unref();
+  Promise.resolve(web ? web.stop() : null).then(() => process.exit(code), () => process.exit(code));
+  setTimeout(() => process.exit(code), 3000).unref();
 }
-process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
+process.on('SIGTERM', () => shutdown(0)); process.on('SIGINT', () => shutdown(0));
 process.on('uncaughtException', (e) => { log('Unexpected problem: ' + (e && e.stack || e)); });
 process.on('unhandledRejection', (e) => { log('Unexpected problem: ' + (e && e.stack || e)); });
 main().catch((e) => { console.error(e); process.exit(1); });

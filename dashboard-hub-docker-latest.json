@@ -1,0 +1,7 @@
+{
+ "version": "1.30.0",
+ "file": "dashboard-hub-docker-1.30.0.tar.gz",
+ "sha256": "205fa41dcd018b4476193463500b5c61d884fcc43912b0e09688695b9034aa28",
+ "base": 1,
+ "notes": "Bridge to the single-file updates"
+}

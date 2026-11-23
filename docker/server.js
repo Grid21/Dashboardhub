@@ -18,8 +18,10 @@ const PROFILE_ID = 'docker-main';
 const log = (m) => console.log(new Date().toISOString().replace('T', ' ').slice(0, 19) + '  ' + m);
 
 // ---------- settings ----------
-// config.json (in the data folder) can be edited by hand; environment variables win over it.
-const DEFAULTS = { name: 'Dashboard Hub (Docker)', network: 'auto', scanSeconds: 300, port: remote.WEB_DEFAULT_PORT, panels: [] };
+// config.json (in the data folder) holds the settings. The first time the server starts, the DASHBOARD_HUB_* environment settings
+// (from docker-compose.yml) are used to create it. From then on config.json wins, so changes made in Dashboard Hub Desktop stick.
+// The access code is the exception: DASHBOARD_HUB_CODE always applies when it is set.
+const DEFAULTS = { name: 'Dashboard Hub (Docker)', network: 'auto', router: 'auto', scanSeconds: 300, port: remote.WEB_DEFAULT_PORT, panels: [] };
 function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return fallback; } }
 function writeJson(file, obj, mode) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -27,38 +29,48 @@ function writeJson(file, obj, mode) {
   fs.writeFileSync(tmp, JSON.stringify(obj), { mode: mode || 0o600 });
   fs.renameSync(tmp, file);
 }
+const validIp = (s) => typeof s === 'string' && /^\d{1,3}(\.\d{1,3}){3}$/.test(s) && s.split('.').every((p) => Number(p) <= 255);
+function cleanPanels(list) {
+  const panels = [];
+  (Array.isArray(list) ? list : []).slice(0, 200).forEach((p) => {
+    const url = String(p && p.url || '').trim().slice(0, 2000);
+    if (/^https?:\/\/[^\s]+$/i.test(url)) panels.push({ name: String(p.name || '').trim().slice(0, 80) || url, url: url });
+  });
+  return panels;
+}
 function cleanConfig(c) {
   c = c && typeof c === 'object' ? c : {};
   const secs = parseInt(c.scanSeconds, 10), port = parseInt(c.port, 10);
-  const panels = [];
-  (Array.isArray(c.panels) ? c.panels : []).slice(0, 200).forEach((p) => {
-    const url = String(p && p.url || '').slice(0, 2000);
-    if (/^https?:\/\/[^\s]+$/i.test(url)) panels.push({ name: String(p.name || url).slice(0, 80), url: url });
-  });
   return {
-    name: String(c.name || DEFAULTS.name).slice(0, 80),
+    name: String(c.name || DEFAULTS.name).trim().slice(0, 80) || DEFAULTS.name,
     network: c.network === 'auto' || !c.network ? 'auto' : String(c.network).slice(0, 20),
+    router: validIp(c.router) ? c.router : 'auto',
     scanSeconds: secs >= 60 && secs <= 86400 ? secs : DEFAULTS.scanSeconds,
     port: port >= 1024 && port <= 65535 ? port : DEFAULTS.port,
-    panels: panels
+    panels: cleanPanels(c.panels)
   };
 }
+const configFile = () => path.join(DATA, 'config.json');
 function loadConfig() {
-  const c = cleanConfig(readJson(path.join(DATA, 'config.json'), {}));
-  const e = process.env;
-  if (e.DASHBOARD_HUB_NAME) c.name = String(e.DASHBOARD_HUB_NAME).slice(0, 80);
-  if (e.DASHBOARD_HUB_NETWORK) c.network = String(e.DASHBOARD_HUB_NETWORK).slice(0, 20);
-  if (e.DASHBOARD_HUB_SCAN_SECONDS && parseInt(e.DASHBOARD_HUB_SCAN_SECONDS, 10) >= 60) c.scanSeconds = Math.min(86400, parseInt(e.DASHBOARD_HUB_SCAN_SECONDS, 10));
-  if (e.DASHBOARD_HUB_PORT && parseInt(e.DASHBOARD_HUB_PORT, 10) >= 1024) c.port = parseInt(e.DASHBOARD_HUB_PORT, 10);
+  const file = readJson(configFile(), null);
+  if (file && typeof file === 'object') return cleanConfig(file);
+  const e = process.env, c = {};
+  if (e.DASHBOARD_HUB_NAME) c.name = e.DASHBOARD_HUB_NAME;
+  if (e.DASHBOARD_HUB_NETWORK) c.network = e.DASHBOARD_HUB_NETWORK;
+  if (e.DASHBOARD_HUB_ROUTER) c.router = e.DASHBOARD_HUB_ROUTER;
+  if (e.DASHBOARD_HUB_SCAN_SECONDS) c.scanSeconds = e.DASHBOARD_HUB_SCAN_SECONDS;
+  if (e.DASHBOARD_HUB_PORT) c.port = e.DASHBOARD_HUB_PORT;
   if (e.DASHBOARD_HUB_PANELS) {      // Name=address|Name=address
     c.panels = String(e.DASHBOARD_HUB_PANELS).split('|').map((x) => { const i = x.indexOf('='); return i > 0 ? { name: x.slice(0, i).trim(), url: x.slice(i + 1).trim() } : { name: '', url: x.trim() }; });
   }
-  return cleanConfig(c);
+  const cfg = cleanConfig(c);
+  try { writeJson(configFile(), cfg); } catch (err) { /* read-only data folder: settings stay in memory */ }
+  return cfg;
 }
-let config = loadConfig();
+let config = null;
+function saveConfig() { try { writeJson(configFile(), config); return true; } catch (e) { return false; } }
 
 // ---------- devices ----------
-const validIp = (s) => typeof s === 'string' && /^\d{1,3}(\.\d{1,3}){3}$/.test(s) && s.split('.').every((p) => Number(p) <= 255);
 function normMac(m) {
   if (typeof m !== 'string') return null;
   const h = m.toLowerCase().replace(/[^0-9a-f]/g, '');
@@ -146,17 +158,22 @@ function trackPresence() {
 const ST = { running: false, lastAt: 0, lastMs: 0, lastError: '', nextAt: 0, cidr: '', router: '', scanning: null };
 let timer = null, session = null, stopping = false;
 const ipInt = (ip) => ip.split('.').reduce((n, p) => n * 256 + Number(p), 0);
+function inCidr(ip, cidr) { const p = scanner.parseCidr(cidr); return !!(p.ok && validIp(ip) && ipInt(ip) >= p.base && ipInt(ip) < p.base + Math.pow(2, 32 - p.prefix)); }
 async function pickNetwork() {
   let router = '';
   try { router = (await scanner.detectGateway()) || ''; } catch (e) { router = ''; }
+  ST.detectedRouter = router;
+  if (config.router !== 'auto') router = config.router;
   const ifs = scanner.listInterfaces();
-  let cidr = '';
-  if (config.network !== 'auto') { const p = scanner.parseCidr(config.network); if (p.ok) cidr = p.cidr; else return { error: 'The network "' + config.network + '" is not valid: ' + p.error }; }
-  else if (ifs.length) {
+  let cidr = '', auto = '';
+  if (ifs.length) {
     let pick = null;
-    if (router) pick = ifs.find((i) => { const p = scanner.parseCidr(i.cidr); return p.ok && ipInt(router) >= p.base && ipInt(router) < p.base + Math.pow(2, 32 - p.prefix); });
-    pick = pick || ifs[0]; cidr = pick.cidr;
+    if (router) pick = ifs.find((i) => inCidr(router, i.cidr));
+    pick = pick || ifs[0]; auto = pick.cidr;
   }
+  ST.detectedCidr = auto;
+  if (config.network !== 'auto') { const p = scanner.parseCidr(config.network); if (p.ok) cidr = p.cidr; else return { error: 'The network "' + config.network + '" is not valid: ' + p.error }; }
+  else cidr = auto;
   if (!cidr) return { error: 'No private network was found. Run the container with host networking (see README-DOCKER.md) or set DASHBOARD_HUB_NETWORK.' };
   return { cidr: cidr, router: router };
 }
@@ -170,7 +187,12 @@ async function runScan(reason) {
   if (ST.running || stopping) return { ok: false, error: 'A scan is already running.' };
   const net = await pickNetwork();
   if (net.error) { ST.lastError = net.error; log(net.error); scheduleNext(); return { ok: false, error: net.error }; }
-  ST.running = true; ST.cidr = net.cidr; ST.router = net.router; ST.lastError = ''; state.cidr = net.cidr;
+  ST.running = true; ST.cidr = net.cidr; ST.router = net.router; ST.lastError = '';
+  if (state.cidr && state.cidr !== net.cidr) {        // the network was changed: machines of the old network are not kept on this map (their history stays)
+    Object.keys(state.devices).forEach((k) => { const d = state.devices[k]; if (!d.isRouter && d.ip && !inCidr(d.ip, net.cidr)) delete state.devices[k]; });
+    log('Network changed to ' + net.cidr + ': machines of the old network were taken off the map');
+  }
+  state.cidr = net.cidr;
   ensureRouter(net.router);
   seen = new Set(); newCount = 0;
   const bg = state.scannedOnce;
@@ -187,6 +209,7 @@ async function runScan(reason) {
         if (!m.canceled && !m.error) {
           const need = bg ? 2 : 1;
           devList().forEach((d) => {
+            if (!d.isRouter && d.ip && !inCidr(d.ip, net.cidr) && !seen.has(d.key)) return;
             if (d.isRouter || seen.has(d.key)) { if (!d.isRouter) { d.misses = 0; d.online = true; } return; }
             d.misses = (d.misses || 0) + 1;
             if (d.misses >= need) { if (d.online !== false) histEvent('left', d); d.online = false; }
@@ -218,6 +241,7 @@ function scheduleNext() {
 // ---------- what the web page and Dashboard Hub Desktop see ----------
 function snapshot() {
   return {
+    at: ST.lastAt || Date.now(),
     profile: { id: PROFILE_ID, name: config.name }, panels: config.panels,
     devices: devList().map((d) => ({ key: d.key, name: d.isRouter && !d.label ? 'Router' : titleOf(d), ip: d.ip, mac: d.mac || '', vendor: d.vendor || '', os: d.os && d.os.id !== 'unknown' ? d.os.label : '', group: d.group || '', online: d.online !== false, isRouter: !!d.isRouter, self: !!d.self, x: d.x || 0, z: d.z || 0, lastSeen: d.lastSeen || null, onlineSince: d.onlineSince || null, ports: d.ports || [] })),
     links: devList().filter((d) => !d.isRouter).map((d) => ({ a: 'router', b: d.key }))
@@ -237,14 +261,47 @@ function info() {
     devices: ds.length, online: ds.filter((d) => d.online !== false).length, offline: ds.filter((d) => d.online === false).length, error: ST.lastError, uptimeSeconds: Math.round(process.uptime()) };
 }
 
+// ---------- settings that Dashboard Hub Desktop can read and change ----------
+function getConfigInfo() {
+  let ifs = []; try { ifs = scanner.listInterfaces().map((i) => ({ name: i.name, address: i.address, cidr: i.cidr })); } catch (e) { ifs = []; }
+  return { config: { name: config.name, network: config.network, router: config.router, scanSeconds: config.scanSeconds, panels: config.panels }, detected: { network: ST.detectedCidr || '', router: ST.detectedRouter || '' }, interfaces: ifs, port: config.port };
+}
+function changeConfig(a) {
+  const errs = [], next = Object.assign({}, config);
+  if (a.name !== undefined) { const n = String(a.name).trim(); if (!n || n.length > 80) errs.push('The name must be 1 to 80 characters.'); else next.name = n; }
+  if (a.network !== undefined) {
+    const n = String(a.network).trim();
+    if (n === 'auto') next.network = 'auto'; else { const p = scanner.parseCidr(n); if (p.ok) next.network = p.cidr; else errs.push('Network: ' + p.error); }
+  }
+  if (a.router !== undefined) { const r = String(a.router).trim(); if (r === 'auto') next.router = 'auto'; else if (validIp(r) && scanner.parseCidr(r + '/32').ok) next.router = r; else errs.push('The router address must be a home network address like 192.168.0.1, or Automatic.'); }
+  if (a.scanSeconds !== undefined) { const n = parseInt(a.scanSeconds, 10); if (n >= 60 && n <= 86400) next.scanSeconds = n; else errs.push('Scan every: 60 seconds to 24 hours.'); }
+  if (a.panels !== undefined) {
+    if (!Array.isArray(a.panels) || a.panels.length > 200) errs.push('Too many panels.');
+    else {
+      const clean = cleanPanels(a.panels);
+      if (clean.length !== a.panels.length) errs.push('Every panel needs an address starting with http:// or https://.');
+      else next.panels = clean;
+    }
+  }
+  if (errs.length) return { ok: false, error: errs.join(' ') };
+  const rescan = next.network !== config.network || next.router !== config.router, resched = next.scanSeconds !== config.scanSeconds;
+  config = cleanConfig(Object.assign({}, next, { port: config.port }));
+  if (!saveConfig()) return { ok: false, error: 'The settings could not be saved (is the data folder read-only?).' };
+  log('Settings changed from Dashboard Hub Desktop or the page');
+  if (resched && !ST.running) scheduleNext();
+  if (rescan && !ST.running) runScan('settings changed').catch(() => {});
+  return { config: getConfigInfo().config, rescanning: rescan };
+}
+
 // ---------- start ----------
 let web = null;
 async function main() {
   fs.mkdirSync(DATA, { recursive: true });
+  config = loadConfig();
   loadState();
   web = remote.createWebAccess({
-    file: path.join(DATA, 'web-access.json'), version: VERSION, getSnapshot: snapshot, getUptime: uptimeFor, getInfo: info,
-    actions: { scan: () => { if (ST.running) return { started: false, message: 'A scan is already running.' }; runScan('requested').catch(() => {}); return { started: true }; } }
+    file: path.join(DATA, 'web-access.json'), version: VERSION, getSnapshot: snapshot, getUptime: uptimeFor, getInfo: info, getConfig: getConfigInfo,
+    actions: { config: changeConfig, scan: () => { if (ST.running) return { started: false, message: 'A scan is already running.' }; runScan('requested').catch(() => {}); return { started: true }; } }
   });
   // the access code: from DASHBOARD_HUB_CODE, or one that was set before, or a new one shown once in the log
   const envCode = process.env.DASHBOARD_HUB_CODE;

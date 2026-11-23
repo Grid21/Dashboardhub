@@ -391,6 +391,22 @@
     <div class="dialog-buttons"><button type="button" id="aboutClose" class="primary">Close</button></div>
   </dialog>
 
+  <dialog id="hubCfgDialog">
+    <h3 id="hubCfgTitle">Server settings</h3>
+    <p class="hint">These settings are kept on the server itself, so they stay after it restarts.</p>
+    <div class="pxe-row"><label class="field-label" for="hcName">Name</label><input type="text" id="hcName" maxlength="80"></div>
+    <div class="pxe-row"><label class="field-label" for="hcNet">Network to scan</label><select id="hcNet"></select><input type="text" id="hcNetCustom" placeholder="like 192.168.0.0/24" maxlength="20" hidden></div>
+    <p class="hint" id="hcNetHint"></p>
+    <div class="pxe-row"><label class="field-label" for="hcRouter">Router address</label><select id="hcRouter"><option value="auto">Automatic</option><option value="custom">I will type it</option></select><input type="text" id="hcRouterCustom" placeholder="like 192.168.0.1" maxlength="15" hidden></div>
+    <p class="hint" id="hcRouterHint"></p>
+    <div class="pxe-row"><label class="field-label" for="hcScan">Scan every</label><select id="hcScan"><option value="60">1 minute</option><option value="120">2 minutes</option><option value="300">5 minutes</option><option value="600">10 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option></select></div>
+    <h4>Panels</h4>
+    <p class="hint">Web pages you want as buttons on the server's page (for example your router, Portainer or Pi-hole). Each needs an address starting with http:// or https://.</p>
+    <div id="hcPanels"></div>
+    <div class="pxe-row"><button type="button" id="hcAddPanel">Add a panel</button></div>
+    <p class="hint" id="hcMsg" role="status"></p>
+    <div class="dialog-buttons"><button type="button" id="hcSave">Save</button><span class="spacer"></span><button type="button" id="hcClose">Close</button></div>
+  </dialog>
   <dialog id="hubsDialog">
     <h3>Remote servers</h3>
     <p class="hint">Dashboard Hub servers (the Docker version running on a Linux box, NAS or Raspberry Pi) that this program can check on and manage. Add one with its address and access code. Use your home network or your VPN (for example WireGuard).</p>

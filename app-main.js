@@ -607,6 +607,8 @@ ipcMain.handle('hubs:save', (event, x) => { checkSender(event); return hubsMake(
 ipcMain.handle('hubs:remove', (event, id) => { checkSender(event); return hubsMake().remove(String(id || '')); });
 ipcMain.handle('hubs:status', (event, id) => { checkSender(event); return hubsMake().status(String(id || '')); });
 ipcMain.handle('hubs:scan', (event, id) => { checkSender(event); return hubsMake().scan(String(id || '')); });
+ipcMain.handle('hubs:getConfig', (event, id) => { checkSender(event); return hubsMake().getConfig(String(id || '')); });
+ipcMain.handle('hubs:setConfig', (event, id, cfg) => { checkSender(event); return hubsMake().setConfig(String(id || ''), cfg && typeof cfg === 'object' ? cfg : {}); });
 ipcMain.handle('hubs:open', async (event, id) => {
   checkSender(event);
   const r = await hubsMake().openInfo(String(id || ''));

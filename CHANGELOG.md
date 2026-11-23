@@ -2,6 +2,14 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.28.0
+- **Docker version, stage 2: settings and panels from Dashboard Hub Desktop.** In Settings > Remote servers each server now has a **Settings** button: change the server's name, the network to scan (Automatic, one of the server's own networks, or type it), the router address (Automatic or type it, with a hint of what the server found), how often it scans, and its panels (add, rename, reorder, remove). The settings are kept on the server and stay after a restart.
+- The compose file's settings are now only the **starting** settings. Once you change something in Desktop, the saved settings win. (The access code still always comes from `DASHBOARD_HUB_CODE` when it is set.) The compose file no longer contains example panels, and its settings can come from a `.env` file or Portainer's Environment variables.
+- Fixed: the server's page said "updated NaN days ago".
+- Changing the network takes machines of the old network off the map (their history stays); machines outside the scanned network are no longer wrongly marked offline.
+- New starting setting `DASHBOARD_HUB_ROUTER`.
+- Tested: 48 checks on the server (including refusal of bad settings) and 24 on Desktop's window against it, plus the earlier tests. Still on a simulated network, not a real container.
+
 ## 1.27.0
 - **New: Dashboard Hub for Docker, stage 1** (the `docker` folder in the source zip; guide in `docker/README-DOCKER.md`). A small always-on version with no window for a Linux box, NAS or Raspberry Pi: it scans the network on a timer (every 5 minutes by default), keeps the device list and Uptime and history in a saved folder, and serves the same view-only page as Phone and browser access. Start it with `docker compose up -d --build`. Settings (access code, name, network, scan interval, port, panels) are in the compose file.
 - **New: Remote servers** (Settings > Remote servers...). Dashboard Hub Desktop can now look after Dashboard Hub servers: add one with its address and access code, then **Check** it (devices online and offline, last scan, version), tell it to **Scan now**, or **Open** its map, devices and uptime in a window. Access codes are stored encrypted where the computer allows it and are never shown again.

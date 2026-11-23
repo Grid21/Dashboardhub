@@ -88,7 +88,9 @@ contextBridge.exposeInMainWorld('hubsApi', {
   remove: (id) => ipcRenderer.invoke('hubs:remove', String(id || '')),
   status: (id) => ipcRenderer.invoke('hubs:status', String(id || '')),
   scan: (id) => ipcRenderer.invoke('hubs:scan', String(id || '')),
-  open: (id) => ipcRenderer.invoke('hubs:open', String(id || ''))
+  open: (id) => ipcRenderer.invoke('hubs:open', String(id || '')),
+  getConfig: (id) => ipcRenderer.invoke('hubs:getConfig', String(id || '')),
+  setConfig: (id, cfg) => ipcRenderer.invoke('hubs:setConfig', String(id || ''), cfg)
 });
 
 contextBridge.exposeInMainWorld('webApi', {

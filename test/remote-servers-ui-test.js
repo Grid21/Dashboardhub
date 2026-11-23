@@ -25,7 +25,7 @@ function freePort() { return new Promise((res) => { const s = net.createServer()
   await page.fill('#hubCode', 'wrong code!'); await page.click('#hubSave'); await sleep(1500);
   check('a server can be saved, and a wrong code is explained when checked', /not right/.test(await page.textContent('#hubsList')), await page.textContent('#hubsList'));
   const id = await page.evaluate(async () => (await window.hubsApi.list()).list[0].id);
-  await page.evaluate((id) => document.querySelector('.hub-row button:nth-child(4)').click(), id); await sleep(200);
+  await page.evaluate((id) => document.querySelector('.hub-row button:nth-child(5)').click(), id); await sleep(200);
   await page.fill('#hubCode', 'server code 1'); await page.click('#hubSave'); await sleep(300);
   await page.click('.hub-row button:nth-child(1)'); await sleep(2500);
   const txt = await page.textContent('#hubsList');
@@ -41,6 +41,36 @@ function freePort() { return new Promise((res) => { const s = net.createServer()
   const win = app.windows().find((w) => w.url().indexOf(':' + dkPort) > 0);
   check('Open shows the server\'s own page, already signed in', !!win && await win.evaluate(() => !document.getElementById('app').hidden), win ? win.url() : 'no window');
   if (win) { await sleep(800); check('and it shows the Docker server\'s panels', /Alpha/.test(await win.textContent('#t-panels'))); await win.close().catch(() => {}); }
+  // ----- the server's settings window -----
+  await page.click('.hub-row button:nth-child(4)');
+  await sleep(1200);
+  const cfgOpen = await page.isVisible('#hubCfgDialog');
+  check('Settings opens the server\'s settings window with its current values', cfgOpen && await page.inputValue('#hcName') === 'Docker box' && await page.evaluate(() => document.querySelectorAll('#hcPanels .hc-panel').length) === 1 && await page.inputValue('#hcScan') === '300');
+  if (cfgOpen && process.env.RS_SHOT) await page.screenshot({ path: process.env.RS_SHOT });
+  if (cfgOpen) {
+    check('the network list offers Automatic and typing it yourself', await page.evaluate(() => Array.from(document.getElementById('hcNet').options).map((o) => o.value).join(',').includes('auto') && Array.from(document.getElementById('hcNet').options).some((o) => o.value === 'custom')));
+    check('the router hint says what the server found', /Found by the server/.test(await page.textContent('#hcRouterHint')));
+    await page.fill('#hcName', 'Renamed from Desktop');
+    await page.selectOption('#hcScan', '600');
+    await page.click('#hcAddPanel'); await sleep(200);
+    const rows = await page.$$('#hcPanels .hc-panel');
+    await rows[1].$eval('.hc-pn', (e) => { e.value = 'Pi-hole'; });
+    await rows[1].$eval('.hc-pu', (e) => { e.value = 'http://192.168.0.2/admin'; });
+    await page.click('#hcSave'); await sleep(1200);
+    check('Save says it is saved', /Saved/.test(await page.textContent('#hcMsg')), await page.textContent('#hcMsg'));
+    await rows[1].$eval('.hc-pu', (e) => { e.value = 'ftp://bad'; });
+    await page.click('#hcSave'); await sleep(900);
+    check('a bad panel address is explained', /http/.test(await page.textContent('#hcMsg')) && !/Saved/.test(await page.textContent('#hcMsg')), await page.textContent('#hcMsg'));
+    await rows[1].$eval('.hc-pu', (e) => { e.value = 'http://192.168.0.2/admin'; });
+    await page.click('#hcSave'); await sleep(900);
+    await page.click('#hcClose'); await sleep(200);
+    const cfg = await page.evaluate(async () => { const l = (await window.hubsApi.list()).list; return window.hubsApi.getConfig(l[0].id); });
+    check('the server really has the new name, scan time and panels', cfg.ok && cfg.config.config.name === 'Renamed from Desktop' && cfg.config.config.scanSeconds === 600 && cfg.config.config.panels.length === 2 && cfg.config.config.panels[1].name === 'Pi-hole', JSON.stringify(cfg).slice(0, 300));
+    const st2 = await page.evaluate(async () => { const l = (await window.hubsApi.list()).list; return window.hubsApi.setConfig(l[0].id, { router: '192.168.0.1', network: 'auto' }); });
+    check('the router can be set from Desktop', st2.ok === true && st2.config.router === '192.168.0.1', JSON.stringify(st2));
+    const st3 = await page.evaluate(async () => { const l = (await window.hubsApi.list()).list; return window.hubsApi.setConfig(l[0].id, { scanSeconds: 3 }); });
+    check('and a bad value comes back as a plain message', st3.ok === false && /Scan every/.test(st3.error), JSON.stringify(st3));
+  }
   // page not reachable
   await page.evaluate(() => window.hubsApi.save({ name: 'Gone', url: 'http://127.0.0.1:1', code: 'whatever1' }));
   await page.evaluate(() => document.getElementById('hubsMenuBtn').click()).catch(() => {}); await sleep(300);

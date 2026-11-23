@@ -180,12 +180,63 @@
       mk('Check', () => check(h, st));
       mk('Scan now', async () => { st.textContent = 'Asking for a scan...'; const r = await api.scan(h.id); st.className = 'hint ' + (r && r.ok ? 'ok' : 'bad'); st.textContent = r && r.ok ? (r.started ? 'Scan started. Press Check in a minute to see the result.' : (r.message || 'A scan is already running.')) : (r && r.error) || 'Could not start a scan.'; }, 'Ask the server to scan its network right now');
       mk('Open', async () => { const r = await api.open(h.id); if (!r || !r.ok) { st.className = 'hint bad'; st.textContent = (r && r.error) || 'Could not open it.'; } }, 'Open the server\'s map, devices and uptime in a window');
+      mk('Settings', () => openCfg(h), 'Change this server\'s name, network, router, scan time and panels');
       mk('Edit', () => { editing = h.id; $('hubName').value = h.name; $('hubUrl').value = h.url; $('hubCode').value = ''; $('hubCode').placeholder = 'New access code (leave empty to keep it)'; $('hubsAddTitle').textContent = 'Change this server'; $('hubCancel').hidden = false; $('hubsAdd').open = true; });
       mk('Remove', async () => { if (!confirm('Remove "' + h.name + '" from this list? The server itself is not touched.')) return; const r = await api.remove(h.id); list = r.list || []; draw(); });
       card.appendChild(row); box.appendChild(card);
       check(h, st);
     });
   }
+  // ----- the settings of one server -----
+  const cfgDlg = $('hubCfgDialog');
+  let cfgHub = null, cfgInfo = null;
+  const cmsg = (t, good) => { const m = $('hcMsg'); m.textContent = t || ''; m.className = 'hint ' + (t ? (good ? 'ok' : 'bad') : ''); };
+  function panelRow(p) {
+    const row = document.createElement('div'); row.className = 'pxe-row hc-panel';
+    const n = document.createElement('input'); n.type = 'text'; n.placeholder = 'Name'; n.maxLength = 80; n.value = p ? p.name : ''; n.className = 'hc-pn';
+    const u = document.createElement('input'); u.type = 'text'; u.placeholder = 'http://192.168.0.10:9000'; u.maxLength = 2000; u.value = p ? p.url : ''; u.className = 'hc-pu';
+    const up = document.createElement('button'); up.type = 'button'; up.textContent = '\u2191'; up.title = 'Move up'; up.addEventListener('click', () => { if (row.previousElementSibling) row.parentNode.insertBefore(row, row.previousElementSibling); });
+    const dn = document.createElement('button'); dn.type = 'button'; dn.textContent = '\u2193'; dn.title = 'Move down'; dn.addEventListener('click', () => { if (row.nextElementSibling) row.parentNode.insertBefore(row.nextElementSibling, row); });
+    const rm = document.createElement('button'); rm.type = 'button'; rm.textContent = 'Remove'; rm.addEventListener('click', () => row.remove());
+    [n, u, up, dn, rm].forEach((x) => row.appendChild(x)); $('hcPanels').appendChild(row);
+  }
+  function fillCfg(info) {
+    const c = info.config, net = $('hcNet'), rt = $('hcRouter');
+    $('hcName').value = c.name;
+    net.textContent = '';
+    const add = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; net.appendChild(o); };
+    add('auto', 'Automatic' + (info.detected.network ? ' (now ' + info.detected.network + ')' : ''));
+    (info.interfaces || []).forEach((i) => add(i.cidr, i.cidr + '  (' + i.name + ', this server is ' + i.address + ')'));
+    add('custom', 'I will type it');
+    const known = Array.from(net.options).some((o) => o.value === c.network);
+    net.value = known ? c.network : 'custom';
+    $('hcNetCustom').hidden = net.value !== 'custom'; $('hcNetCustom').value = known ? '' : c.network;
+    $('hcNetHint').textContent = 'Only home and office addresses can be scanned (192.168.x.x, 10.x.x.x, 172.16-31.x.x).';
+    rt.value = c.router === 'auto' ? 'auto' : 'custom'; $('hcRouterCustom').hidden = rt.value !== 'custom'; $('hcRouterCustom').value = c.router === 'auto' ? '' : c.router;
+    $('hcRouterHint').textContent = info.detected.router ? 'Found by the server: ' + info.detected.router + '. If that is not your router, choose "I will type it".' : 'The server has not found a router yet.';
+    $('hcScan').value = String(c.scanSeconds);
+    if (!Array.from($('hcScan').options).some((o) => o.value === String(c.scanSeconds))) { const o = document.createElement('option'); o.value = String(c.scanSeconds); o.textContent = Math.round(c.scanSeconds / 60) + ' minutes'; $('hcScan').appendChild(o); $('hcScan').value = String(c.scanSeconds); }
+    $('hcPanels').textContent = ''; (c.panels || []).forEach((p) => panelRow(p));
+  }
+  async function openCfg(h) {
+    cfgHub = h; cmsg('Loading...'); $('hubCfgTitle').textContent = 'Settings of ' + h.name;
+    const r = await api.getConfig(h.id);
+    if (!r || !r.ok) { cmsg((r && r.error) || 'Could not read the settings.'); const st = document.querySelector('#hubsList .hint'); if (st) st.textContent = (r && r.error) || ''; return; }
+    cfgInfo = r.config; fillCfg(r.config); cmsg(''); if (!cfgDlg.open) cfgDlg.showModal();
+  }
+  $('hcNet').addEventListener('change', () => { $('hcNetCustom').hidden = $('hcNet').value !== 'custom'; });
+  $('hcRouter').addEventListener('change', () => { $('hcRouterCustom').hidden = $('hcRouter').value !== 'custom'; });
+  $('hcAddPanel').addEventListener('click', () => panelRow(null));
+  $('hcClose').addEventListener('click', () => cfgDlg.close());
+  $('hcSave').addEventListener('click', async () => {
+    if (!cfgHub) return;
+    const panels = Array.from(document.querySelectorAll('#hcPanels .hc-panel')).map((r) => ({ name: r.querySelector('.hc-pn').value.trim(), url: r.querySelector('.hc-pu').value.trim() })).filter((p) => p.name || p.url);
+    const net = $('hcNet').value === 'custom' ? $('hcNetCustom').value.trim() : $('hcNet').value;
+    const router = $('hcRouter').value === 'custom' ? $('hcRouterCustom').value.trim() : 'auto';
+    cmsg('Saving...');
+    const r = await api.setConfig(cfgHub.id, { name: $('hcName').value, network: net, router: router, scanSeconds: Number($('hcScan').value), panels: panels });
+    if (r && r.ok) { cmsg(r.rescanning ? 'Saved. The server is scanning the network again.' : 'Saved.', true); } else cmsg((r && r.error) || 'Could not save.');
+  });
   async function load() { const r = await api.list(); list = (r && r.list) || []; if (r && r.encrypted === false) say('This computer cannot encrypt saved codes, so they are kept only until Dashboard Hub closes.'); draw(); }
   openBtn.addEventListener('click', async () => { say(''); resetForm(); await load(); if (!dlg.open) dlg.showModal(); });
   $('hubsClose').addEventListener('click', () => dlg.close());

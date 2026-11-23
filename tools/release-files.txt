@@ -161,6 +161,7 @@ test/window-test.js
 tools-ui.js
 tools/check-release.js
 tools/finish-build.js
+tools/make-docker-bundle.js
 tools/make-update.js
 tools/release-files.txt
 tools/removed-files.txt

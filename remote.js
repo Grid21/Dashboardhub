@@ -229,11 +229,18 @@ function createWebAccess(o) {
     if (am && req.method === 'POST' && o.actions && Object.prototype.hasOwnProperty.call(o.actions, am[1])) {
       if (!authed(req)) return json(res, 401, { error: 'Sign in first', login: true });
       if (req.headers['x-dashboard-hub'] !== '1') return json(res, 403, { error: 'Not allowed' });      // a web page on another site cannot send this header
-      Promise.resolve().then(() => o.actions[am[1]]()).then((r) => json(res, 200, Object.assign({ ok: true }, r && typeof r === 'object' ? r : {})), (e) => json(res, 500, { ok: false, error: String(e && e.message || 'Failed').slice(0, 200) }));
+      let abody = '', aover = false;
+      req.on('data', (c) => { abody += c; if (abody.length > 65536) { aover = true; req.destroy(); } });
+      req.on('end', () => {
+        if (aover) return;
+        let args = {}; try { args = abody ? JSON.parse(abody) : {}; } catch (e) { return json(res, 400, { ok: false, error: 'Bad request' }); }
+        Promise.resolve().then(() => o.actions[am[1]](args && typeof args === 'object' ? args : {})).then((r) => json(res, 200, Object.assign({ ok: true }, r && typeof r === 'object' ? r : {})), (e) => json(res, 500, { ok: false, error: String(e && e.message || 'Failed').slice(0, 200) }));
+      });
       return;
     }
     if (req.method !== 'GET') return json(res, 405, { error: 'Read only' });
     if (!authed(req)) return json(res, 401, { error: 'Sign in first', login: true });
+    if (p === '/api/config') { let c = null; try { c = o.getConfig ? o.getConfig() : null; } catch (e) { c = null; } return c ? json(res, 200, Object.assign({ ok: true }, c)) : json(res, 404, { error: 'Not found' }); }
     if (p === '/api/info') { let i = null; try { i = o.getInfo ? o.getInfo() : null; } catch (e) { i = null; } return json(res, 200, Object.assign({ ok: true, mode: 'desktop', version: o.version || '' }, i || {})); }
     if (p === '/api/state') {
       let s = null; try { s = o.getSnapshot(); } catch (e) { s = null; }
@@ -375,6 +382,22 @@ function createRemoteHubs(o) {
       if (r.code === 200 && r.json) return { ok: true, started: r.json.started !== false, message: r.json.message || '' };
       if (r.code === 404 || r.code === 405) return { ok: false, error: 'That server cannot be told to scan. Is it the Docker version?' };
       return { ok: false, error: why(r) };
+    },
+    async getConfig(id) {
+      const h = find(id); if (!h) return { ok: false, error: 'Not found' };
+      const r = await authed(h, 'GET', '/api/config');
+      if (!r.ok) return r.error && /unexpected reply \(404\)/.test(r.error) ? { ok: false, error: 'That server has no settings to edit. Is it the Docker version (1.28 or newer)?' } : r;
+      return { ok: true, config: r.json };
+    },
+    async setConfig(id, cfg) {
+      const h = find(id); if (!h) return { ok: false, error: 'Not found' };
+      const doIt = async (cookie) => request(h, 'POST', '/api/action/config', cfg && typeof cfg === 'object' ? cfg : {}, cookie, { 'X-Dashboard-Hub': '1' });
+      let s = await session(h, false); if (!s.ok) return s;
+      let r = await doIt(s.cookie);
+      if (r.code === 401) { s = await session(h, true); if (!s.ok) return s; r = await doIt(s.cookie); }
+      if (r.code === 200 && r.json) return r.json;
+      if (r.code === 404 || r.code === 405) return { ok: false, error: 'That server cannot change its settings. Update it to the newest Docker version first.' };
+      return r.json && r.json.error ? { ok: false, error: r.json.error } : { ok: false, error: why(r) };
     },
     async openInfo(id) {
       const h = find(id); if (!h) return { ok: false, error: 'Not found' };

@@ -16,18 +16,25 @@ services:
     read_only: true
     tmpfs: [/tmp]
     environment:
-      # Your access code for the web page and for Dashboard Hub Desktop (6 or more characters). Change this!
-      DASHBOARD_HUB_CODE: "change-me-please"
+      # These are the STARTING settings, used the first time the server runs. After that, change them in
+      # Dashboard Hub Desktop (Settings > Remote servers > Settings), which keeps them in the data volume.
+      # You can also set them in a file called .env next to this one, or in Portainer's "Environment variables".
+      #
+      # Your access code for the web page and for Dashboard Hub Desktop (6 or more characters). CHANGE THIS!
+      # (The access code is the one setting that always comes from here when it is set.)
+      DASHBOARD_HUB_CODE: "${DASHBOARD_HUB_CODE:-change-me-please}"
       # The name shown in Dashboard Hub Desktop and on the page
-      DASHBOARD_HUB_NAME: "Home network (Docker)"
+      DASHBOARD_HUB_NAME: "${DASHBOARD_HUB_NAME:-Home network (Docker)}"
       # "auto" finds your network by itself. Or write it like 192.168.1.0/24
-      DASHBOARD_HUB_NETWORK: "auto"
+      DASHBOARD_HUB_NETWORK: "${DASHBOARD_HUB_NETWORK:-auto}"
+      # "auto" finds your router by itself. Or write its address, like 192.168.0.1
+      DASHBOARD_HUB_ROUTER: "${DASHBOARD_HUB_ROUTER:-auto}"
       # How often to scan, in seconds (60 or more)
-      DASHBOARD_HUB_SCAN_SECONDS: "300"
-      # Your panels, written Name=address and separated by |   (the browser page will be able to edit these in a later version)
-      DASHBOARD_HUB_PANELS: "Router=http://192.168.1.1|Example=https://example.org"
+      DASHBOARD_HUB_SCAN_SECONDS: "${DASHBOARD_HUB_SCAN_SECONDS:-300}"
       # The port of the web page (host networking: this is the real port on the computer)
-      DASHBOARD_HUB_PORT: "8787"
+      DASHBOARD_HUB_PORT: "${DASHBOARD_HUB_PORT:-8787}"
+      # Your panels, written Name=address and separated by |   (easier: add them in Dashboard Hub Desktop)
+      DASHBOARD_HUB_PANELS: "${DASHBOARD_HUB_PANELS:-}"
     volumes:
       - dashboard-hub-data:/data
 

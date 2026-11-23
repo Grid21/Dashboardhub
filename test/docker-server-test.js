@@ -56,6 +56,27 @@ async function waitFor(fn, ms) { const end = Date.now() + ms; while (Date.now() 
   check('asking again while it runs says so', r.code === 200 && (r.json.started === false || r.json.started === true));
   check('the second scan finishes', await waitFor(() => (s.log.match(/Scan finished/g) || []).length >= 2, 40000), s.log);
   check('nothing else can be done to it from the page', (await req(port, 'POST', '/api/action/reboot', {}, cookie, { 'X-Dashboard-Hub': '1' })).code === 405 && (await req(port, 'POST', '/api/state', {}, cookie)).code === 405);
+  // ----- settings that Desktop can read and change -----
+  check('settings need a sign-in', (await req(port, 'GET', '/api/config')).code === 401);
+  r = await req(port, 'GET', '/api/config', null, cookie);
+  check('the settings show what is set, what was found, and the network cards', r.code === 200 && r.json.config.name === 'Test box' && r.json.config.scanSeconds === 60 && r.json.config.panels.length === 2 && Array.isArray(r.json.interfaces) && typeof r.json.detected.network === 'string' && r.json.detected.router === '192.0.2.1' && r.json.port === port, JSON.stringify(r.json).slice(0, 300));
+  check('the page knows when it was last scanned (no "NaN days ago")', Number.isFinite(sn.at) && sn.at > 1.7e12);
+  const H = { 'X-Dashboard-Hub': '1' };
+  check('changing settings needs the safety header', (await req(port, 'POST', '/api/action/config', { name: 'x' }, cookie)).code === 403);
+  for (const [label, bad] of [['a scan time under a minute', { scanSeconds: 5 }], ['a public network', { network: '8.8.8.0/24' }], ['a network that is not one', { network: 'hello' }], ['a router address that is not one', { router: 'abc' }], ['a public router address', { router: '8.8.8.8' }], ['a panel without http', { panels: [{ name: 'x', url: 'javascript:alert(1)' }] }], ['an empty name', { name: '  ' }]]) {
+    const x = await req(port, 'POST', '/api/action/config', bad, cookie, H);
+    check('it refuses ' + label, x.code === 200 && x.json.ok === false && typeof x.json.error === 'string' && x.json.error.length > 5, JSON.stringify(x.json));
+  }
+  r = await req(port, 'POST', '/api/action/config', { name: 'Renamed box', scanSeconds: 120, router: '10.9.9.1', panels: [{ name: 'One', url: 'http://10.0.0.9' }, { name: '', url: 'https://example.net/a' }] }, cookie, H);
+  check('good settings are accepted', r.json.ok === true && r.json.config.name === 'Renamed box' && r.json.config.panels.length === 2 && r.json.config.panels[1].name === 'https://example.net/a', JSON.stringify(r.json));
+  r = await req(port, 'GET', '/api/state', null, cookie);
+  check('the page shows the new name and panels at once', r.json.snapshot.profile.name === 'Renamed box' && r.json.snapshot.panels[0].name === 'One');
+  r = await req(port, 'GET', '/api/info', null, cookie);
+  check('info shows the new scan time', r.json.scanSeconds === 120 && r.json.name === 'Renamed box');
+  check('the settings file on disk has them', JSON.parse(fs.readFileSync(path.join(data, 'config.json'), 'utf8')).name === 'Renamed box');
+  check('only the settings that were sent change', (await req(port, 'GET', '/api/config', null, cookie)).json.config.scanSeconds === 120 && (await req(port, 'POST', '/api/action/config', { name: 'Renamed box' }, cookie, H)).json.config.panels.length === 2);
+  r = await req(port, 'POST', '/api/action/config', { router: 'auto' }, cookie, H);
+  check('the router can go back to automatic', r.json.ok === true && r.json.config.router === 'auto');
   await sleep(3500);
   check('the device list and history are saved in the data folder', fs.existsSync(path.join(data, 'state.json')) && fs.existsSync(path.join(data, 'history.json')) && fs.existsSync(path.join(data, 'web-access.json')));
   check('the access code is not in the data folder as plain text', !fs.readFileSync(path.join(data, 'web-access.json'), 'utf8').includes('docker test code'));
@@ -68,6 +89,7 @@ async function waitFor(fn, ms) { const end = Date.now() + ms; while (Date.now() 
   r = await req(port, 'POST', '/api/login', { code: 'docker test code' }); const c2 = r.headers['set-cookie'][0].split(';')[0];
   r = await req(port, 'GET', '/api/state', null, c2);
   check('the devices are the same after a restart', r.json.snapshot.devices.length === Object.keys(before.devices).length);
+  check('settings changed in Desktop win over the starting settings after a restart', r.json.snapshot.profile.name === 'Renamed box' && r.json.snapshot.panels[0].name === 'One');
   check('the second run finishes a scan without calling everything new', await waitFor(() => /Scan finished/.test(s.log), 40000) && !/ new\b/.test(s.log.split('Scan finished').pop().split('\n')[0] || ''), s.log);
   s.child.kill('SIGTERM'); await s.exited;
   // no code given: it makes one and shows it once
@@ -84,7 +106,7 @@ async function waitFor(fn, ms) { const end = Date.now() + ms; while (Date.now() 
   s.child.kill('SIGTERM'); await s.exited;
   s = start({ DASHBOARD_HUB_DATA: data2, DASHBOARD_HUB_CODE: 'abc', DASHBOARD_HUB_PORT: String(port2) });
   check('a too-short code in the settings stops it with a clear message', (await s.exited) === 2 && /DASHBOARD_HUB_CODE/.test(s.log));
-  s = start({ DASHBOARD_HUB_DATA: data2, DASHBOARD_HUB_NETWORK: '8.8.8.0/24', DASHBOARD_HUB_PORT: String(port2), DASHBOARD_HUB_CODE: 'a good code' });
+  s = start({ DASHBOARD_HUB_DATA: fs.mkdtempSync(path.join(os.tmpdir(), 'dk3-')), DASHBOARD_HUB_NETWORK: '8.8.8.0/24', DASHBOARD_HUB_PORT: String(port2), DASHBOARD_HUB_CODE: 'a good code' });
   check('a public network is refused (only home networks are scanned)', await waitFor(() => /only private/.test(s.log), 15000), s.log);
   s.child.kill('SIGTERM'); await s.exited;
   // the files the image needs exist

@@ -901,3 +901,10 @@ body.view-map .car-arrow, body.view-map .car-info { display: none !important; }
 .hub-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
 .hint.ok { color: var(--f-4ade80, #4ade80); }
 .hint.bad { color: var(--f-f87171, #f87171); }
+
+.field-label { min-width: 9em; }
+#hubCfgDialog .pxe-row input[type=text], #hubCfgDialog .pxe-row select { flex: 1; min-width: 0; }
+#hubCfgDialog h4 { margin: 12px 0 4px; }
+.hc-panel input.hc-pn { flex: 0 0 28%; }
+.hc-panel { flex-wrap: wrap; }
+.hc-panel input.hc-pu { flex: 1 1 12em; }

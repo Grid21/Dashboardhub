@@ -149,8 +149,8 @@ ipcMain.handle('notif:heartbeat', (event, profileId, name, gapMs) => {
   else if (r === 'extended' && Date.now() - notifBeatSaved > 5 * 60000) { notifBeatSaved = Date.now(); notifSave(); }   // a growing period is saved every 5 minutes (and when the app closes)
   return { ok: true };
 });
-ipcMain.handle('notif:uptime', (event, profileId, rangeMs, minDropMs) => {
-  notifSender(event);
+// the Uptime and history numbers; used by the Notifications Center and by the phone and browser page
+function uptimeFor(profileId, rangeMs, minDropMs) {
   const pid = notifLib.profileId(String(profileId || ''));
   const store = notifData();
   if (!pid || !store.profiles[pid]) return { ok: true, empty: true, now: Date.now() };
@@ -158,6 +158,10 @@ ipcMain.handle('notif:uptime', (event, profileId, rangeMs, minDropMs) => {
   const range = Math.min(366 * 86400000, Math.max(3600000, Number(rangeMs) || 86400000));
   const tl = notifLib.hideShort(notifLib.timeline(store.profiles[pid], now - range, now, now), Math.min(3600000, Math.max(0, Number(minDropMs) || 0)));
   return { ok: true, now: now, from: tl.from, to: tl.to, since: tl.since, watchedPct: tl.watchedPct, summary: notifLib.summary(tl, now), lines: notifLib.story(tl, now), linesAll: notifLib.story(tl, now, undefined, true), devices: tl.devices };
+}
+ipcMain.handle('notif:uptime', (event, profileId, rangeMs, minDropMs) => {
+  notifSender(event);
+  return uptimeFor(profileId, rangeMs, minDropMs);
 });
 ipcMain.handle('notif:clear', async (event, profileId) => {
   notifSender(event);
@@ -556,6 +560,70 @@ ipcMain.handle('pxe:choice', (event, mac, what) => { checkSender(event); return 
 ipcMain.handle('pxe:check', async (event, ip) => { checkSender(event); try { return await pxeMod.check(String(ip || '').slice(0, 40)); } catch (e) { return { ok: false, error: 'The check could not run.' }; } });
 ipcMain.handle('pxe:removeIso', (event, id) => { checkSender(event); return pxeMod.removeIso(String(id || '')); });
 ipcMain.handle('pxe:renameIso', (event, id, name) => { checkSender(event); return pxeMod.renameIso(String(id || ''), String(name || '').slice(0, 80)); });
+// ---------- Phone and browser access (a small read-only web page; off until the owner turns it on) ----------
+let webSnap = null, webAccess = null;
+function webMod() {
+  if (!webAccess) {
+    webAccess = remoteLib.createWebAccess({
+      file: path.join(app.getPath('userData'), 'web-access.json'), version: app.getVersion(),
+      getSnapshot: () => webSnap,
+      getUptime: (rangeMs, minMs) => (webSnap && webSnap.profile.id ? uptimeFor(webSnap.profile.id, rangeMs, minMs) : { ok: true, empty: true, now: Date.now() })
+    });
+  }
+  return webAccess;
+}
+ipcMain.handle('web:status', (event) => { checkSender(event); return Object.assign({ ok: true }, webMod().status()); });
+ipcMain.handle('web:setOn', async (event, on) => { checkSender(event); return Object.assign({ ok: true }, await webMod().setOn(on === true)); });
+ipcMain.handle('web:setPort', async (event, port) => { checkSender(event); return webMod().setPort(port); });
+ipcMain.handle('web:setCode', (event, code) => { checkSender(event); return webMod().setCode(code); });
+ipcMain.handle('web:signOut', (event) => { checkSender(event); return Object.assign({ ok: true }, webMod().signOutAll()); });
+ipcMain.handle('web:push', (event, snap) => { checkSender(event); webSnap = remoteLib.webCleanSnapshot(snap); return { ok: true }; });
+app.on('before-quit', () => { try { if (webAccess) webAccess.stop(); } catch (e) { /* closing anyway */ } });
+// ---------- Remote servers (Dashboard Hub Docker servers that this program checks on and manages) ----------
+let hubsMemory = null, hubsMod = null;
+const hubsFile = () => path.join(app.getPath('userData'), 'remote-servers.dat');
+function hubsMake() {
+  if (hubsMod) return hubsMod;
+  hubsMod = remoteLib.createRemoteHubs({
+    read: () => {
+      if (hubsMemory) return hubsMemory;
+      try { const raw = JSON.parse(fs.readFileSync(hubsFile(), 'utf8')); if (raw && typeof raw.enc === 'string' && notesEncryptionOk()) return JSON.parse(safeStorage.decryptString(Buffer.from(raw.enc, 'base64'))); } catch (e) { /* none saved yet */ }
+      return [];
+    },
+    write: (list) => {
+      if (!notesEncryptionOk()) { hubsMemory = list; return false; }       // no real encryption here: codes are kept only until the program closes
+      hubsMemory = null;
+      fs.mkdirSync(path.dirname(hubsFile()), { recursive: true });
+      const tmp = hubsFile() + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify({ enc: safeStorage.encryptString(JSON.stringify(list)).toString('base64') }), { mode: 0o600 });
+      fs.renameSync(tmp, hubsFile());
+      return true;
+    }
+  });
+  return hubsMod;
+}
+ipcMain.handle('hubs:list', (event) => { checkSender(event); return { ok: true, list: hubsMake().list(), encrypted: notesEncryptionOk() }; });
+ipcMain.handle('hubs:save', (event, x) => { checkSender(event); return hubsMake().save(x && typeof x === 'object' ? x : {}); });
+ipcMain.handle('hubs:remove', (event, id) => { checkSender(event); return hubsMake().remove(String(id || '')); });
+ipcMain.handle('hubs:status', (event, id) => { checkSender(event); return hubsMake().status(String(id || '')); });
+ipcMain.handle('hubs:scan', (event, id) => { checkSender(event); return hubsMake().scan(String(id || '')); });
+ipcMain.handle('hubs:open', async (event, id) => {
+  checkSender(event);
+  const r = await hubsMake().openInfo(String(id || ''));
+  if (!r.ok) return r;
+  try {
+    const part = 'rh-' + String(id).replace(/[^a-z0-9]/gi, '').slice(0, 20);
+    const ses = require('electron').session.fromPartition(part);
+    await ses.cookies.set({ url: r.url, name: 'dh_sid', value: r.cookie, httpOnly: true, sameSite: 'strict', expirationDate: Math.floor(Date.now() / 1000) + 11 * 3600 });
+    const origin = r.url;
+    const w = new BrowserWindow({ width: 1100, height: 780, title: r.name + ' (Dashboard Hub server)', backgroundColor: winBg(), webPreferences: { partition: part, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    w.setMenuBarVisibility(false);
+    w.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+    w.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(origin + '/') && url !== origin) { e.preventDefault(); if (/^https?:\/\//i.test(url)) shell.openExternal(url); } });
+    await w.loadURL(origin + '/');
+    return { ok: true };
+  } catch (e) { return { ok: false, error: 'The window could not be opened.' }; }
+});
 app.on('before-quit', () => { try { pxeMod.stop(true); } catch (e) { /* closing anyway */ } notifWriteNow(); });
 
 // ---------- "Update file tools": unpack (decompile) and pack (compile) .hubupdate files ----------
@@ -1495,6 +1563,7 @@ app.whenReady().then(() => {
   setTimeout(() => { try { versionArchive.archive(runningVersionNow()); } catch (e) { /* safety net only */ } }, 4000);
   settings = readSettings();
   applyTheme(settings.theme);
+  try { webMod().autoStart().catch(() => {}); } catch (e) { /* the page stays off */ }
   startWithLock((locked) => {
     if (locked) { app.on('second-instance', showWindow); ensureTray(); }
     pmExt.load().catch(() => {}).then(() => createWindow());   // the password manager extension (if any) is ready before the panels load

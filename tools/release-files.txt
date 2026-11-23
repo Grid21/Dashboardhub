@@ -30,6 +30,11 @@ connections-ui.js
 connectors.js
 discovery.js
 dns-probe.js
+docker/Dockerfile
+docker/Dockerfile.dockerignore
+docker/README-DOCKER.md
+docker/docker-compose.yml
+docker/server.js
 hubupdate-tools.js
 index.html
 main.js
@@ -66,6 +71,7 @@ test/corrupt-data-test.js
 test/dialog-fit-test.js
 test/dialog-shot.png
 test/dns-test.js
+test/docker-server-test.js
 test/ensure-node-test.sh
 test/filter-test.js
 test/find-test.js
@@ -115,6 +121,7 @@ test/pxe-ui-test.js
 test/pxe-win-test.js
 test/refresh-test.js
 test/release-check-test.js
+test/remote-servers-ui-test.js
 test/remote-test.js
 test/remote-ui-test.js
 test/restart-test.js
@@ -146,6 +153,9 @@ test/uptime-ui-test.js
 test/versions-test.js
 test/versions-ui-test.js
 test/wake-test.js
+test/web-access-test.js
+test/web-access-ui-test.js
+test/web-page-test.js
 test/win-harness.js
 test/window-test.js
 tools-ui.js

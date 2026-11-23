@@ -3257,6 +3257,13 @@
       const copy = JSON.parse(JSON.stringify(net));
       return copy;
     },
+    // a plain copy for the phone and browser page (see Settings, Phone and browser access)
+    webData: function () {
+      return {
+        devices: Object.keys(net.devices).map((k) => { const d = net.devices[k]; return { key: d.key, name: d.isRouter && !d.label ? 'Router' : title(d), ip: d.ip, mac: d.mac || '', vendor: d.vendor || '', os: d.os && d.os.id !== 'unknown' ? d.os.label : '', group: d.group || '', online: d.online !== false, isRouter: !!d.isRouter, self: !!d.self, x: d.pos ? d.pos.x : 0, z: d.pos ? d.pos.z : 0, lastSeen: d.lastSeen, onlineSince: d.onlineSince, ports: d.ports }; }),
+        links: net.links.map((l) => ({ a: l.a, b: l.b }))
+      };
+    },
     count: function () { return devices().filter((d) => !d.isRouter).length; },
     // data has already been cleaned by the app's background process
     importData: function (data, replace) {

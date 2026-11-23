@@ -82,6 +82,24 @@ contextBridge.exposeInMainWorld('remoteViewApi', {
   open: () => ipcRenderer.invoke('remote:open', '')
 });
 
+contextBridge.exposeInMainWorld('hubsApi', {
+  list: () => ipcRenderer.invoke('hubs:list'),
+  save: (x) => ipcRenderer.invoke('hubs:save', x),
+  remove: (id) => ipcRenderer.invoke('hubs:remove', String(id || '')),
+  status: (id) => ipcRenderer.invoke('hubs:status', String(id || '')),
+  scan: (id) => ipcRenderer.invoke('hubs:scan', String(id || '')),
+  open: (id) => ipcRenderer.invoke('hubs:open', String(id || ''))
+});
+
+contextBridge.exposeInMainWorld('webApi', {
+  status: () => ipcRenderer.invoke('web:status'),
+  setOn: (on) => ipcRenderer.invoke('web:setOn', on === true),
+  setPort: (port) => ipcRenderer.invoke('web:setPort', Number(port)),
+  setCode: (code) => ipcRenderer.invoke('web:setCode', String(code || '')),
+  signOut: () => ipcRenderer.invoke('web:signOut'),
+  push: (snap) => ipcRenderer.invoke('web:push', snap)
+});
+
 contextBridge.exposeInMainWorld('pmApi', {
   status: () => ipcRenderer.invoke('pm:status'),
   pick: (key, kind) => ipcRenderer.invoke('pm:pick', String(key || ''), kind === 'folder' ? 'folder' : 'file'),

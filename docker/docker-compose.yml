@@ -1,0 +1,35 @@
+# Dashboard Hub for Docker.   Start it with:   docker compose up -d --build
+# Then open http://<this computer's address>:8787/ in a browser, and add it to Dashboard Hub Desktop (Settings > Remote servers).
+services:
+  dashboard-hub:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: dashboard-hub:local
+    container_name: dashboard-hub
+    restart: unless-stopped
+    # Host networking lets it see the devices on your network (ARP, ping). This works on Linux, NAS and Raspberry Pi only.
+    network_mode: host
+    cap_drop: [ALL]
+    cap_add: [NET_RAW]            # lets "ping" work
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      # Your access code for the web page and for Dashboard Hub Desktop (6 or more characters). Change this!
+      DASHBOARD_HUB_CODE: "change-me-please"
+      # The name shown in Dashboard Hub Desktop and on the page
+      DASHBOARD_HUB_NAME: "Home network (Docker)"
+      # "auto" finds your network by itself. Or write it like 192.168.1.0/24
+      DASHBOARD_HUB_NETWORK: "auto"
+      # How often to scan, in seconds (60 or more)
+      DASHBOARD_HUB_SCAN_SECONDS: "300"
+      # Your panels, written Name=address and separated by |   (the browser page will be able to edit these in a later version)
+      DASHBOARD_HUB_PANELS: "Router=http://192.168.1.1|Example=https://example.org"
+      # The port of the web page (host networking: this is the real port on the computer)
+      DASHBOARD_HUB_PORT: "8787"
+    volumes:
+      - dashboard-hub-data:/data
+
+volumes:
+  dashboard-hub-data:

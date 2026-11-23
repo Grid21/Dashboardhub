@@ -20,9 +20,25 @@ function loadState() {
 
 function saveState() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+  try { webPush(); } catch (e) { /* not ready yet */ }
 }
 
 let state = loadState();
+
+// ---------- Phone and browser access: a plain copy of the panels and the map is shared with the small web page (only used when it is turned on) ----------
+let webPushTimer = null;
+function webPushNow() {
+  webPushTimer = null;
+  if (!window.webApi || !window.webApi.push) return;
+  try {
+    const prof = (state.profiles || []).find((p) => p.id === state.activeProfileId) || null;
+    const map = window.hubNetmap && window.hubNetmap.webData ? window.hubNetmap.webData() : { devices: [], links: [] };
+    window.webApi.push({ profile: prof ? { id: prof.id, name: prof.name } : { id: '', name: '' }, panels: state.panels.map((p) => ({ name: p.name, url: p.url })), devices: map.devices, links: map.links }).catch(() => {});
+  } catch (e) { /* the web page is a convenience */ }
+}
+function webPush() { if (!webPushTimer) webPushTimer = setTimeout(webPushNow, 1500); }
+setInterval(webPush, 30000);
+window.addEventListener('load', () => { setTimeout(() => { webPush(); try { if (window.hubNetmap && window.hubNetmap.onScanDone) window.hubNetmap.onScanDone(webPush); } catch (e) { /* ignore */ } }, 2500); });
 let editingId = null;
 let noteButtons = {};          // panel id -> its Notes button
 let notesIds = new Set();      // ids of panels that have a saved note

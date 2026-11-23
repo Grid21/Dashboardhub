@@ -2,6 +2,20 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.27.0
+- **New: Dashboard Hub for Docker, stage 1** (the `docker` folder in the source zip; guide in `docker/README-DOCKER.md`). A small always-on version with no window for a Linux box, NAS or Raspberry Pi: it scans the network on a timer (every 5 minutes by default), keeps the device list and Uptime and history in a saved folder, and serves the same view-only page as Phone and browser access. Start it with `docker compose up -d --build`. Settings (access code, name, network, scan interval, port, panels) are in the compose file.
+- **New: Remote servers** (Settings > Remote servers...). Dashboard Hub Desktop can now look after Dashboard Hub servers: add one with its address and access code, then **Check** it (devices online and offline, last scan, version), tell it to **Scan now**, or **Open** its map, devices and uptime in a window. Access codes are stored encrypted where the computer allows it and are never shown again.
+- The server page gained a few safe extras: an unauthenticated health check for Docker, an info report and a "scan now" action that needs a sign-in and a safety header. Dashboard Hub Desktop's own phone page stays strictly view only.
+- Not yet: editing panels, device names and scan settings from the browser or from Desktop (next stages). The Docker image was not built here (no Docker engine on the test machine); the server program inside it was tested on a simulated network.
+- Tested: 46 new checks (the server program, Desktop's Remote servers window against it, light and dark pages) plus the earlier tests.
+
+## 1.26.0
+- **New: Phone and browser access.** Settings now has **Phone and browser access...**. It is **off** until you turn it on and it needs an access code you choose (6 or more characters; stored only as a scrambled hash). When on, Dashboard Hub serves a small page at an address like `http://192.168.1.20:8787/` (the window shows the exact addresses) that works in mobile Chrome or on another computer's browser, at home or over your VPN.
+- The page is **view only**: nothing on it can change anything. Tabs: **Panels** (your panels as buttons that open them), **Map** (the same layout as on the computer, seen from above: drag to move, pinch or wheel to zoom, tap a device for details), **Devices** (search, Online/Offline filter, details) and **Uptime** (24 hours, 7 or 30 days, the plain-words sentences and a bar per device). It follows the phone's light or dark setting and refreshes itself every 15 seconds.
+- Safety: five wrong codes pause sign-in for 10 minutes, sign-in lasts 12 hours, "Sign everyone out" and changing the code end all sessions, the port can be changed, and it stops when you turn it off or close Dashboard Hub. The page is plain HTTP (not encrypted by itself), so use it on your home network or through your VPN such as WireGuard and never open the port to the internet. Windows may ask once to allow Dashboard Hub through the firewall (private networks).
+- It only works while Dashboard Hub is open and scanning on the computer. The 3D map is not on the phone page; panels open directly in the phone's browser, so the phone must be able to reach each panel's address.
+- Tested: 83 checks (the sign-in and limits, read-only rules, the page in a phone-sized browser in light and dark, the Settings window, restart). Tested on this computer only, not yet on a real phone over a real VPN.
+
 ## 1.25.1
 - Carousel now sets Panel height to Full screen automatically (details under 1.25.0 below).
 

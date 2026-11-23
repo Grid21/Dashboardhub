@@ -1,0 +1,9 @@
+node_modules
+test
+tools
+build
+update-files
+*.hubupdate
+*.zip
+*.md
+.git

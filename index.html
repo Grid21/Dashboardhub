@@ -49,6 +49,8 @@
           <button type="button" id="profileRemove" role="menuitem">Remove profile</button>
           <div class="profile-menu-sep"></div>
           <button type="button" id="bmcMenuBtn" role="menuitem" title="Status and power control for servers with iLO, iDRAC or another BMC">Server management (iLO / iDRAC)...</button>
+          <button type="button" id="hubsMenuBtn" role="menuitem" title="Check on and manage Dashboard Hub servers, such as the Docker version">Remote servers...</button>
+          <button type="button" id="webMenuBtn" role="menuitem" title="Look at your panels, map and uptime from a phone or another computer">Phone and browser access...</button>
           <button type="button" id="pmMenuBtn" role="menuitem" title="Bring your own password manager into the panels (optional)">Password manager for panels...</button>
           <button type="button" id="pxeMenuBtn" role="menuitem" title="Boot another computer from this one over the network (PXE): live and rescue discs, no USB stick needed">Network boot (PXE)...</button>
           <button type="button" id="toolsMenuBtn" role="menuitem" title="Unpack a .hubupdate file into its source files, or pack a folder back into a .hubupdate file">Update file tools (unpack / pack)...</button>
@@ -389,6 +391,38 @@
     <div class="dialog-buttons"><button type="button" id="aboutClose" class="primary">Close</button></div>
   </dialog>
 
+  <dialog id="hubsDialog">
+    <h3>Remote servers</h3>
+    <p class="hint">Dashboard Hub servers (the Docker version running on a Linux box, NAS or Raspberry Pi) that this program can check on and manage. Add one with its address and access code. Use your home network or your VPN (for example WireGuard).</p>
+    <div id="hubsList"></div>
+    <details id="hubsAdd" open>
+      <summary id="hubsAddTitle">Add a server</summary>
+      <div class="pxe-row"><input type="text" id="hubName" placeholder="Name (for example: Home server)" maxlength="60"></div>
+      <div class="pxe-row"><input type="text" id="hubUrl" placeholder="Address, like http://192.168.1.50:8787" maxlength="200"></div>
+      <div class="pxe-row"><input type="password" id="hubCode" placeholder="Access code of that server" autocomplete="new-password" maxlength="64">
+        <button type="button" id="hubSave">Save</button> <button type="button" id="hubCancel" hidden>Cancel</button></div>
+    </details>
+    <p class="hint" id="hubsMsg" role="status"></p>
+    <div class="dialog-buttons"><span class="spacer"></span><button type="button" id="hubsClose">Close</button></div>
+  </dialog>
+  <dialog id="webDialog">
+    <h3>Phone and browser access</h3>
+    <p class="hint">Lets a phone, tablet or another computer open a small page from <b>this</b> Dashboard Hub and look at your <b>panels, network map, devices and Uptime and history</b>. It is <b>view only</b>: nothing on it can change anything. It is <b>off</b> until you turn it on, it needs an access code, and it only works while Dashboard Hub is open on this computer.</p>
+    <p class="hint">The page is not encrypted by itself. Use it on your home network or through your VPN (for example WireGuard), and do not open this port to the internet. Windows may ask once to allow Dashboard Hub through the firewall: allow it for private networks.</p>
+    <div class="pxe-row">
+      <input type="password" id="webCode" placeholder="Access code (6 or more characters)" autocomplete="new-password" maxlength="64">
+      <button type="button" id="webSetCode">Set access code</button>
+    </div>
+    <div class="pxe-row">
+      <label class="check-inline"><input type="checkbox" id="webOn" disabled> Turn on phone and browser access</label>
+      <label class="check-inline">Port <input type="number" id="webPort" min="1024" max="65535" value="8787" style="width:6em"></label>
+      <button type="button" id="webSetPort">Save port</button>
+    </div>
+    <p class="hint" id="webState">Off.</p>
+    <div id="webUrls" class="hint"></div>
+    <p class="hint" id="webMsg" role="status"></p>
+    <div class="dialog-buttons"><button type="button" id="webSignOut">Sign everyone out</button><span class="spacer"></span><button type="button" id="webClose">Close</button></div>
+  </dialog>
   <dialog id="pmDialog">
     <h3>Password manager for panels</h3>
     <p class="hint">Want to bring your password manager into Dashboard Hub? Pick yours below, then choose the extension file or folder you got from its own website. It is loaded into the <b>panels only</b>, so a panel's login page can be filled in the way you do in your browser. Dashboard Hub never sees, stores or sends your passwords: the extension does all of that itself. This is <b>off</b> until you do it, and Dashboard Hub is not a browser: there is no extension store, only this one slot.</p>

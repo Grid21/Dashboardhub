@@ -96,3 +96,104 @@
   $('pmPopup').addEventListener('click', async () => { const r = await api.popup(); if (!r || !r.ok) say((r && r.error) || 'Could not open it.'); });
   $('pmRemove').addEventListener('click', async () => { const r = await api.remove(); say(r && r.ok ? 'Removed.' : 'Could not remove it.', !!(r && r.ok)); refresh(); });
 })();
+
+// The "Phone and browser access" window: a small read-only web page for phones and other computers (off until turned on).
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const api = window.webApi;
+  const dlg = $('webDialog'), open = $('webMenuBtn');
+  if (!api || !dlg || !open) return;
+  function say(t, good) { const m = $('webMsg'); m.textContent = t || ''; m.classList.toggle('ok', !!good); }
+  async function refresh() {
+    let st; try { st = await api.status(); } catch (e) { return; }
+    if (!st || !st.ok) return;
+    $('webOn').disabled = !st.hasCode; $('webOn').checked = !!st.on;
+    if (document.activeElement !== $('webPort')) $('webPort').value = st.port;
+    $('webState').textContent = st.on ? 'On. ' + (st.signedIn ? st.signedIn + ' browser(s) signed in.' : 'Nobody is signed in.') : (st.hasCode ? 'Off.' : 'Off. Set an access code first.');
+    const box = $('webUrls'); box.textContent = '';
+    if (st.on) {
+      box.appendChild(document.createTextNode('Open one of these in the browser on your phone or other computer:'));
+      (st.urls || []).forEach((u) => { const d = document.createElement('div'); d.textContent = u.url + '   (' + u.name + ')'; d.style.userSelect = 'text'; box.appendChild(d); });
+      if (!(st.urls || []).length) box.appendChild(document.createTextNode(' (no network address found)'));
+    }
+    if (st.error) say(st.error);
+  }
+  open.addEventListener('click', async () => { say(''); await refresh(); if (!dlg.open) dlg.showModal(); });
+  $('webClose').addEventListener('click', () => dlg.close());
+  $('webSetCode').addEventListener('click', async () => {
+    const r = await api.setCode($('webCode').value);
+    if (r && r.ok) { $('webCode').value = ''; say('Access code saved. Anyone signed in before has been signed out.', true); } else say((r && r.error) || 'Could not save the code.');
+    refresh();
+  });
+  $('webOn').addEventListener('change', async () => {
+    const want = $('webOn').checked;
+    const r = await api.setOn(want);
+    if (want && r && !r.on) say(r.error || 'It could not start.'); else say(want ? 'Turned on.' : 'Turned off.', true);
+    refresh();
+  });
+  $('webSetPort').addEventListener('click', async () => {
+    const r = await api.setPort($('webPort').value);
+    say(r && r.ok ? (r.error || 'Port saved.') : ((r && r.error) || 'Could not save the port.'), !!(r && r.ok && !r.error));
+    refresh();
+  });
+  $('webSignOut').addEventListener('click', async () => { await api.signOut(); say('Everyone has been signed out.', true); refresh(); });
+})();
+
+// The "Remote servers" window: Dashboard Hub Docker servers that this program checks on and manages.
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const api = window.hubsApi, dlg = $('hubsDialog'), openBtn = $('hubsMenuBtn');
+  if (!api || !dlg || !openBtn) return;
+  let editing = null, list = [];
+  const say = (t, good) => { const m = $('hubsMsg'); m.textContent = t || ''; m.classList.toggle('ok', !!good); };
+  const ago = (ms) => { const s = Math.max(0, Math.round((Date.now() - ms) / 1000)); return s < 60 ? s + ' s ago' : s < 3600 ? Math.round(s / 60) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; };
+  function resetForm() { editing = null; $('hubName').value = ''; $('hubUrl').value = ''; $('hubCode').value = ''; $('hubCode').placeholder = 'Access code of that server'; $('hubsAddTitle').textContent = 'Add a server'; $('hubCancel').hidden = true; }
+  function line(box, text, cls) { const d = document.createElement('div'); d.textContent = text; if (cls) d.className = cls; box.appendChild(d); return d; }
+  function infoText(i) {
+    const parts = [];
+    parts.push(i.devices + ' devices: ' + i.online + ' online, ' + i.offline + ' offline');
+    parts.push(i.running ? 'scanning now' + (i.progress && i.progress.total ? ' (' + Math.round(100 * i.progress.done / i.progress.total) + '%)' : '') : (i.lastScanAt ? 'last scan ' + ago(i.lastScanAt) : 'no scan finished yet'));
+    if (i.network) parts.push('network ' + i.network);
+    parts.push('version ' + i.version + ', running ' + (i.uptimeSeconds >= 86400 ? Math.round(i.uptimeSeconds / 86400) + ' days' : i.uptimeSeconds >= 3600 ? Math.round(i.uptimeSeconds / 3600) + ' h' : Math.max(1, Math.round(i.uptimeSeconds / 60)) + ' min'));
+    return parts.join(' · ');
+  }
+  async function check(h, box) {
+    box.textContent = 'Checking...'; box.className = 'hint';
+    let r; try { r = await api.status(h.id); } catch (e) { r = { ok: false, error: 'Could not check.' }; }
+    box.className = 'hint ' + (r && r.ok ? 'ok' : 'bad');
+    box.textContent = r && r.ok ? (r.info.error ? 'Reachable, but: ' + r.info.error + ' · ' : 'Online · ') + infoText(r.info) : (r && r.error) || 'Could not check.';
+  }
+  function draw() {
+    const box = $('hubsList'); box.textContent = '';
+    if (!list.length) { line(box, 'No servers yet.', 'hint'); return; }
+    list.forEach((h) => {
+      const card = document.createElement('div'); card.className = 'hub-card';
+      const head = document.createElement('div'); head.className = 'hub-head';
+      const nm = document.createElement('b'); nm.textContent = h.name; head.appendChild(nm);
+      const ad = document.createElement('span'); ad.className = 'hint'; ad.textContent = '  ' + h.url; head.appendChild(ad);
+      card.appendChild(head);
+      const st = line(card, '', 'hint');
+      const row = document.createElement('div'); row.className = 'hub-row';
+      const mk = (label, fn, title) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (title) b.title = title; b.addEventListener('click', fn); row.appendChild(b); return b; };
+      mk('Check', () => check(h, st));
+      mk('Scan now', async () => { st.textContent = 'Asking for a scan...'; const r = await api.scan(h.id); st.className = 'hint ' + (r && r.ok ? 'ok' : 'bad'); st.textContent = r && r.ok ? (r.started ? 'Scan started. Press Check in a minute to see the result.' : (r.message || 'A scan is already running.')) : (r && r.error) || 'Could not start a scan.'; }, 'Ask the server to scan its network right now');
+      mk('Open', async () => { const r = await api.open(h.id); if (!r || !r.ok) { st.className = 'hint bad'; st.textContent = (r && r.error) || 'Could not open it.'; } }, 'Open the server\'s map, devices and uptime in a window');
+      mk('Edit', () => { editing = h.id; $('hubName').value = h.name; $('hubUrl').value = h.url; $('hubCode').value = ''; $('hubCode').placeholder = 'New access code (leave empty to keep it)'; $('hubsAddTitle').textContent = 'Change this server'; $('hubCancel').hidden = false; $('hubsAdd').open = true; });
+      mk('Remove', async () => { if (!confirm('Remove "' + h.name + '" from this list? The server itself is not touched.')) return; const r = await api.remove(h.id); list = r.list || []; draw(); });
+      card.appendChild(row); box.appendChild(card);
+      check(h, st);
+    });
+  }
+  async function load() { const r = await api.list(); list = (r && r.list) || []; if (r && r.encrypted === false) say('This computer cannot encrypt saved codes, so they are kept only until Dashboard Hub closes.'); draw(); }
+  openBtn.addEventListener('click', async () => { say(''); resetForm(); await load(); if (!dlg.open) dlg.showModal(); });
+  $('hubsClose').addEventListener('click', () => dlg.close());
+  $('hubCancel').addEventListener('click', resetForm);
+  $('hubSave').addEventListener('click', async () => {
+    const r = await api.save({ id: editing, name: $('hubName').value, url: $('hubUrl').value, code: $('hubCode').value });
+    if (!r || !r.ok) { say((r && r.error) || 'Could not save.'); return; }
+    say(r.kept === false ? 'Saved until Dashboard Hub closes (this computer cannot encrypt codes).' : 'Saved.', true);
+    resetForm(); list = r.list || []; draw();
+  });
+})();

@@ -896,3 +896,8 @@ body.carousel .grid { padding-left: 64px; padding-right: 64px; }
 .car-info { position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%); z-index: 60; padding: 3px 12px; border-radius: 999px; font-size: 12px; background: var(--b-1b1f27); border: 1px solid var(--l-38415a); color: var(--f-a9b1c0); box-shadow: 0 2px 8px var(--sh-mid); max-width: 60vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 .chip.car-current { background: #3b82f6; border-color: #3b82f6; color: #fff; }
 body.view-map .car-arrow, body.view-map .car-info { display: none !important; }
+
+.hub-card { border: 1px solid var(--l-2c3340, #2c3340); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+.hub-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.hint.ok { color: var(--f-4ade80, #4ade80); }
+.hint.bad { color: var(--f-f87171, #f87171); }

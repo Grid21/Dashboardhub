@@ -181,12 +181,64 @@
       mk('Scan now', async () => { st.textContent = 'Asking for a scan...'; const r = await api.scan(h.id); st.className = 'hint ' + (r && r.ok ? 'ok' : 'bad'); st.textContent = r && r.ok ? (r.started ? 'Scan started. Press Check in a minute to see the result.' : (r.message || 'A scan is already running.')) : (r && r.error) || 'Could not start a scan.'; }, 'Ask the server to scan its network right now');
       mk('Open', async () => { const r = await api.open(h.id); if (!r || !r.ok) { st.className = 'hint bad'; st.textContent = (r && r.error) || 'Could not open it.'; } }, 'Open the server\'s map, devices and uptime in a window');
       mk('Settings', () => openCfg(h), 'Change this server\'s name, network, router, scan time and panels');
+      mk('Devices', () => openDev(h), 'Give machines names and groups, ignore some, or add one by hand');
       mk('Edit', () => { editing = h.id; $('hubName').value = h.name; $('hubUrl').value = h.url; $('hubCode').value = ''; $('hubCode').placeholder = 'New access code (leave empty to keep it)'; $('hubsAddTitle').textContent = 'Change this server'; $('hubCancel').hidden = false; $('hubsAdd').open = true; });
       mk('Remove', async () => { if (!confirm('Remove "' + h.name + '" from this list? The server itself is not touched.')) return; const r = await api.remove(h.id); list = r.list || []; draw(); });
       card.appendChild(row); box.appendChild(card);
       check(h, st);
     });
   }
+  // ----- the devices of one server: names, groups, ignore, add by hand, forget -----
+  const devDlg = $('hubDevDialog');
+  let devHub = null;
+  const dmsg = (t, good) => { const m = $('hdMsg'); m.textContent = t || ''; m.className = 'hint ' + (t ? (good ? 'ok' : 'bad') : ''); };
+  function devRow(d) {
+    const row = document.createElement('div'); row.className = 'pxe-row hd-row' + (d.ignored ? ' hd-ign' : ''); row.dataset.key = d.key;
+    const dot = document.createElement('span'); dot.className = 'hd-dot ' + (d.online ? 'on' : 'off'); dot.title = d.online ? 'Online' : 'Offline';
+    const n = document.createElement('input'); n.type = 'text'; n.maxLength = 60; n.className = 'hd-n'; n.placeholder = d.shownName; n.value = d.name; n.dataset.was = d.name;
+    const g = document.createElement('input'); g.type = 'text'; g.maxLength = 30; g.className = 'hd-g'; g.placeholder = 'Group'; g.setAttribute('list', 'hdGroups'); g.value = d.group; g.dataset.was = d.group;
+    const info = document.createElement('span'); info.className = 'hint hd-info'; info.textContent = [d.ip, d.vendor, d.os, d.manual ? 'added by hand' : '', d.self ? 'this server' : ''].filter(Boolean).join('  \u00b7  ');
+    const lab = document.createElement('label'); lab.className = 'hd-ig'; const cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'hd-i'; cb.checked = d.ignored; cb.dataset.was = d.ignored ? '1' : ''; cb.disabled = d.isRouter || d.self;
+    lab.appendChild(cb); lab.appendChild(document.createTextNode(' Ignore'));
+    const parts = [dot, n, g, lab];
+    if (!d.isRouter && !d.self && (!d.online || d.manual)) { const f = document.createElement('button'); f.type = 'button'; f.textContent = 'Forget'; f.title = 'Remove it from the server\'s list (it comes back if it shows up again)'; f.addEventListener('click', async () => { if (!confirm('Remove "' + d.shownName + '" from the list?')) return; const r = await api.devices(devHub.id, { op: 'forget', key: d.key }); if (r && r.ok !== false) { row.remove(); dmsg('Removed.', true); } else dmsg((r && r.error) || 'Could not remove it.'); }); parts.push(f); }
+    parts.push(info);
+    parts.forEach((x) => row.appendChild(x));
+    return row;
+  }
+  async function loadDev() {
+    const r = await api.devices(devHub.id, { op: 'list' });
+    if (!r || r.ok === false) { dmsg((r && r.error) || 'Could not read the devices.'); return false; }
+    $('hdList').textContent = ''; (r.devices || []).forEach((d) => $('hdList').appendChild(devRow(d)));
+    const dl = $('hdGroups'); dl.textContent = ''; (r.groups || []).forEach((g) => { const o = document.createElement('option'); o.value = g; dl.appendChild(o); });
+    return true;
+  }
+  async function openDev(h) {
+    devHub = h; $('hdTitle').textContent = 'Devices of ' + h.name; dmsg('Loading...');
+    if (await loadDev()) { dmsg(''); if (!devDlg.open) devDlg.showModal(); } else { const st = document.querySelector('#hubsList .hint'); if (st) st.textContent = $('hdMsg').textContent; }
+  }
+  $('hdClose').addEventListener('click', () => devDlg.close());
+  $('hdSave').addEventListener('click', async () => {
+    if (!devHub) return;
+    const changes = [];
+    document.querySelectorAll('#hdList .hd-row').forEach((row) => {
+      const n = row.querySelector('.hd-n'), g = row.querySelector('.hd-g'), i = row.querySelector('.hd-i'), c = { key: row.dataset.key };
+      if (n.value.trim() !== n.dataset.was) c.name = n.value.trim();
+      if (g.value.trim() !== g.dataset.was) c.group = g.value.trim();
+      if ((i.checked ? '1' : '') !== i.dataset.was) c.ignored = i.checked;
+      if (Object.keys(c).length > 1) changes.push(c);
+    });
+    if (!changes.length) { dmsg('Nothing changed.', true); return; }
+    dmsg('Saving...');
+    const r = await api.devices(devHub.id, { op: 'save', changes: changes });
+    if (r && r.ok !== false) { await loadDev(); dmsg('Saved ' + r.saved + ' change' + (r.saved === 1 ? '' : 's') + '.', true); } else dmsg((r && r.error) || 'Could not save.');
+  });
+  $('hdAdd').addEventListener('click', async () => {
+    if (!devHub) return;
+    dmsg('Adding...');
+    const r = await api.devices(devHub.id, { op: 'add', ip: $('hdAddIp').value, name: $('hdAddName').value, group: $('hdAddGroup').value });
+    if (r && r.ok !== false) { $('hdAddIp').value = ''; $('hdAddName').value = ''; $('hdAddGroup').value = ''; await loadDev(); dmsg(r.online ? 'Added. It answers, so it is online.' : 'Added. It does not answer a ping right now, so it shows as offline.', true); } else dmsg((r && r.error) || 'Could not add it.');
+  });
   // ----- the settings of one server -----
   const cfgDlg = $('hubCfgDialog');
   let cfgHub = null, cfgInfo = null;
@@ -218,6 +270,7 @@
     if (!Array.from($('hcScan').options).some((o) => o.value === String(c.scanSeconds))) { const o = document.createElement('option'); o.value = String(c.scanSeconds); o.textContent = Math.round(c.scanSeconds / 60) + ' minutes'; $('hcScan').appendChild(o); $('hcScan').value = String(c.scanSeconds); }
     $('hcPanels').textContent = ''; (c.panels || []).forEach((p) => panelRow(p));
     $('hcUpdate').value = c.update || 'auto'; updHint(info.update);
+    const al = c.alerts || {}; $('hcAlUrl').value = al.url || ''; $('hcAlFmt').value = al.format || 'ntfy'; $('hcAlNew').checked = al.onNew !== false; $('hcAlLeft').checked = al.onLeft !== false; $('hcAlBack').checked = al.onBack === true; $('hcAlMsg').textContent = '';
   }
   function updHint(u) {
     const h = $('hcUpdHint'), b = $('hcUpdNow');
@@ -232,6 +285,13 @@
     h.textContent = t; b.textContent = u.available && u.canInstall && !u.needsRebuild ? 'Install ' + u.latest + ' now' : 'Check now';
     b.dataset.install = u.available && u.canInstall && !u.needsRebuild ? '1' : '';
   }
+  const alertsNow = () => ({ url: $('hcAlUrl').value.trim(), format: $('hcAlFmt').value, onNew: $('hcAlNew').checked, onLeft: $('hcAlLeft').checked, onBack: $('hcAlBack').checked });
+  $('hcAlTest').addEventListener('click', async () => {
+    if (!cfgHub) return;
+    const m = $('hcAlMsg'); m.className = 'hint'; m.textContent = 'Sending...';
+    const r = await api.alertTest(cfgHub.id, alertsNow());
+    m.textContent = r && r.ok ? (r.message || 'Sent.') : ((r && r.error) || 'Not sent.'); m.className = 'hint ' + (r && r.ok ? 'ok' : 'bad');
+  });
   $('hcUpdNow').addEventListener('click', async () => {
     if (!cfgHub) return;
     const install = !!$('hcUpdNow').dataset.install;
@@ -258,7 +318,7 @@
     const net = $('hcNet').value === 'custom' ? $('hcNetCustom').value.trim() : $('hcNet').value;
     const router = $('hcRouter').value === 'custom' ? $('hcRouterCustom').value.trim() : 'auto';
     cmsg('Saving...');
-    const r = await api.setConfig(cfgHub.id, { name: $('hcName').value, network: net, router: router, scanSeconds: Number($('hcScan').value), update: $('hcUpdate').value, panels: panels });
+    const r = await api.setConfig(cfgHub.id, { name: $('hcName').value, network: net, router: router, scanSeconds: Number($('hcScan').value), update: $('hcUpdate').value, alerts: alertsNow(), panels: panels });
     if (r && r.ok) { cmsg(r.rescanning ? 'Saved. The server is scanning the network again.' : 'Saved.', true); } else cmsg((r && r.error) || 'Could not save.');
   });
   async function load() { const r = await api.list(); list = (r && r.list) || []; if (r && r.encrypted === false) say('This computer cannot encrypt saved codes, so they are kept only until Dashboard Hub closes.'); draw(); }

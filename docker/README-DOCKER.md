@@ -44,10 +44,10 @@ Your data (the device list, the history, the access code hash) is kept in the `d
 - The container drops all extra permissions except the one `ping` needs, and runs with a read-only file system.
 
 ## Update
-**Automatic (from version 1.29.1 on).** **Every time the container starts** (for example when you press Restart in Portainer) it first looks for a newer version, installs it and runs that. While it keeps running it also checks your GitHub repository every 6 hours (and a couple of minutes after it starts) for a file called `dashboard-hub-docker-latest.json`. When it lists a newer version, the server downloads `dashboard-hub-docker-<version>.tar.gz` from the same place, checks its fingerprint, unpacks it into its data folder and restarts itself. Nothing to rebuild and Portainer is not involved.
-- **To publish an update:** upload both files that come with each Docker bundle (`dashboard-hub-docker-<version>.tar.gz` and `dashboard-hub-docker-latest.json`) to the top folder of your repository (`Grid21/Dashboardhub`, branch `main`). Replace the old `latest.json`.
+**Automatic (from version 1.29.1 on).** **Every time the container starts** (for example when you press Restart in Portainer) it first looks for a newer version, installs it and runs that. While it keeps running it also checks your GitHub repository every 6 hours (and a couple of minutes after it starts) for the file `dashboard-hub-docker.tar.gz`. If the version inside it is newer, the server unpacks it into its data folder and restarts itself. Nothing to rebuild and Portainer is not involved.
+- **To publish an update:** upload the one file `dashboard-hub-docker.tar.gz` (the Docker bundle) to the top folder of your repository (`Grid21/Dashboardhub`, branch `main`), replacing the old one. That is the same file you use to install it the first time.
 - **Setting:** in Dashboard Hub Desktop, Settings > Remote servers > Settings > Updates: *Install new versions by itself*, *Only tell me* (then press "Install ... now" yourself) or *Off*. The starting value is `DASHBOARD_HUB_UPDATE` in the compose file. `DASHBOARD_HUB_UPDATE_REPO` picks another repository.
-- **Safe:** a file whose fingerprint does not match is not installed. If a new version stops within 30 seconds of starting, the server goes back to the version inside the image and skips the bad one.
+- **Safe:** the download comes over HTTPS from your own repository, and a file that is not a proper bundle is refused. If a new version stops within 30 seconds of starting, the server goes back to the version inside the image and skips the bad one.
 - **Rebuild once:** a container built before 1.29.0 has no way to update itself, so rebuild it once from the 1.29.0 bundle. Later, an update that changes the Linux part of the image says so ("needs a one-time rebuild") and is not installed by itself.
 - It trusts whatever is in that repository, so keep the repository yours.
 
@@ -55,8 +55,14 @@ Your data (the device list, the history, the access code hash) is kept in the `d
 
 Otherwise, copy the newer source folder over the old one and run `docker compose up -d --build` again in the `docker` folder. Your data stays.
 
+## Alerts to your phone
+In the server's **Settings** (browser page, or Dashboard Hub Desktop > Remote servers > Settings) there is an **Alerts** section.
+1. Install the free **ntfy** app on your phone and subscribe to a topic with a long, secret name (for example `home-hub-x7k29q`). Or make a Discord/Slack web hook.
+2. Type the address (for ntfy: `https://ntfy.sh/home-hub-x7k29q`), choose the type, tick what you want to hear about, press **Send a test message**, then **Save**.
+Anyone who knows an ntfy topic name can read it, so make it hard to guess. Nothing is sent until you type an address.
+
 ## What it cannot do yet
-- Editing device names and groups, and editing from the browser page (Desktop can edit the name, network, router, scan time and panels). Planned next.
-- Alerts and notifications, SSH, 3D map.
+- HTTPS on the server's own page (use your VPN, or put a reverse proxy such as Nginx Proxy Manager in front of it).
+- Pop-up notifications like on the desktop program, SSH.
 - The Windows desktop program and the Docker version keep separate histories.
 - It was tested on a simulated network, not yet in a real container on a real home network. If something does not work, send me `docker compose logs`.

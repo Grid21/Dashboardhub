@@ -399,6 +399,26 @@ function createRemoteHubs(o) {
       if (r.code === 404 || r.code === 405) return { ok: false, error: 'That server cannot change its settings. Update it to the newest Docker version first.' };
       return r.json && r.json.error ? { ok: false, error: r.json.error } : { ok: false, error: why(r) };
     },
+    async devices(id, args) {
+      const h = find(id); if (!h) return { ok: false, error: 'Not found' };
+      const doIt = async (cookie) => request(h, 'POST', '/api/action/devices', args && typeof args === 'object' ? args : {}, cookie, { 'X-Dashboard-Hub': '1' });
+      let s = await session(h, false); if (!s.ok) return s;
+      let r = await doIt(s.cookie);
+      if (r.code === 401) { s = await session(h, true); if (!s.ok) return s; r = await doIt(s.cookie); }
+      if (r.code === 200 && r.json) return r.json;
+      if (r.code === 404 || r.code === 405) return { ok: false, error: 'That server cannot edit devices yet. Update it to the newest Docker version first.' };
+      return r.json && r.json.error ? { ok: false, error: r.json.error } : { ok: false, error: why(r) };
+    },
+    async alertTest(id, alerts) {
+      const h = find(id); if (!h) return { ok: false, error: 'Not found' };
+      const doIt = async (cookie) => request(h, 'POST', '/api/action/alerttest', { alerts: alerts && typeof alerts === 'object' ? alerts : {} }, cookie, { 'X-Dashboard-Hub': '1' });
+      let s = await session(h, false); if (!s.ok) return s;
+      let r = await doIt(s.cookie);
+      if (r.code === 401) { s = await session(h, true); if (!s.ok) return s; r = await doIt(s.cookie); }
+      if (r.code === 200 && r.json) return r.json;
+      if (r.code === 404 || r.code === 405) return { ok: false, error: 'That server cannot send alerts yet. Update it to the newest Docker version first.' };
+      return r.json && r.json.error ? { ok: false, error: r.json.error } : { ok: false, error: why(r) };
+    },
     async update(id, apply) {
       const h = find(id); if (!h) return { ok: false, error: 'Not found' };
       const doIt = async (cookie) => request(h, 'POST', '/api/action/update', { apply: apply !== false }, cookie, { 'X-Dashboard-Hub': '1' });
@@ -463,13 +483,13 @@ const WEB_HTML = String.raw`<!doctype html>
     <div class="right"><span id="age" class="dim"></span> <button id="refresh" title="Refresh now">&#8635;</button> <button id="logout">Sign out</button></div>
   </header>
   <nav class="tabs">
-    <button data-tab="panels" class="on">Panels</button><button data-tab="map">Map</button><button data-tab="devices">Devices</button><button data-tab="uptime">Uptime</button>
+    <button data-tab="panels" class="on">Panels</button><button data-tab="map">Map</button><button data-tab="devices">Devices</button><button data-tab="uptime">Uptime</button><button data-tab="settings" id="setTab" hidden>Settings</button>
   </nav>
   <main>
     <div id="note" class="note" hidden></div>
     <div id="t-panels"></div>
     <div id="t-map" hidden>
-      <div class="mapbar"><span id="mapStat" class="dim"></span><button id="fit">Fit</button></div>
+      <div class="mapbar"><span id="mapStat" class="dim"></span><span><button id="mode3" title="Switch between the flat map and the 3D view">3D</button> <button id="resetPos" title="Put the dots back where they were placed automatically">Reset</button> <button id="fit">Fit</button></span></div>
       <canvas id="map"></canvas>
       <div id="mapDetail" class="card" hidden></div>
     </div>
@@ -477,6 +497,7 @@ const WEB_HTML = String.raw`<!doctype html>
       <div class="bar"><input id="q" type="search" placeholder="Search name, address, maker"><span id="chips"><button data-f="all" class="on">All</button><button data-f="on">Online</button><button data-f="off">Offline</button></span></div>
       <div id="devList"></div>
     </div>
+    <div id="t-settings" hidden></div>
     <div id="t-uptime" hidden>
       <div class="bar"><select id="range"><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select>
       <label class="chk"><input id="brief" type="checkbox"> show very short drops</label></div>
@@ -501,7 +522,7 @@ button{cursor:pointer;min-height:40px}button.primary{background:var(--accent);bo
 .login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}.login .card{width:100%;max-width:360px;display:flex;flex-direction:column;gap:12px}.login h1{margin:0;font-size:22px}.login p{margin:0}
 .top{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap;position:sticky;top:0;z-index:5}
 .top .right{display:flex;gap:8px;align-items:center;font-size:13px}
-.tabs{display:flex;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:57px;z-index:4}
+.tabs{display:flex;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:var(--hh,57px);z-index:4}
 .tabs button{flex:1;border:0;border-radius:0;background:transparent;padding:12px 4px;border-bottom:3px solid transparent}
 .tabs button.on{border-bottom-color:var(--accent);font-weight:600}
 main{padding:14px;max-width:1100px;margin:0 auto}
@@ -525,6 +546,8 @@ canvas#map{width:100%;height:62vh;min-height:320px;background:var(--panel);borde
 .line{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
 .chk{font-size:14px;display:flex;gap:6px;align-items:center}.chk input{padding:0;width:auto}
 h2{font-size:16px;margin:16px 0 8px}
+.sl{display:block;margin-top:10px}.sl span{display:block;font-size:13px;margin-bottom:4px}.sl select,#t-settings input{width:100%}
+.prow{display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--line)}
 `;
 
 const WEB_JS = String.raw`(function () {
@@ -547,7 +570,9 @@ function showLogin(msg) {
   $('app').hidden = true; $('login').hidden = false; $('loginMsg').textContent = msg || '';
   clearInterval(S.timer); S.timer = null;
 }
-function showApp() { $('login').hidden = true; $('app').hidden = false; if (!S.timer) S.timer = setInterval(function () { if (!document.hidden) load(true); }, 15000); }
+function fixHeader() { var h = document.querySelector('.top'); if (h) document.documentElement.style.setProperty('--hh', h.offsetHeight + 'px'); }
+window.addEventListener('resize', fixHeader);
+function showApp() { fixHeader(); $('login').hidden = true; $('app').hidden = false; if (!S.timer) S.timer = setInterval(function () { if (!document.hidden) load(true); }, 15000); }
 
 $('loginForm').addEventListener('submit', function (e) {
   e.preventDefault();
@@ -562,6 +587,8 @@ function load() {
   api('/api/state').then(function (r) {
     if (r._status === 401) { showLogin(''); return; }
     showApp();
+    if (S.edit === undefined) { S.edit = false; api('/api/info').then(function (i) { if (i && i.editable === true) { S.edit = true; $('setTab').hidden = false; if (S.tab === 'devices') drawDevices(); } }).catch(function () {}); }
+    if (S.dragging) return;
     S.now = r.now; S.snap = r.snapshot || null; S.fetched = Date.now();
     draw();
   }).catch(function () { $('note').hidden = false; $('note').textContent = 'Cannot reach Dashboard Hub right now. Is the computer on and the VPN connected?'; });
@@ -569,7 +596,7 @@ function load() {
 
 document.querySelectorAll('.tabs button').forEach(function (b) {
   b.addEventListener('click', function () {
-    S.tab = b.getAttribute('data-tab');
+    S.tab = b.getAttribute('data-tab'); S.setBuilt = false;
     document.querySelectorAll('.tabs button').forEach(function (x) { x.classList.toggle('on', x === b); });
     draw();
   });
@@ -580,16 +607,95 @@ function draw() {
   $('profile').textContent = s && s.profile ? s.profile.name : '';
   var note = $('note');
   if (!s) { note.hidden = false; note.textContent = 'Dashboard Hub has not shared anything yet. Open Dashboard Hub on the computer once.'; }
-  else if (!s.devices.length && S.tab !== 'panels' && S.tab !== 'uptime') { note.hidden = false; note.textContent = 'No devices yet. On the computer, open Network Map and run a scan.'; }
+  else if (!s.devices.length && S.tab !== 'panels' && S.tab !== 'uptime' && S.tab !== 'settings') { note.hidden = false; note.textContent = 'No devices yet. On the computer, open Network Map and run a scan.'; }
   else note.hidden = true;
   $('age').textContent = s ? 'updated ' + ago(S.now - s.at) : '';
-  ['panels', 'map', 'devices', 'uptime'].forEach(function (t) { $('t-' + t).hidden = S.tab !== t; });
+  ['panels', 'map', 'devices', 'uptime', 'settings'].forEach(function (t) { $('t-' + t).hidden = S.tab !== t; });
   if (S.tab === 'panels') drawPanels();
   else if (S.tab === 'map') drawMap();
   else if (S.tab === 'devices') drawDevices();
+  else if (S.tab === 'settings') { if (!S.setBuilt) { S.setBuilt = true; drawSettings(); } }
   else loadUptime();
 }
 
+/* ---------- settings of the Docker version (name, network, router, scan time, panels, updates) ---------- */
+function lab(text, node) { var l = el('label', 'sl'); l.appendChild(el('span', 'dim', text)); l.appendChild(node); return l; }
+function drawSettings() {
+  var box = $('t-settings'); box.textContent = ''; box.appendChild(el('p', 'dim', 'Loading...'));
+  api('/api/config').then(function (r) {
+    box.textContent = '';
+    if (r._status === 401) { showLogin(''); return; }
+    if (!r.config) { box.appendChild(el('p', 'bad', 'This server does not allow changing its settings from the page.')); return; }
+    var c = r.config, det = r.detected || {}, card = el('div', 'card'), msg = el('p', 'dim');
+    var name = field('Name', c.name, 80); name.style.marginTop = '0';
+    var net = el('select'), netC = field('192.168.0.0/24', '', 18), rt = el('select'), rtC = field('192.168.0.1', '', 15), scan = el('select'), upd = el('select');
+    function opt(sel, v, t) { var o = el('option', '', t); o.value = v; sel.appendChild(o); }
+    opt(net, 'auto', 'Automatic' + (det.network ? ' (now ' + det.network + ')' : ''));
+    (r.interfaces || []).forEach(function (i) { opt(net, i.cidr, i.cidr + ' (' + i.name + ')'); });
+    opt(net, 'custom', 'I will type it');
+    var known = Array.prototype.some.call(net.options, function (o) { return o.value === c.network; });
+    net.value = known ? c.network : 'custom'; netC.hidden = net.value !== 'custom'; netC.value = known ? '' : c.network;
+    net.addEventListener('change', function () { netC.hidden = net.value !== 'custom'; });
+    opt(rt, 'auto', 'Automatic' + (det.router ? ' (found ' + det.router + ')' : '')); opt(rt, 'custom', 'I will type it');
+    rt.value = c.router === 'auto' ? 'auto' : 'custom'; rtC.hidden = rt.value !== 'custom'; rtC.value = c.router === 'auto' ? '' : c.router;
+    rt.addEventListener('change', function () { rtC.hidden = rt.value !== 'custom'; });
+    [[60, 'every minute'], [300, 'every 5 minutes'], [900, 'every 15 minutes'], [3600, 'every hour'], [21600, 'every 6 hours'], [86400, 'once a day']].forEach(function (x) { opt(scan, String(x[0]), x[1]); });
+    if (!Array.prototype.some.call(scan.options, function (o) { return o.value === String(c.scanSeconds); })) opt(scan, String(c.scanSeconds), 'every ' + c.scanSeconds + ' seconds');
+    scan.value = String(c.scanSeconds);
+    opt(upd, 'auto', 'Install new versions by itself'); opt(upd, 'check', 'Only tell me'); opt(upd, 'off', 'Off'); upd.value = c.update || 'auto';
+    [lab('Name of this server', name), lab('Network to scan', net), netC, lab('Router', rt), rtC, lab('Scan', scan), lab('Updates', upd)].forEach(function (x) { card.appendChild(x); });
+    var u = r.update, uh = el('p', 'dim'), ub = el('button', '', 'Check now');
+    function updText(s) {
+      if (!s) { uh.textContent = 'This server cannot update itself yet.'; ub.hidden = true; return; }
+      var t = 'Running ' + s.version + '.';
+      if (s.error) t += ' Last check: ' + s.error;
+      else if (s.available && s.needsRebuild) t += ' Version ' + s.latest + ' is ready but needs a one-time rebuild of the container.';
+      else if (s.available) t += ' Version ' + s.latest + ' is ready.';
+      else if (s.latest) t += ' This is the newest version.';
+      uh.textContent = t; var inst = s.available && s.canInstall && !s.needsRebuild; ub.textContent = inst ? 'Install ' + s.latest + ' now' : 'Check now'; ub.dataset.install = inst ? '1' : '';
+    }
+    updText(u);
+    ub.addEventListener('click', function () {
+      var inst = !!ub.dataset.install; uh.textContent = inst ? 'Installing...' : 'Checking...';
+      act('update', { apply: inst }).then(function (x) {
+        if (x.ok === false) { uh.textContent = x.error || 'Could not check.'; return; }
+        if (x.updated) { uh.textContent = x.message + ' Reload this page in a minute.'; ub.hidden = true; return; }
+        if (x.status) updText(x.status); if (x.message) uh.textContent += ' ' + x.message;
+      }).catch(function () { uh.textContent = 'Could not reach the server.'; });
+    });
+    card.appendChild(uh); card.appendChild(ub);
+    card.appendChild(el('h2', '', 'Alerts'));
+    card.appendChild(el('p', 'dim', 'A message to your phone when something changes. Use a free ntfy topic (ntfy.sh), a Discord or Slack web hook, or any web address that accepts a POST.'));
+    var al = c.alerts || {}, alUrl = field('https://ntfy.sh/your-secret-topic', al.url, 300), alFmt = el('select'), alRes = el('p', 'dim');
+    alUrl.style.marginTop = '0';
+    [['ntfy', 'ntfy (plain text)'], ['discord', 'Discord web hook'], ['slack', 'Slack web hook'], ['json', 'Other (JSON)']].forEach(function (x) { opt(alFmt, x[0], x[1]); }); alFmt.value = al.format || 'ntfy';
+    function chk(text, on) { var l = el('label', 'chk'), i = el('input'); i.type = 'checkbox'; i.checked = !!on; l.style.marginTop = '8px'; l.appendChild(i); l.appendChild(document.createTextNode(text)); l.input = i; return l; }
+    var cNew = chk('A new device appears', al.onNew), cLeft = chk('A device goes offline', al.onLeft), cBack = chk('A device comes back online', al.onBack);
+    var alTest = el('button', '', 'Send a test message'); alTest.style.marginTop = '8px';
+    function alertsNow() { return { url: alUrl.value.trim(), format: alFmt.value, onNew: cNew.input.checked, onLeft: cLeft.input.checked, onBack: cBack.input.checked }; }
+    alTest.addEventListener('click', function () { alRes.className = 'dim'; alRes.textContent = 'Sending...'; act('alerttest', { alerts: alertsNow() }).then(function (x) { alRes.textContent = x.ok ? (x.message || 'Sent.') : (x.error || 'Not sent.'); alRes.className = x.ok ? 'good' : 'bad'; }).catch(function () { alRes.textContent = 'Could not reach the server.'; alRes.className = 'bad'; }); });
+    [lab('Alert address (leave empty for no alerts)', alUrl), lab('Type', alFmt), cNew, cLeft, cBack, alTest, alRes].forEach(function (x) { card.appendChild(x); });
+    card.appendChild(el('h2', '', 'Panels'));
+    var pbox = el('div');
+    function panelRow(p) {
+      var row = el('div', 'prow'), pn = field('Name', p ? p.name : '', 40), pu = field('http://192.168.0.10:9000', p ? p.url : '', 300), rm = el('button', '', 'Remove');
+      pn.className = 'pn'; pu.className = 'pu'; rm.addEventListener('click', function () { row.remove(); });
+      row.appendChild(pn); row.appendChild(pu); row.appendChild(rm); pbox.appendChild(row);
+    }
+    (c.panels || []).forEach(panelRow); card.appendChild(pbox);
+    var addP = el('button', '', 'Add a panel'); addP.style.marginTop = '8px'; addP.addEventListener('click', function () { panelRow(null); }); card.appendChild(addP);
+    var save = el('button', 'primary', 'Save'); save.style.marginTop = '14px'; save.style.display = 'block';
+    save.addEventListener('click', function () {
+      var panels = Array.prototype.map.call(pbox.querySelectorAll('.prow'), function (r2) { return { name: r2.querySelector('.pn').value.trim(), url: r2.querySelector('.pu').value.trim() }; }).filter(function (p) { return p.name || p.url; });
+      msg.className = 'dim'; msg.textContent = 'Saving...';
+      act('config', { name: name.value, network: net.value === 'custom' ? netC.value.trim() : net.value, router: rt.value === 'custom' ? rtC.value.trim() : 'auto', scanSeconds: Number(scan.value), update: upd.value, alerts: alertsNow(), panels: panels }).then(function (x) {
+        if (x.ok === false) { msg.textContent = x.error || 'Could not save.'; msg.className = 'bad'; return; }
+        msg.textContent = x.rescanning ? 'Saved. The server is scanning the network again.' : 'Saved.'; msg.className = 'good'; load();
+      }).catch(function () { msg.textContent = 'Could not reach the server.'; msg.className = 'bad'; });
+    });
+    card.appendChild(save); card.appendChild(msg); box.appendChild(card);
+  }).catch(function () { box.textContent = ''; box.appendChild(el('p', 'bad', 'Could not read the settings.')); });
+}
 function drawPanels() {
   var box = $('t-panels'); box.textContent = '';
   var list = S.snap ? S.snap.panels : [];
@@ -618,6 +724,55 @@ function detailRows(d) {
   return rows;
 }
 
+function act(name, body) {
+  return api('/api/action/' + name, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Dashboard-Hub': '1' }, body: JSON.stringify(body || {}) });
+}
+function field(ph, val, max) { var i = el('input'); i.type = 'text'; i.placeholder = ph; i.maxLength = max; i.value = val || ''; i.style.width = '100%'; i.style.marginTop = '6px'; return i; }
+function editBox(d) {
+  var b = el('div', 'edit'); b.style.marginTop = '10px';
+  var n = field('Name', d.name, 60), g = field('Group', d.group, 30), msg = el('div', 'dim');
+  var lab = el('label', 'chk'), cb = el('input'); cb.type = 'checkbox'; lab.style.marginTop = '8px'; lab.appendChild(cb); lab.appendChild(document.createTextNode('Ignore (leave it off the map and the counts)'));
+  var save = el('button', 'primary', 'Save'); save.style.marginTop = '8px';
+  if (d.isRouter || d.self) cb.disabled = true;
+  save.addEventListener('click', function () {
+    msg.textContent = 'Saving...';
+    act('devices', { op: 'save', changes: [{ key: d.key, name: n.value, group: g.value, ignored: cb.checked }] }).then(function (r) {
+      if (r.ok === false) { msg.textContent = r.error || 'Could not save.'; msg.className = 'bad'; return; }
+      msg.textContent = 'Saved.'; msg.className = 'good'; load();
+    }).catch(function () { msg.textContent = 'Could not reach the server.'; msg.className = 'bad'; });
+  });
+  [n, g, lab, save, msg].forEach(function (x) { b.appendChild(x); });
+  return b;
+}
+function manageBox() {
+  var box = el('div', 'card'); box.style.marginTop = '14px';
+  box.appendChild(el('b', '', 'Add a machine by hand'));
+  box.appendChild(el('div', 'dim', 'For something the scan cannot see. The server pings it to see if it is online.'));
+  var ip = field('192.168.0.50', '', 15), nm = field('Name', '', 60), gr = field('Group', '', 30), msg = el('div', 'dim'), add = el('button', 'primary', 'Add'); add.style.marginTop = '8px';
+  add.addEventListener('click', function () {
+    msg.className = 'dim'; msg.textContent = 'Adding...';
+    act('devices', { op: 'add', ip: ip.value, name: nm.value, group: gr.value }).then(function (r) {
+      if (r.ok === false) { msg.textContent = r.error || 'Could not add it.'; msg.className = 'bad'; return; }
+      ip.value = ''; nm.value = ''; gr.value = ''; msg.textContent = 'Added.'; msg.className = 'good'; load();
+    });
+  });
+  [ip, nm, gr, add, msg].forEach(function (x) { box.appendChild(x); });
+  var ign = el('div'); ign.style.marginTop = '14px'; var sh = el('button', '', 'Show ignored machines'); ign.appendChild(sh);
+  sh.addEventListener('click', function () {
+    act('devices', { op: 'list' }).then(function (r) {
+      ign.textContent = '';
+      var list = (r.devices || []).filter(function (d) { return d.ignored; });
+      ign.appendChild(el('b', '', list.length ? 'Ignored machines' : 'No ignored machines'));
+      list.forEach(function (d) {
+        var row = el('div', 'line'), t = el('span', '', d.shownName + (d.ip ? ' (' + d.ip + ')' : '') + ' '), rb = el('button', '', 'Bring back');
+        rb.addEventListener('click', function () { act('devices', { op: 'save', changes: [{ key: d.key, ignored: false }] }).then(function () { row.remove(); load(); }); });
+        row.appendChild(t); row.appendChild(rb); ign.appendChild(row);
+      });
+    });
+  });
+  box.appendChild(ign);
+  return box;
+}
 function drawDevices() {
   var box = $('devList'); box.textContent = '';
   var s = S.snap; if (!s) return;
@@ -636,11 +791,13 @@ function drawDevices() {
     n.appendChild(el('b', '', devName(d))); n.appendChild(el('span', '', (d.ip || '') + (d.vendor ? ' · ' + d.vendor : '') + (d.online ? '' : ' · offline')));
     h.appendChild(n); card.appendChild(h);
     var body = el('div', 'd'); detailRows(d).forEach(function (t) { body.appendChild(el('div', '', t)); });
+    if (S.edit) body.appendChild(editBox(d));
     body.hidden = !S.openDev[d.key]; card.appendChild(body);
     h.addEventListener('click', function () { S.openDev[d.key] = body.hidden; body.hidden = !body.hidden; });
     box.appendChild(card);
   });
   if (!list.length) box.appendChild(el('p', 'dim', 'Nothing matches.'));
+  if (S.edit) box.appendChild(manageBox());
 }
 $('q').addEventListener('input', function () { S.q = $('q').value; drawDevices(); });
 document.querySelectorAll('#chips button').forEach(function (b) {
@@ -649,10 +806,14 @@ document.querySelectorAll('#chips button').forEach(function (b) {
 
 /* ---------- map: the same layout as on the computer, seen from above; drag to move, pinch or wheel to zoom, tap a device ---------- */
 var cv = $('map'), ctx = cv.getContext('2d'), pts = [], base = { sx: 1, ox: 0, oy: 0 }, ptr = {}, dragInfo = null;
+function posKey() { return 'dh-pos-' + (S.snap && S.snap.profile ? S.snap.profile.id : ''); }
+function localPos() { try { return JSON.parse(localStorage.getItem(posKey()) || '{}') || {}; } catch (e) { return {}; } }
+function saveLocalPos(key, x, z) { try { var o = localPos(); o[key] = { x: x, z: z }; localStorage.setItem(posKey(), JSON.stringify(o)); } catch (e) { /* private window: the move just lasts until the page is reloaded */ } }
 function layout() {
   var s = S.snap; pts = [];
   if (!s) return;
   var ds = s.devices, minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
+  if (S.edit === false) { var ov = localPos(); ds.forEach(function (d) { if (ov[d.key]) { d.x = ov[d.key].x; d.z = ov[d.key].z; } }); }
   ds.forEach(function (d) { minX = Math.min(minX, d.x); maxX = Math.max(maxX, d.x); minZ = Math.min(minZ, d.z); maxZ = Math.max(maxZ, d.z); });
   var flat = !(maxX - minX > 0.5 || maxZ - minZ > 0.5);
   var cols = Math.ceil(Math.sqrt(ds.length || 1));
@@ -671,9 +832,82 @@ function fitView() {
   var pad = 46, sx = (z.w - pad * 2) / Math.max(1, maxX - minX), sz = (z.h - pad * 2) / Math.max(1, maxZ - minZ), k = Math.min(sx, sz, 60);
   S.view = { k: k, tx: z.w / 2 - k * (minX + maxX) / 2, ty: z.h / 2 - k * (minZ + maxZ) / 2 };
 }
+/* ---------- the 3D view: the same flat map seen from a tilted camera you can turn around (drag), zoom (wheel or pinch); dots are boxes standing on the floor ---------- */
+var C3 = { yaw: 0.55, pitch: 0.75, dist: 60, tx: 0, tz: 0 };
+try { S.m3 = localStorage.getItem('dh-3d') === '1'; } catch (e) { S.m3 = false; }
+function focal() { var z = size(); return Math.min(z.w, z.h) * 1.05; }
+function proj3(x, y, z) {
+  var rx = x - C3.tx, rz = z - C3.tz, cy = Math.cos(C3.yaw), sy = Math.sin(C3.yaw), cp = Math.cos(C3.pitch), sp = Math.sin(C3.pitch);
+  var x1 = cy * rx + sy * rz, z1 = -sy * rx + cy * rz, y2 = cp * y + sp * z1, z2 = -sp * y + cp * z1, zc = z2 + C3.dist, zz = size(), f = focal();
+  if (zc < 1) zc = 1;
+  return { x: zz.w / 2 + f * x1 / zc, y: zz.h / 2 - f * y2 / zc, d: zc, k: f / zc };
+}
+function floorAt(p) {
+  var zz = size(), f = focal(), dx = (p.x - zz.w / 2) / f, dy = -(p.y - zz.h / 2) / f, dz = 1;
+  var cy = Math.cos(C3.yaw), sy = Math.sin(C3.yaw), cp = Math.cos(C3.pitch), sp = Math.sin(C3.pitch);
+  function back(vx, vy, vz) { var y = cp * vy - sp * vz, z1 = sp * vy + cp * vz; return { x: cy * vx - sy * z1, y: y, z: sy * vx + cy * z1 }; }
+  var O = back(0, 0, -C3.dist), D = back(dx, dy, dz);
+  if (Math.abs(D.y) < 1e-6) return null;
+  var t = (1 - O.y) / D.y; if (t <= 0) return null;      // the plane through the middle of the boxes
+  return { x: O.x + t * D.x + C3.tx, z: O.z + t * D.z + C3.tz };
+}
+function scr(p) { if (S.m3) { var a = proj3(p.x, 1, p.z); return { x: a.x, y: a.y }; } return toScreen(p); }
+function fit3() {
+  layout(); var cx = 0, cz = 0, R = 8;
+  if (pts.length) { pts.forEach(function (p) { cx += p.x; cz += p.z; }); cx /= pts.length; cz /= pts.length; pts.forEach(function (p) { R = Math.max(R, Math.hypot(p.x - cx, p.z - cz)); }); }
+  C3.tx = cx; C3.tz = cz; C3.dist = R * 2.1 + 12;
+}
+function zoom3(f) { C3.dist = Math.max(8, Math.min(1500, C3.dist / f)); paint(); }
+function shade(hex, f) {
+  var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || ''); if (!m) return hex;
+  return 'rgb(' + [1, 2, 3].map(function (i) { return Math.max(0, Math.min(255, Math.round(parseInt(m[i], 16) * f))); }).join(',') + ')';
+}
+function paint3() {
+  var z = size(); ctx.setTransform(z.dpr, 0, 0, z.dpr, 0, 0); ctx.clearRect(0, 0, z.w, z.h);
+  var s = S.snap; if (!s) return;
+  var good = css('--good'), bad = css('--bad'), text = css('--text'), acc = css('--accent');
+  // floor grid
+  var minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9; pts.forEach(function (p) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); });
+  if (pts.length) {
+    var g0x = Math.floor((minX - 12) / 10) * 10, g1x = Math.ceil((maxX + 12) / 10) * 10, g0z = Math.floor((minZ - 12) / 10) * 10, g1z = Math.ceil((maxZ + 12) / 10) * 10, i, a, b;
+    ctx.lineWidth = 1; ctx.strokeStyle = css('--line'); ctx.globalAlpha = 0.7;
+    for (i = g0x; i <= g1x; i += 10) { a = proj3(i, 0, g0z); b = proj3(i, 0, g1z); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+    for (i = g0z; i <= g1z; i += 10) { a = proj3(g0x, 0, i); b = proj3(g1x, 0, i); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+    ctx.globalAlpha = 1;
+  }
+  var byKey = {}; pts.forEach(function (p) { byKey[p.d.key] = p; });
+  ctx.lineWidth = 1.5; ctx.strokeStyle = css('--dim');
+  (s.links || []).forEach(function (l) { var A = byKey[l.a], B = byKey[l.b]; if (!A || !B) return; var a2 = proj3(A.x, 1, A.z), b2 = proj3(B.x, 1, B.z); ctx.beginPath(); ctx.moveTo(a2.x, a2.y); ctx.lineTo(b2.x, b2.y); ctx.stroke(); });
+  // camera position in the world, to know which sides of a box face us
+  var cy = Math.cos(C3.yaw), sy = Math.sin(C3.yaw), cp = Math.cos(C3.pitch), sp = Math.sin(C3.pitch);
+  var oy = cp * 0 - sp * -C3.dist, oz1 = sp * 0 + cp * -C3.dist, camX = cy * 0 - sy * oz1 + C3.tx, camY = oy, camZ = sy * 0 + cy * oz1 + C3.tz;
+  var order = pts.slice().sort(function (a, b) { return Math.hypot(b.x - camX, b.z - camZ) - Math.hypot(a.x - camX, a.z - camZ); });
+  ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.lineJoin = 'round';
+  order.forEach(function (p) {
+    var d = p.d, sc = d.isRouter ? 1.5 : 1, hw = 1.6 * sc, hh = 2 * sc, hd = 1 * sc, base = d.online ? good : bad;
+    function V(sx, sy2, sz) { return proj3(p.x + sx * hw, sy2 * hh, p.z + sz * hd); }
+    function face(vs, col) { ctx.beginPath(); vs.forEach(function (v, i) { if (i) ctx.lineTo(v.x, v.y); else ctx.moveTo(v.x, v.y); }); ctx.closePath(); ctx.fillStyle = col; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.stroke(); }
+    var v = { a: V(-1, 0, -1), b: V(1, 0, -1), c: V(1, 0, 1), d: V(-1, 0, 1), e: V(-1, 1, -1), f: V(1, 1, -1), g: V(1, 1, 1), h: V(-1, 1, 1) };
+    if (camZ > p.z + hd) face([v.d, v.c, v.g, v.h], shade(base, 0.8));      // front (+z)
+    if (camZ < p.z - hd) face([v.a, v.b, v.f, v.e], shade(base, 0.8));      // back (-z)
+    if (camX > p.x + hw) face([v.b, v.c, v.g, v.f], shade(base, 0.62));     // right (+x)
+    if (camX < p.x - hw) face([v.a, v.d, v.h, v.e], shade(base, 0.62));     // left (-x)
+    face([v.e, v.f, v.g, v.h], shade(base, 1.1));                           // top
+    if (d.self || (S.sel && S.sel === d.key)) { ctx.lineWidth = 3; ctx.strokeStyle = acc; ctx.beginPath(); [v.e, v.f, v.g, v.h].forEach(function (q, i) { if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); }); ctx.closePath(); ctx.stroke(); }
+    var lp = proj3(p.x, 0, p.z), nm = devName(d); if (nm.length > 18) nm = nm.slice(0, 17) + '\u2026';
+    if (pts.length > 60 && lp.k < 16 && !d.isRouter && !d.self && S.sel !== d.key) return;      // a crowd: names appear when you zoom in
+    ctx.fillStyle = text; ctx.fillText(nm, lp.x, lp.y + 14);
+  });
+}
+$('mode3').addEventListener('click', function () {
+  S.m3 = !S.m3; try { localStorage.setItem('dh-3d', S.m3 ? '1' : '0'); } catch (e) { /* only this visit */ }
+  $('mode3').textContent = S.m3 ? '2D' : '3D'; if (S.m3) fit3(); paint();
+});
+$('mode3').textContent = S.m3 ? '2D' : '3D';
 function toScreen(p) { return { x: p.x * S.view.k + S.view.tx, y: p.z * S.view.k + S.view.ty }; }
 function css(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 function paint() {
+  if (S.m3) { paint3(); return; }
   var z = size(); if (!S.view) fitView();
   ctx.setTransform(z.dpr, 0, 0, z.dpr, 0, 0); ctx.clearRect(0, 0, z.w, z.h);
   var s = S.snap; if (!s) return;
@@ -697,7 +931,7 @@ function paint() {
 function drawMap() {
   var s = S.snap; var on = s ? s.devices.filter(function (d) { return d.online; }).length : 0;
   $('mapStat').textContent = s ? on + ' online of ' + s.devices.length : '';
-  layout(); if (!S.view || S.refit) { fitView(); S.refit = false; }
+  layout(); if (!S.view || S.refit) { fitView(); if (S.m3) fit3(); S.refit = false; }
   paint(); showDetail();
 }
 function showDetail() {
@@ -708,14 +942,26 @@ function showDetail() {
   h.appendChild(el('b', '', devName(d) + (d.online ? '' : ' (offline)'))); box.appendChild(h);
   var dd = el('div', 'd'); detailRows(d).forEach(function (t) { dd.appendChild(el('div', '', t)); }); box.appendChild(dd);
 }
-$('fit').addEventListener('click', function () { fitView(); paint(); });
+$('fit').addEventListener('click', function () { if (S.m3) fit3(); else fitView(); paint(); });
 function zoomAt(x, y, f) {
   var v = S.view, nk = Math.max(0.3, Math.min(400, v.k * f)); f = nk / v.k;
   v.tx = x - (x - v.tx) * f; v.ty = y - (y - v.ty) * f; v.k = nk; paint();
 }
 function pos(e) { var r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
-cv.addEventListener('wheel', function (e) { e.preventDefault(); var p = pos(e); zoomAt(p.x, p.y, e.deltaY < 0 ? 1.15 : 1 / 1.15); }, { passive: false });
-cv.addEventListener('pointerdown', function (e) { cv.setPointerCapture(e.pointerId); ptr[e.pointerId] = pos(e); dragInfo = { moved: 0, start: pos(e), pinch: 0 }; });
+cv.addEventListener('wheel', function (e) { e.preventDefault(); if (S.m3) { zoom3(e.deltaY < 0 ? 1.15 : 1 / 1.15); return; } var p = pos(e); zoomAt(p.x, p.y, e.deltaY < 0 ? 1.15 : 1 / 1.15); }, { passive: false });
+function hitDot(p, max) {
+  var best = null, bd = max || 22;
+  pts.forEach(function (q) { var A = scr(q), dd = Math.hypot(A.x - p.x, A.y - p.y); if (dd < bd) { bd = dd; best = q; } });
+  return best;
+}
+cv.addEventListener('pointerdown', function (e) {
+  cv.setPointerCapture(e.pointerId); ptr[e.pointerId] = pos(e);
+  dragInfo = { moved: 0, start: pos(e), pinch: 0, dev: null };
+  if (Object.keys(ptr).length === 1) {
+    var hit = hitDot(pos(e));
+    if (hit) { dragInfo.dev = hit; S.dragging = true; }
+  }
+});
 cv.addEventListener('pointermove', function (e) {
   if (!ptr[e.pointerId]) return;
   var prev = ptr[e.pointerId], cur = pos(e), ids = Object.keys(ptr);
@@ -723,23 +969,47 @@ cv.addEventListener('pointermove', function (e) {
     var o = ptr[ids[0] === String(e.pointerId) ? ids[1] : ids[0]];
     var d0 = Math.hypot(prev.x - o.x, prev.y - o.y), d1 = Math.hypot(cur.x - o.x, cur.y - o.y);
     ptr[e.pointerId] = cur; dragInfo.moved = 99;
+    if (S.m3) { if (d0 > 0) zoom3(d1 / d0); return; }
     if (d0 > 0) zoomAt((cur.x + o.x) / 2, (cur.y + o.y) / 2, d1 / d0);
     return;
   }
   ptr[e.pointerId] = cur; dragInfo.moved += Math.abs(cur.x - prev.x) + Math.abs(cur.y - prev.y);
+  if (dragInfo.dev) {
+    if (dragInfo.moved < 8) return;                       // a small wobble is still a tap
+    if (!dragInfo.began) { dragInfo.began = true; pts.forEach(function (q) { q.d.x = q.x; q.d.z = q.z; }); S.sel = dragInfo.dev.d.key; }   // keep every dot where it is drawn (also when the layout was a plain grid)
+    var q = dragInfo.dev;
+    if (S.m3) { var f = floorAt(cur); if (f) { q.x = f.x; q.z = f.z; } } else { q.x = (cur.x - S.view.tx) / S.view.k; q.z = (cur.y - S.view.ty) / S.view.k; }
+    q.d.x = q.x; q.d.z = q.z; paint(); return;
+  }
+  if (S.m3) { C3.yaw += (cur.x - prev.x) * 0.008; C3.pitch = Math.max(0.2, Math.min(1.5, C3.pitch + (cur.y - prev.y) * 0.006)); paint(); return; }
   S.view.tx += cur.x - prev.x; S.view.ty += cur.y - prev.y; paint();
 });
+function finishDrag() {
+  var q = dragInfo && dragInfo.dev; S.dragging = false;
+  if (!q || !dragInfo.began) return;
+  var d = q.d;
+  if (S.edit) act('devices', { op: 'move', key: d.key, x: d.x, z: d.z }).then(function (r) { if (r && r.ok === false) { $('mapStat').textContent = r.error || 'Could not save the move.'; } }).catch(function () { $('mapStat').textContent = 'Could not save the move.'; });
+  else saveLocalPos(d.key, d.x, d.z);
+  showDetail();
+}
 function up(e) {
+  if (dragInfo && dragInfo.dev && Object.keys(ptr).length === 1) finishDrag();
   var wasTap = dragInfo && dragInfo.moved < 8 && Object.keys(ptr).length === 1;
   delete ptr[e.pointerId];
+  if (!Object.keys(ptr).length) S.dragging = false;
   if (wasTap) {
-    var p = pos(e), best = null, bd = 28;
-    pts.forEach(function (q) { var A = toScreen(q), dd = Math.hypot(A.x - p.x, A.y - p.y); if (dd < bd) { bd = dd; best = q.d.key; } });
-    S.sel = best; paint(); showDetail();
+    var hit = hitDot(pos(e), 28);
+    S.sel = hit ? hit.d.key : null; paint(); showDetail();
   }
 }
-cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', function (e) { delete ptr[e.pointerId]; });
-window.addEventListener('resize', function () { if (S.tab === 'map') { fitView(); paint(); } });
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', function (e) { delete ptr[e.pointerId]; S.dragging = false; });
+$('resetPos').addEventListener('click', function () {
+  if (!confirm('Put all the dots back where they were placed automatically?')) return;
+  if (S.edit) act('devices', { op: 'resetlayout' }).then(function () { S.refit = true; load(); });
+  else { try { localStorage.removeItem(posKey()); } catch (e) { /* nothing saved */ } S.refit = true; load(); }
+});
+cv.dhDots = function () { return pts.map(function (p) { var A = scr(p); return { key: p.d.key, x: A.x, y: A.y, name: devName(p.d) }; }); };   // lets the tests find the dots
+window.addEventListener('resize', function () { if (S.tab === 'map') { if (S.m3) fit3(); else fitView(); paint(); } });
 
 /* ---------- uptime and history ---------- */
 function loadUptime() {

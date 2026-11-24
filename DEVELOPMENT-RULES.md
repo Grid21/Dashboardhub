@@ -15,4 +15,9 @@ These are the owner's rules. They apply to every session and every change.
    scripts (`.bat`, `.sh`) travel in the source zip and must be mentioned to the owner.
 4. Work in small stages, one per session; the owner's usage limit runs out. Say in a few words what is being done.
 5. Short, plain-language replies. Cumulative update notes. Keep `CHANGELOG.md`. GPL-3.0-or-later. Patch version = fixes, minor = features.
+7. **Never break the updates of containers that are already installed.** Docker containers update themselves from the owner's GitHub. Containers built
+   from 1.29.0 and 1.29.1 look for `dashboard-hub-docker-latest.json` + `dashboard-hub-docker-<version>.tar.gz`; 1.29.2 and newer look for the single
+   `dashboard-hub-docker.tar.gz`. `tools/make-docker-bundle.js` therefore makes both (the old pair goes in `for-old-containers/`), and
+   `test/docker-update-test.js` runs the real 1.29.1 program (kept in `test/fixtures/docker-1.29.1/`) against it. If the update method ever changes again,
+   keep the old method working (or give the owner a tested bridge) and add the old program to `test/fixtures/` so the test covers it.
 6. README.md and FEATURES.md are identical and start with the install steps and "Node.js 24 LTS or newer".

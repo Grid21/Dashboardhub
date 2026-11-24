@@ -1,0 +1,142 @@
+'use strict';
+//   node test/docker-page-test.js
+// Editing from the browser page of the Docker version (phone-sized window): name, group, ignore, bring back, add by hand.
+// Simulated network (loopback), not a real container.
+const { spawn } = require('child_process');
+const fs = require('fs'), os = require('os'), path = require('path'), net = require('net'), http = require('http');
+const { chromium, devices } = require(process.env.PLAYWRIGHT_DIR || '/home/claude/.npm-global/lib/node_modules/playwright');
+const ROOT = path.join(__dirname, '..');
+let passed = 0, failed = 0;
+const check = (n, ok, d) => { if (ok) { passed++; console.log('  ok    ' + n); } else { failed++; console.log('  FAIL  ' + n + (d !== undefined ? '   -> ' + d : '')); } };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const freePort = () => new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+const health = (port) => new Promise((r) => http.get({ host: '127.0.0.1', port, path: '/api/health' }, (x) => { x.resume(); r(x.statusCode); }).on('error', () => r(0)));
+(async () => {
+  const port = await freePort(), data = fs.mkdtempSync(path.join(os.tmpdir(), 'dp-'));
+  const child = spawn(process.execPath, [path.join(ROOT, 'docker', 'server.js')], { env: Object.assign({}, process.env, { DASHBOARD_HUB_DATA: data, DASHBOARD_HUB_PORT: String(port), DASHBOARD_HUB_CODE: 'page test code', DASHBOARD_HUB_NETWORK: '127.0.0.0/24', DASHBOARD_HUB_SCAN_SECONDS: '60' }), stdio: ['ignore', 'pipe', 'pipe'] });
+  let log = ''; child.stdout.on('data', (d) => { log += d; }); child.stderr.on('data', (d) => { log += d; });
+  for (let i = 0; i < 60 && (await health(port)) !== 200; i++) await sleep(300);
+  for (let i = 0; i < 100 && !/Scan finished/.test(log); i++) await sleep(300);
+  const browser = await chromium.launch();
+  const ctx = await browser.newContext(Object.assign({}, devices['Pixel 7']));
+  const page = await ctx.newPage(); const errs = []; page.on('pageerror', (e) => errs.push(String(e)));
+  await page.goto('http://127.0.0.1:' + port + '/'); await page.fill('#code', 'page test code'); await page.click('#loginForm button[type=submit]'); await sleep(1500);
+  await page.click('[data-tab=devices]'); await sleep(600);
+  check('the Devices tab shows machines', await page.evaluate(() => document.querySelectorAll('#devList .dev').length >= 2));
+  check('the edit boxes and the "add by hand" box appear on the Docker version', await page.evaluate(() => document.querySelectorAll('#devList .edit').length >= 2 && /Add a machine by hand/.test(document.getElementById('devList').textContent)));
+  // open the first non-router device
+  const idx = await page.evaluate(() => { const l = Array.from(document.querySelectorAll('#devList .dev')); const i = l.findIndex((c) => !/Router/.test(c.querySelector('b').textContent)); l[i].querySelector('.h').click(); return i; });
+  await sleep(200);
+  const card = (await page.$$('#devList .dev'))[idx];
+  const first = await (await card.$('b')).textContent();
+  const inputs = await card.$$('.edit input[type=text]');
+  await inputs[0].fill('Phone test box'); await inputs[1].fill('Lab');
+  await (await card.$('.edit button.primary')).click(); await sleep(1500);
+  check('Save renames it and the page shows the new name and group', await page.evaluate(() => /Phone test box/.test(document.getElementById('devList').textContent) && /Group: Lab/.test(document.getElementById('devList').textContent)), first);
+  // ignore it
+  await page.evaluate(() => { const c = Array.from(document.querySelectorAll('#devList .dev')).find((x) => /Phone test box/.test(x.textContent)); if (c.querySelector('.d').hidden) c.querySelector('.h').click(); });
+  const c2 = await page.evaluateHandle(() => Array.from(document.querySelectorAll('#devList .dev')).find((x) => /Phone test box/.test(x.textContent)));
+  await (await c2.asElement().$('.edit input[type=checkbox]')).check(); await (await c2.asElement().$('.edit button.primary')).click(); await sleep(1500);
+  check('Ignore takes it off the list', await page.evaluate(() => !/Phone test box/.test(document.getElementById('devList').textContent)));
+  await page.evaluate(() => { Array.from(document.querySelectorAll('#devList button')).find((b) => /Show ignored/.test(b.textContent)).click(); }); await sleep(800);
+  check('"Show ignored machines" lists it', await page.evaluate(() => /Phone test box/.test(document.getElementById('devList').textContent)));
+  await page.evaluate(() => { Array.from(document.querySelectorAll('#devList button')).find((b) => /Bring back/.test(b.textContent)).click(); }); await sleep(1500);
+  check('Bring back puts it on the list again', await page.evaluate(() => /Phone test box/.test(document.getElementById('devList').textContent)));
+  // add by hand
+  const boxIn = await page.$$('#devList .card input'); await boxIn[0].fill('10.55.0.7'); await boxIn[1].fill('Far NAS'); await boxIn[2].fill('Remote');
+  await page.evaluate(() => { Array.from(document.querySelectorAll('#devList .card button')).find((b) => b.textContent === 'Add').click(); }); await sleep(2500);
+  check('Add puts the machine on the list (offline, it does not answer)', await page.evaluate(() => { const c = Array.from(document.querySelectorAll('#devList .dev')).find((x) => /Far NAS/.test(x.textContent)); return !!c && /offline/.test(c.textContent); }));
+  // ----- moving the dots on the map -----
+  page.on('dialog', (dl) => dl.accept());
+  const serverPos = (k) => page.evaluate(async (key) => { const r = await fetch('/api/state', { credentials: 'same-origin' }).then((x) => x.json()); const d = r.snapshot.devices.find((x) => x.key === key); return d ? { x: d.x, z: d.z } : null; }, k);
+  await page.click('[data-tab=map]'); await sleep(800);
+  const dots = () => page.evaluate(() => document.getElementById('map').dhDots());
+  let ds = await dots(); const box = await (await page.$('#map')).boundingBox();
+  const victim = ds.find((d) => d.key !== 'router'), others = ds.filter((d) => d.key !== victim.key);
+  const orig = await serverPos(victim.key);
+  const away = (px, py) => !others.some((o) => Math.hypot(o.x - px, o.y - py) < 30);
+  let tx = box.width - 30, ty = box.height - 30; for (const c of [[box.width - 30, box.height - 30], [30, box.height - 30], [box.width - 30, 30], [30, 30]]) { if (away(c[0], c[1])) { tx = c[0]; ty = c[1]; break; } }
+  const others0 = JSON.stringify(others.map((o) => [o.key, Math.round(o.x), Math.round(o.y)]));
+  await page.mouse.move(box.x + victim.x, box.y + victim.y); await page.mouse.down(); await page.mouse.move(box.x + (victim.x + tx) / 2, box.y + (victim.y + ty) / 2, { steps: 5 }); await page.mouse.move(box.x + tx, box.y + ty, { steps: 5 }); await page.mouse.up(); await sleep(1200);
+  ds = await dots(); const moved = ds.find((d) => d.key === victim.key);
+  check('dragging a dot moves that dot to where it was dropped', Math.hypot(moved.x - tx, moved.y - ty) < 6, JSON.stringify([moved, tx, ty]));
+  check('and the other dots stay where they were', JSON.stringify(ds.filter((d) => d.key !== victim.key).map((o) => [o.key, Math.round(o.x), Math.round(o.y)])) === others0);
+  const saved = await serverPos(victim.key);
+  check('the new place is saved on the server', Math.hypot(saved.x - orig.x, saved.z - orig.z) > 1, JSON.stringify([orig, saved]));
+  await page.reload(); await sleep(1500); await page.click('[data-tab=map]'); await sleep(800);
+  const saved2 = await serverPos(victim.key);
+  check('after reloading the page the dot is still in its new place', Math.hypot(saved2.x - saved.x, saved2.z - saved.z) < 0.01 && (await dots()).length === others.length + 1);
+  await page.evaluate(() => window.scrollTo(0, 0)); await sleep(200);
+  await page.click('#resetPos'); await sleep(1500);
+  const back = await serverPos(victim.key);
+  check('Reset puts the dots back in the automatic layout', Math.hypot(back.x - orig.x, back.z - orig.z) < 0.01, JSON.stringify([orig, back]));
+  ds = await dots(); const t2 = ds.find((d) => d.key !== 'router'), box2 = await (await page.$('#map')).boundingBox();
+  await page.mouse.click(box2.x + t2.x, box2.y + t2.y); await sleep(300);
+  check('a plain tap still shows the details of a dot', await page.evaluate(() => !document.getElementById('mapDetail').hidden));
+  // ----- the 3D view -----
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.click('[data-tab=map]'); await sleep(500);
+  await page.click('#mode3'); await sleep(600);
+  check('the 3D button switches the map to 3D (and the button now says 2D)', (await page.textContent('#mode3')) === '2D');
+  const painted = () => page.evaluate(() => { const c = document.getElementById('map'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4 * 7) if (d[i] > 0) n++; return n; });
+  check('the 3D map is drawn', (await painted()) > 300);
+  if (process.env.DP_SHOT3) await page.screenshot({ path: process.env.DP_SHOT3 });
+  let d3 = await dots(); const b3 = await (await page.$('#map')).boundingBox();
+  check('every dot has a place on the screen', d3.length >= 2 && d3.every((d) => Number.isFinite(d.x) && Number.isFinite(d.y)));
+  const dsBefore = JSON.stringify(d3.map((d) => [Math.round(d.x), Math.round(d.y)]));
+  const farFromAll = (px, py) => !d3.some((o) => Math.hypot(o.x - px, o.y - py) < 40);
+  let sx = 25, sy = 25; for (const c of [[25, 25], [b3.width - 25, 25], [25, b3.height - 25], [b3.width - 25, b3.height - 25]]) { if (farFromAll(c[0], c[1])) { sx = c[0]; sy = c[1]; break; } }
+  await page.mouse.move(b3.x + sx, b3.y + sy); await page.mouse.down(); await page.mouse.move(b3.x + sx + 60, b3.y + sy + 10, { steps: 6 }); await page.mouse.up(); await sleep(300);
+  d3 = await dots();
+  check('dragging empty space turns the view', JSON.stringify(d3.map((d) => [Math.round(d.x), Math.round(d.y)])) !== dsBefore);
+  const spread = (arr) => Math.max.apply(null, arr.map((d) => d.x)) - Math.min.apply(null, arr.map((d) => d.x));
+  const w0 = spread(d3); await page.mouse.move(b3.x + b3.width / 2, b3.y + b3.height / 2); await page.mouse.wheel(0, -300); await sleep(300);
+  check('the wheel zooms in', spread(await dots()) > w0 * 1.05);
+  await page.evaluate(() => document.getElementById('fit').click()); await sleep(300);
+  d3 = await dots();
+  const vic = d3.find((d) => d.key !== 'router'), oth = d3.filter((d) => d.key !== vic.key), pre = await serverPos(vic.key);
+  let tx3 = b3.width / 2, ty3 = b3.height - 30; for (const c of [[b3.width / 2, b3.height - 30], [40, b3.height - 30], [b3.width - 40, b3.height - 30], [40, 40], [b3.width - 40, 40]]) { if (!oth.some((o) => Math.hypot(o.x - c[0], o.y - c[1]) < 40)) { tx3 = c[0]; ty3 = c[1]; break; } }
+  await page.mouse.move(b3.x + vic.x, b3.y + vic.y); await page.mouse.down(); await page.mouse.move(b3.x + (vic.x + tx3) / 2, b3.y + (vic.y + ty3) / 2, { steps: 5 }); await page.mouse.move(b3.x + tx3, b3.y + ty3, { steps: 5 }); await page.mouse.up(); await sleep(1200);
+  const mv = (await dots()).find((d) => d.key === vic.key), post = await serverPos(vic.key);
+  check('a box can be dragged across the floor and lands where it was dropped', Math.hypot(mv.x - tx3, mv.y - ty3) < 5, JSON.stringify([mv, tx3, ty3]));
+  check('and the new place is saved on the server', Math.hypot(post.x - pre.x, post.z - pre.z) > 0.5);
+  await page.click('#mode3'); await sleep(500);
+  check('2D brings the flat map back', (await page.textContent('#mode3')) === '3D' && (await painted()) > 300);
+  await page.evaluate(() => window.scrollTo(0, 0)); await page.click('#resetPos'); await sleep(1000);
+  // ----- the Settings tab -----
+  const cfg = () => page.evaluate(async () => (await fetch('/api/config', { credentials: 'same-origin' })).json());
+  check('the Settings tab appears on the Docker version', await page.evaluate(() => !document.getElementById('setTab').hidden));
+  await page.evaluate(() => window.scrollTo(0, 0)); await page.click('#setTab'); await sleep(1200);
+  check('it shows the name, network, router, scan time, updates and panels', await page.evaluate(() => { const t = document.getElementById('t-settings'); return t.querySelectorAll('select').length >= 4 && /Network to scan/.test(t.textContent) && /Panels/.test(t.textContent) && /Running/.test(t.textContent); }));
+  await page.fill('#t-settings input', 'Garage hub');
+  await page.evaluate(() => { const s = document.querySelectorAll('#t-settings select'); s[2].value = '900'; });
+  await page.click('text=Add a panel'); await sleep(200);
+  const pin = await page.$$('#t-settings .prow input'); await pin[0].fill('Portainer'); await pin[1].fill('ftp://nope');
+  await page.click('#t-settings button.primary'); await sleep(1000);
+  check('a panel with a wrong address is explained and nothing is saved', /http/.test(await page.textContent('#t-settings')) && (await cfg()).config.name !== 'Garage hub');
+  await pin[1].fill('http://192.168.0.10:9000');
+  await page.click('#t-settings button.primary'); await sleep(1200);
+  const c1 = (await cfg()).config;
+  check('Save keeps the name, scan time and panel on the server', c1.name === 'Garage hub' && c1.scanSeconds === 900 && c1.panels.length === 1 && c1.panels[0].url === 'http://192.168.0.10:9000', JSON.stringify(c1));
+  await page.evaluate(() => { const s = document.querySelectorAll('#t-settings select'); s[3].value = 'check'; });
+  await page.click('#t-settings button.primary'); await sleep(1000);
+  check('the updates choice is kept', (await cfg()).config.update === 'check');
+  await page.click('#t-settings .card > button:not(.primary)'); await sleep(800);
+  check('Check now answers in plain words (no update server here)', /Last check|newest|Checking/.test(await page.textContent('#t-settings')));
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const rx = require('http').createServer((q, s) => { rxGot.push(q.url); q.resume(); s.writeHead(200); s.end('ok'); }), rxGot = [];
+  await new Promise((r) => rx.listen(0, '127.0.0.1', r)); const rxUrl = 'http://127.0.0.1:' + rx.address().port + '/pagetopic';
+  await page.fill('#t-settings input[placeholder^="https://ntfy"]', rxUrl);
+  await page.click('text=Send a test message'); await sleep(1200);
+  check('the test message button sends a message to the address typed on the page', rxGot.length === 1 && rxGot[0] === '/pagetopic' && /sent/i.test(await page.textContent('#t-settings')), JSON.stringify(rxGot));
+  await page.click('#t-settings button.primary'); await sleep(1200);
+  const cAl = (await cfg()).config;
+  check('the alert address and choices are saved with the settings', cAl.alerts.url === rxUrl && cAl.alerts.format === 'ntfy' && cAl.alerts.onNew === true && cAl.alerts.onBack === false, JSON.stringify(cAl.alerts));
+  rx.close();
+  await page.click('[data-tab=panels]'); await sleep(800);
+  check('the new panel shows on the Panels tab', await page.evaluate(() => /Portainer/.test(document.getElementById('t-panels').textContent)));
+  if (process.env.DP_SHOT) await page.screenshot({ path: process.env.DP_SHOT, fullPage: true });
+  check('no errors in the page', errs.length === 0, errs.join(' | '));
+  await browser.close(); child.kill('SIGTERM');
+  console.log('\n' + passed + ' passed, ' + failed + ' failed'); process.exit(failed ? 1 : 0);
+})().catch((e) => { console.error(e); process.exit(1); });

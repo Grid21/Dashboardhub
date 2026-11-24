@@ -908,3 +908,23 @@ body.view-map .car-arrow, body.view-map .car-info { display: none !important; }
 .hc-panel input.hc-pn { flex: 0 0 28%; }
 .hc-panel { flex-wrap: wrap; }
 .hc-panel input.hc-pu { flex: 1 1 12em; }
+
+/* devices of a remote server */
+.hd-list{max-height:46vh;overflow:auto;margin:6px 0}
+.hd-row{align-items:center;flex-wrap:wrap;gap:6px}
+.hd-row .hd-n{flex:1 1 150px;min-width:110px}
+.hd-row .hd-g{flex:0 1 110px;min-width:80px}
+.hd-row .hd-info{flex:1 1 100%;margin:0 0 4px 18px}
+.hd-row.hd-ign .hd-n,.hd-row.hd-ign .hd-g,.hd-row.hd-ign .hd-info{opacity:.55}
+.hd-ig{white-space:nowrap}
+.hd-dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none;background:var(--muted,#888)}
+.hd-dot.on{background:#3fb950}
+.hd-dot.off{background:#e5534b}
+#hubDevDialog{width:min(760px,94vw)}
+.hd-row{display:flex;flex-direction:row}
+.hd-row .hd-ig{flex:none}
+.hd-list{overflow-x:hidden}
+.hd-row .hd-ig{display:inline-flex;align-items:center;gap:4px;width:auto;min-width:0;margin:0}
+.hd-row .hd-i{width:auto;margin:0}
+.hd-row .hd-n{flex:1 1 120px;min-width:0;width:auto}
+.hd-row .hd-g{flex:0 0 100px;min-width:0;width:100px}

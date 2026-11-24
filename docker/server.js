@@ -6,6 +6,8 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const http = require('http');
+const https = require('https');
 const SRC = process.env.DASHBOARD_HUB_SRC || path.join(__dirname, '..');
 const scanner = require(path.join(SRC, 'scanner.js'));
 const notifLib = require(path.join(SRC, 'notif-history.js'));
@@ -22,7 +24,7 @@ const log = (m) => console.log(new Date().toISOString().replace('T', ' ').slice(
 // config.json (in the data folder) holds the settings. The first time the server starts, the DASHBOARD_HUB_* environment settings
 // (from docker-compose.yml) are used to create it. From then on config.json wins, so changes made in Dashboard Hub Desktop stick.
 // The access code is the exception: DASHBOARD_HUB_CODE always applies when it is set.
-const DEFAULTS = { name: 'Dashboard Hub (Docker)', network: 'auto', router: 'auto', scanSeconds: 300, port: remote.WEB_DEFAULT_PORT, panels: [], update: 'auto' };
+const DEFAULTS = { name: 'Dashboard Hub (Docker)', network: 'auto', router: 'auto', scanSeconds: 300, port: remote.WEB_DEFAULT_PORT, panels: [], update: 'auto', alerts: { url: '', format: 'ntfy', onNew: true, onLeft: true, onBack: false } };
 function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return fallback; } }
 function writeJson(file, obj, mode) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -39,6 +41,18 @@ function cleanPanels(list) {
   });
   return panels;
 }
+const ALERT_FORMATS = ['ntfy', 'discord', 'slack', 'json'];
+function cleanAlertUrl(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return '';
+  try { const u = new URL(s); if ((u.protocol === 'http:' || u.protocol === 'https:') && s.length <= 300) return u.href; } catch (e) { /* not an address */ }
+  return null;
+}
+function cleanAlerts(a) {
+  a = a && typeof a === 'object' ? a : {};
+  const u = cleanAlertUrl(a.url), d = DEFAULTS.alerts;
+  return { url: u || '', format: ALERT_FORMATS.includes(a.format) ? a.format : d.format, onNew: a.onNew === undefined ? d.onNew : a.onNew === true, onLeft: a.onLeft === undefined ? d.onLeft : a.onLeft === true, onBack: a.onBack === undefined ? d.onBack : a.onBack === true };
+}
 function cleanConfig(c) {
   c = c && typeof c === 'object' ? c : {};
   const secs = parseInt(c.scanSeconds, 10), port = parseInt(c.port, 10);
@@ -49,7 +63,8 @@ function cleanConfig(c) {
     scanSeconds: secs >= 60 && secs <= 86400 ? secs : DEFAULTS.scanSeconds,
     port: port >= 1024 && port <= 65535 ? port : DEFAULTS.port,
     panels: cleanPanels(c.panels),
-    update: ['auto', 'check', 'off'].includes(c.update) ? c.update : DEFAULTS.update
+    update: ['auto', 'check', 'off'].includes(c.update) ? c.update : DEFAULTS.update,
+    alerts: cleanAlerts(c.alerts)
   };
 }
 const configFile = () => path.join(DATA, 'config.json');
@@ -101,16 +116,59 @@ const saveHistory = () => { if (!histTimer) histTimer = setTimeout(saveHistoryNo
 function saveHistoryNow() { if (histTimer) { clearTimeout(histTimer); histTimer = null; } try { writeJson(historyFile(), store); } catch (e) { log('Could not save the history: ' + (e && e.code || 'error')); } }
 
 const devList = () => Object.keys(state.devices).map((k) => state.devices[k]);
+const shownList = () => devList().filter((d) => !d.ignored);      // ignored devices stay on the server but are left off the map, the counts and the history
 const titleOf = (d) => d.label || d.hostname || d.ip || d.mac || 'Device';
 let histQueue = [], seen = new Set(), newCount = 0, baseline = false;
 function histEvent(kind, d) {
-  if (!d || d.isRouter) return;
+  if (!d || d.isRouter || d.ignored) return;
   histQueue.push({ kind: kind, key: d.key, t: Date.now(), mac: d.mac || '', ip: d.ip || '', name: titleOf(d), os: (d.os && d.os.id) || 'unknown', vendor: d.vendor || '' });
   if (histQueue.length > 2000) histQueue.shift();
+}
+// ---------- alerts: a message to your phone (ntfy, Discord, Slack or any web address) when a device is new, goes offline or comes back ----------
+function alertLine(ev) {
+  const who = (ev.name || ev.ip || ev.mac || 'A device') + (ev.ip && ev.name !== ev.ip ? ' (' + ev.ip + ')' : '') + (ev.kind === 'new' && ev.vendor ? ' - ' + ev.vendor : '');
+  return (ev.kind === 'new' ? 'New device: ' : ev.kind === 'left' ? 'Went offline: ' : 'Back online: ') + who;
+}
+function buildAlert(format, server, lines, extra) {
+  const title = 'Dashboard Hub: ' + server, body = lines.join('\n').slice(0, 1800);
+  if (format === 'discord') return { type: 'application/json', body: JSON.stringify({ content: (title + '\n' + body).slice(0, 1900) }), headers: {} };
+  if (format === 'slack') return { type: 'application/json', body: JSON.stringify({ text: title + '\n' + body }), headers: {} };
+  if (format === 'json') return { type: 'application/json', body: JSON.stringify({ title: title, message: body, server: server, events: extra || [] }), headers: {} };
+  return { type: 'text/plain; charset=utf-8', body: body, headers: { Title: title.replace(/[^\x20-\x7e]/g, '').slice(0, 100) || 'Dashboard Hub', Tags: 'satellite' } };
+}
+function postAlert(url, msg) {
+  return new Promise((resolve) => {
+    let u; try { u = new URL(url); } catch (e) { return resolve({ ok: false, error: 'The alert address is not valid.' }); }
+    const lib = u.protocol === 'https:' ? https : http;
+    const req = lib.request(u, { method: 'POST', timeout: 10000, headers: Object.assign({ 'Content-Type': msg.type, 'Content-Length': Buffer.byteLength(msg.body), 'User-Agent': 'DashboardHub-Alerts' }, msg.headers) }, (res) => {
+      res.resume(); res.on('end', () => resolve(res.statusCode >= 200 && res.statusCode < 300 ? { ok: true } : { ok: false, error: 'The alert address answered ' + res.statusCode + '.' }));
+    });
+    req.on('timeout', () => req.destroy(new Error('no answer')));
+    req.on('error', (e) => resolve({ ok: false, error: 'Could not reach the alert address (' + ((e && e.message) || 'error') + ').' }));
+    req.end(msg.body);
+  });
+}
+let lastAlertError = '';
+function sendAlerts(q) {
+  const al = config.alerts;
+  if (!al || !al.url) return;
+  const evs = q.filter((e) => (e.kind === 'new' && al.onNew) || (e.kind === 'left' && al.onLeft) || (e.kind === 'back' && al.onBack));
+  if (!evs.length) return;
+  const lines = evs.slice(0, 15).map(alertLine); if (evs.length > 15) lines.push('...and ' + (evs.length - 15) + ' more');
+  postAlert(al.url, buildAlert(al.format, config.name, lines, evs.slice(0, 50).map((e) => ({ kind: e.kind, name: e.name, ip: e.ip, mac: e.mac, vendor: e.vendor, at: e.t })))).then((r) => {
+    if (!r.ok) { if (r.error !== lastAlertError) log('Alert not sent: ' + r.error); lastAlertError = r.error; } else lastAlertError = '';
+  });
+}
+async function alertTest(a) {
+  const al = a && a.alerts ? cleanAlerts(a.alerts) : config.alerts, url = a && a.alerts ? cleanAlertUrl(a.alerts.url) : config.alerts.url;
+  if (!url) return { ok: false, error: 'Type the alert address first.' };
+  const r = await postAlert(url, buildAlert(al.format, config.name, ['This is a test message. Alerts are working.'], []));
+  return r.ok ? { ok: true, message: 'Test message sent.' } : r;
 }
 function flushHistory() {
   const q = histQueue; histQueue = [];
   if (!q.length) return;
+  try { sendAlerts(q); } catch (e) { /* alerts must never stop the scan */ }
   if (notifLib.apply(store, PROFILE_ID, config.name, q)) saveHistory();
 }
 function rekey(oldKey, newKey) {
@@ -230,6 +288,7 @@ async function runScan(reason) {
     });
     if (!r.ok) { ST.lastError = r.error || 'The scan could not start.'; log(ST.lastError); resolve(); } else session = r.session;
   });
+  try { await pingManual(); trackPresence(); saveState(); } catch (e) { /* manual machines are a bonus */ }
   ST.running = false;
   scheduleNext();
   return { ok: true };
@@ -246,8 +305,8 @@ function snapshot() {
   return {
     at: ST.lastAt || Date.now(),
     profile: { id: PROFILE_ID, name: config.name }, panels: config.panels,
-    devices: devList().map((d) => ({ key: d.key, name: d.isRouter && !d.label ? 'Router' : titleOf(d), ip: d.ip, mac: d.mac || '', vendor: d.vendor || '', os: d.os && d.os.id !== 'unknown' ? d.os.label : '', group: d.group || '', online: d.online !== false, isRouter: !!d.isRouter, self: !!d.self, x: d.x || 0, z: d.z || 0, lastSeen: d.lastSeen || null, onlineSince: d.onlineSince || null, ports: d.ports || [] })),
-    links: devList().filter((d) => !d.isRouter).map((d) => ({ a: 'router', b: d.key }))
+    devices: shownList().map((d) => ({ key: d.key, name: d.isRouter && !d.label ? 'Router' : titleOf(d), ip: d.ip, mac: d.mac || '', vendor: d.vendor || '', os: d.os && d.os.id !== 'unknown' ? d.os.label : '', group: d.group || '', online: d.online !== false, isRouter: !!d.isRouter, self: !!d.self, x: d.x || 0, z: d.z || 0, lastSeen: d.lastSeen || null, onlineSince: d.onlineSince || null, ports: d.ports || [] })),
+    links: shownList().filter((d) => !d.isRouter).map((d) => ({ a: 'router', b: d.key }))
   };
 }
 function uptimeFor(rangeMs, minDropMs) {
@@ -259,15 +318,85 @@ function uptimeFor(rangeMs, minDropMs) {
   return { ok: true, now: now, from: tl.from, to: tl.to, since: tl.since, watchedPct: tl.watchedPct, summary: notifLib.summary(tl, now), lines: notifLib.story(tl, now), linesAll: notifLib.story(tl, now, undefined, true), devices: tl.devices };
 }
 function info() {
-  const ds = devList().filter((d) => !d.isRouter);
-  return { mode: 'docker', version: VERSION, name: config.name, network: ST.cidr || state.cidr, router: ST.router || state.router, scanSeconds: config.scanSeconds, running: ST.running, progress: ST.scanning, lastScanAt: ST.lastAt, lastScanMs: ST.lastMs, nextScanAt: ST.nextAt, scans: state.scans,
+  const ds = shownList().filter((d) => !d.isRouter);
+  return { mode: 'docker', editable: true, version: VERSION, name: config.name, network: ST.cidr || state.cidr, router: ST.router || state.router, scanSeconds: config.scanSeconds, running: ST.running, progress: ST.scanning, lastScanAt: ST.lastAt, lastScanMs: ST.lastMs, nextScanAt: ST.nextAt, scans: state.scans,
     devices: ds.length, online: ds.filter((d) => d.online !== false).length, offline: ds.filter((d) => d.online === false).length, error: ST.lastError, uptimeSeconds: Math.round(process.uptime()) };
+}
+
+// ---------- device names, groups, ignore and manual add (Dashboard Hub Desktop) ----------
+const cleanName = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f<>]/g, '').trim().slice(0, n);
+function deviceRows() {
+  return devList().map((d) => ({ key: d.key, name: d.label || '', shownName: d.isRouter && !d.label ? 'Router' : titleOf(d), group: d.group || '', ip: d.ip || '', mac: d.mac || '', vendor: d.vendor || '', os: d.os && d.os.id !== 'unknown' ? d.os.label : '',
+    online: d.online !== false, ignored: !!d.ignored, manual: !!d.manual, isRouter: !!d.isRouter, self: !!d.self, lastSeen: d.lastSeen || null }))
+    .sort((a, b) => (b.isRouter - a.isRouter) || (a.ignored - b.ignored) || a.shownName.localeCompare(b.shownName));
+}
+async function pingManual() {       // machines typed in by hand that are outside the scanned network cannot be found by the scan, so they are pinged
+  const list = devList().filter((d) => d.manual && d.ip && (!ST.cidr || !inCidr(d.ip, ST.cidr)));
+  for (const d of list.slice(0, 100)) {
+    let up = false; try { up = !!(await scanner.pingHost(d.ip)); } catch (e) { up = false; }
+    if (up) { if (d.online === false) histEvent('back', d); d.online = true; d.misses = 0; d.lastSeen = Date.now(); if (!d.onlineSince) d.onlineSince = Date.now(); }
+    else { d.misses = (d.misses || 0) + 1; if (d.misses >= 2 && d.online !== false) { histEvent('left', d); d.online = false; d.onlineSince = null; } }
+  }
+}
+async function devicesAction(a) {
+  const op = String(a.op || 'list');
+  if (op === 'list') return { devices: deviceRows(), groups: Array.from(new Set(devList().map((d) => d.group).filter(Boolean))).sort() };
+  if (op === 'save') {
+    const ch = Array.isArray(a.changes) ? a.changes.slice(0, 1500) : [], errs = []; let n = 0;
+    ch.forEach((c) => {
+      const d = c && typeof c === 'object' ? state.devices[String(c.key || '')] : null;
+      if (!d) { errs.push('A device was not found.'); return; }
+      if (c.name !== undefined) { const nm = cleanName(c.name, 60); d.label = d.isRouter && !nm ? 'Router' : nm; }
+      if (c.group !== undefined) d.group = cleanName(c.group, 30);
+      if (c.ignored !== undefined) { if (d.isRouter || d.self) { if (c.ignored === true) errs.push((d.isRouter ? 'The router' : 'The server itself') + ' cannot be ignored.'); } else d.ignored = c.ignored === true; }
+      n++;
+    });
+    saveNow();
+    return errs.length ? { ok: false, error: errs[0], saved: n } : { saved: n };
+  }
+  if (op === 'add') {
+    const ip = String(a.ip || '').trim();
+    if (!validIp(ip) || !scanner.parseCidr(ip + '/32').ok) return { ok: false, error: 'Type a home network address like 192.168.0.50.' };
+    if (devList().some((d) => d.ip === ip)) return { ok: false, error: 'That address is already on the list.' };
+    if (devList().length >= 1500) return { ok: false, error: 'The list is full.' };
+    const p = spiralPos(devList().length);
+    const dev = { key: 'ip:' + ip, ip: ip, mac: null, vendor: '', hostname: '', label: cleanName(a.name, 60), group: cleanName(a.group, 30), os: { id: 'unknown', label: 'Unknown' }, ports: [], x: p.x, z: p.z, online: false, misses: 0, lastSeen: 0, firstSeen: Date.now(), onlineSince: null, isRouter: false, self: false, manual: true };
+    state.devices[dev.key] = dev;
+    let up = false; try { up = !!(await scanner.pingHost(ip)); } catch (e) { up = false; }
+    if (up) { dev.online = true; dev.lastSeen = Date.now(); dev.onlineSince = Date.now(); }
+    histEvent('seen', dev);
+    flushHistory(); saveNow();
+    return { added: dev.key, online: dev.online };
+  }
+  if (op === 'move') {
+    const d = state.devices[String(a.key || '')], x = Number(a.x), z = Number(a.z);
+    if (!d) return { ok: false, error: 'That device was not found.' };
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return { ok: false, error: 'The position is not valid.' };
+    d.x = Math.max(-1000, Math.min(1000, x)); d.z = Math.max(-1000, Math.min(1000, z));
+    saveState();
+    return { moved: true };
+  }
+  if (op === 'resetlayout') {
+    devList().forEach((d, i) => { if (d.isRouter) return; const p = spiralPos(i); d.x = p.x; d.z = p.z; });
+    if (state.devices.router) { state.devices.router.x = 0; state.devices.router.z = 0; }
+    saveNow();
+    return { reset: true };
+  }
+  if (op === 'forget') {
+    const d = state.devices[String(a.key || '')];
+    if (!d) return { ok: false, error: 'That device was not found.' };
+    if (d.isRouter || d.self) return { ok: false, error: 'The router and the server itself cannot be removed.' };
+    if (d.online !== false && !d.manual) return { ok: false, error: 'It is online right now. To hide it, choose Ignore instead.' };
+    delete state.devices[d.key]; saveNow();
+    return { removed: true };
+  }
+  return { ok: false, error: 'Unknown request.' };
 }
 
 // ---------- settings that Dashboard Hub Desktop can read and change ----------
 function getConfigInfo() {
   let ifs = []; try { ifs = scanner.listInterfaces().map((i) => ({ name: i.name, address: i.address, cidr: i.cidr })); } catch (e) { ifs = []; }
-  return { config: { name: config.name, network: config.network, router: config.router, scanSeconds: config.scanSeconds, panels: config.panels, update: config.update }, update: updater ? updater.status() : null, detected: { network: ST.detectedCidr || '', router: ST.detectedRouter || '' }, interfaces: ifs, port: config.port };
+  return { config: { name: config.name, network: config.network, router: config.router, scanSeconds: config.scanSeconds, panels: config.panels, update: config.update, alerts: config.alerts }, update: updater ? updater.status() : null, detected: { network: ST.detectedCidr || '', router: ST.detectedRouter || '' }, interfaces: ifs, port: config.port };
 }
 function changeConfig(a) {
   const errs = [], next = Object.assign({}, config);
@@ -278,6 +407,13 @@ function changeConfig(a) {
   }
   if (a.router !== undefined) { const r = String(a.router).trim(); if (r === 'auto') next.router = 'auto'; else if (validIp(r) && scanner.parseCidr(r + '/32').ok) next.router = r; else errs.push('The router address must be a home network address like 192.168.0.1, or Automatic.'); }
   if (a.scanSeconds !== undefined) { const n = parseInt(a.scanSeconds, 10); if (n >= 60 && n <= 86400) next.scanSeconds = n; else errs.push('Scan every: 60 seconds to 24 hours.'); }
+  if (a.alerts !== undefined) {
+    const al = a.alerts && typeof a.alerts === 'object' ? a.alerts : null, u = al ? (al.url === undefined ? config.alerts.url : cleanAlertUrl(al.url)) : null;
+    if (!al) errs.push('The alert settings are not valid.');
+    else if (u === null) errs.push('The alert address must start with http:// or https://.');
+    else if (al.format !== undefined && !ALERT_FORMATS.includes(al.format)) errs.push('Pick one of the alert types in the list.');
+    else next.alerts = cleanAlerts(Object.assign({}, config.alerts, al, { url: u }));
+  }
   if (a.update !== undefined) { if (['auto', 'check', 'off'].includes(a.update)) next.update = a.update; else errs.push('Updates must be Automatic, Only tell me, or Off.'); }
   if (a.panels !== undefined) {
     if (!Array.isArray(a.panels) || a.panels.length > 200) errs.push('Too many panels.');
@@ -319,14 +455,13 @@ async function main() {
   });
   // On every start (also when you press Restart in Portainer or Docker): look for a newer version FIRST and install it before anything else.
   if (config.update === 'auto' && process.env.DASHBOARD_HUB_BOOT === '1') {
-    log('Looking for a newer version...');
     const r = await Promise.race([updater.apply(), new Promise((res) => setTimeout(() => res(null), 45000))]).catch(() => null);
     if (r && r.updated) { log('Updated to ' + r.version + '. Starting it now.'); process.exit(42); }
     if (r && r.ok === false) log('No update installed: ' + r.error);
   }
   web = remote.createWebAccess({
     file: path.join(DATA, 'web-access.json'), version: VERSION, getSnapshot: snapshot, getUptime: uptimeFor, getInfo: info, getConfig: getConfigInfo,
-    actions: { config: changeConfig, update: updateNow, scan: () => { if (ST.running) return { started: false, message: 'A scan is already running.' }; runScan('requested').catch(() => {}); return { started: true }; } }
+    actions: { config: changeConfig, update: updateNow, alerttest: alertTest, devices: devicesAction, scan: () => { if (ST.running) return { started: false, message: 'A scan is already running.' }; runScan('requested').catch(() => {}); return { started: true }; } }
   });
   // the access code: from DASHBOARD_HUB_CODE, or one that was set before, or a new one shown once in the log
   const envCode = process.env.DASHBOARD_HUB_CODE;
@@ -361,4 +496,5 @@ function shutdown(code) {
 process.on('SIGTERM', () => shutdown(0)); process.on('SIGINT', () => shutdown(0));
 process.on('uncaughtException', (e) => { log('Unexpected problem: ' + (e && e.stack || e)); });
 process.on('unhandledRejection', (e) => { log('Unexpected problem: ' + (e && e.stack || e)); });
-main().catch((e) => { console.error(e); process.exit(1); });
+if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
+else module.exports = { _test: { sendAlerts: sendAlerts, setConfig: (c) => { config = cleanConfig(c); } } };      // for the tests only

@@ -1,7 +1,7 @@
 'use strict';
 //   node test/docker-update-test.js
 // The Docker version's self-update, with a pretend GitHub (a small web server on this computer): newer version found and installed,
-// a wrong fingerprint refused, a version that needs a rebuild refused, a version that will not start rolled back, "only tell me" mode.
+// a web page instead of the file refused, a version that needs a rebuild refused, a version that will not start rolled back, "only tell me" mode.
 // Not tested here: the real GitHub, the Docker image itself.
 const { spawn, execFileSync } = require('child_process');
 const fs = require('fs'), os = require('os'), path = require('path'), http = require('http'), net = require('net'), crypto = require('crypto');
@@ -47,10 +47,7 @@ function fakeGithub() {
     const n = rq.url.split('/').pop(); o.hits.push(n);
     if (o.files[n]) { rs.writeHead(200); rs.end(o.files[n]); } else { rs.writeHead(404); rs.end('no'); }
   });
-  o.publish = (version, buf, extra) => {
-    const name = 'dashboard-hub-docker-' + version + '.tar.gz'; o.files[name] = buf;
-    o.files['dashboard-hub-docker-latest.json'] = JSON.stringify(Object.assign({ version: version, file: name, sha256: crypto.createHash('sha256').update(buf).digest('hex'), base: 1 }, extra || {}));
-  };
+  o.publish = (buf) => { o.files['dashboard-hub-docker.tar.gz'] = buf; };
   return new Promise((res) => o.server.listen(0, '127.0.0.1', () => { o.port = o.server.address().port; res(o); }));
 }
 function startBoot(baked, env) {
@@ -68,7 +65,7 @@ const stopBoot = async (o) => { o.child.kill('SIGTERM'); await new Promise((r) =
 
   // ---- 1. automatic update ----
   let baked = makeBaked('1.0.0'), data = tmpd('data-'), port = await freePort();
-  gh.publish('1.0.1', makeBundle('1.0.1'));
+  gh.publish(makeBundle('1.0.1'));
   let b = startBoot(baked, { DASHBOARD_HUB_DATA: data, DASHBOARD_HUB_PORT: String(port), DASHBOARD_HUB_UPDATE_URL: url, DASHBOARD_HUB_UPDATE: 'auto' });
   check('the built-in version starts first', await waitFor(async () => (await req(port, 'GET', '/api/health')).code === 200, 15000), b.log);
   check('it finds, installs and restarts into the newer version by itself', await waitFor(() => /Running the updated version 1\.0\.1/.test(b.log), 40000), b.log);
@@ -89,18 +86,18 @@ const stopBoot = async (o) => { o.child.kill('SIGTERM'); await new Promise((r) =
   check('a rebuilt image that is newer than the saved update wins', !/updated version/.test(b.log) && (await req(port, 'GET', '/api/info', null, c)).json.version === '1.0.5', b.log);
   await stopBoot(b);
 
-  // ---- 2. bad fingerprint ----
+  // ---- 2. a web page instead of the file (the GitHub /blob/ mistake) ----
   baked = makeBaked('1.0.0'); data = tmpd('data-'); port = await freePort();
-  gh.publish('1.0.2', makeBundle('1.0.2')); gh.files['dashboard-hub-docker-latest.json'] = JSON.stringify(Object.assign(JSON.parse(gh.files['dashboard-hub-docker-latest.json']), { sha256: 'a'.repeat(64) }));
+  gh.publish(Buffer.from('<!DOCTYPE html><html><body>GitHub</body></html>'));
   b = startBoot(baked, { DASHBOARD_HUB_DATA: data, DASHBOARD_HUB_PORT: String(port), DASHBOARD_HUB_UPDATE_URL: url, DASHBOARD_HUB_UPDATE: 'auto' });
   await waitFor(async () => (await req(port, 'GET', '/api/health')).code === 200, 15000);
   await sleep(3500);
   c = await login(port); r = await req(port, 'GET', '/api/config', null, c);
-  check('a file with the wrong fingerprint is not installed', !/updated version/.test(b.log) && /fingerprint/.test(r.json.update.error) && !fs.existsSync(path.join(data, 'app', 'current.json')), JSON.stringify(r.json.update));
+  check('a web page instead of the bundle is not installed', !/updated version/.test(b.log) && /not a proper/.test(r.json.update.error) && !fs.existsSync(path.join(data, 'app', 'current.json')), JSON.stringify(r.json.update));
   await stopBoot(b);
 
   // ---- 3. needs a rebuild ----
-  gh.publish('1.0.3', makeBundle('1.0.3'), { base: 2 }); data = tmpd('data-'); port = await freePort();
+  gh.publish(makeBundle('1.0.3', (d) => { const f = path.join(d, 'package.json'), j = JSON.parse(fs.readFileSync(f, 'utf8')); j.dockerBase = 2; fs.writeFileSync(f, JSON.stringify(j)); })); data = tmpd('data-'); port = await freePort();
   b = startBoot(baked, { DASHBOARD_HUB_DATA: data, DASHBOARD_HUB_PORT: String(port), DASHBOARD_HUB_UPDATE_URL: url, DASHBOARD_HUB_UPDATE: 'auto' });
   await waitFor(async () => (await req(port, 'GET', '/api/health')).code === 200, 15000); await sleep(3000);
   c = await login(port); r = await req(port, 'GET', '/api/config', null, c);
@@ -108,7 +105,7 @@ const stopBoot = async (o) => { o.child.kill('SIGTERM'); await new Promise((r) =
   await stopBoot(b);
 
   // ---- 4. a version that will not start is rolled back ----
-  gh.publish('1.0.4', makeBundle('1.0.4', (d) => { fs.appendFileSync(path.join(d, 'server.js'), '\nprocess.exit(1);\n'); }));
+  gh.publish(makeBundle('1.0.4', (d) => { fs.appendFileSync(path.join(d, 'server.js'), '\nprocess.exit(1);\n'); }));
   data = tmpd('data-'); port = await freePort();
   b = startBoot(baked, { DASHBOARD_HUB_DATA: data, DASHBOARD_HUB_PORT: String(port), DASHBOARD_HUB_UPDATE_URL: url, DASHBOARD_HUB_UPDATE: 'auto' });
   check('a version that stops right away is dropped', await waitFor(() => /going back to the built-in version/i.test(b.log), 40000), b.log);
@@ -118,7 +115,7 @@ const stopBoot = async (o) => { o.child.kill('SIGTERM'); await new Promise((r) =
   await stopBoot(b);
 
   // ---- 5. only tell me, then install from Desktop ----
-  gh.publish('1.0.6', makeBundle('1.0.6'));
+  gh.publish(makeBundle('1.0.6'));
   data = tmpd('data-'); port = await freePort();
   b = startBoot(baked, { DASHBOARD_HUB_DATA: data, DASHBOARD_HUB_PORT: String(port), DASHBOARD_HUB_UPDATE_URL: url, DASHBOARD_HUB_UPDATE: 'check' });
   await waitFor(async () => (await req(port, 'GET', '/api/health')).code === 200, 15000); await sleep(3000);
@@ -143,24 +140,35 @@ const stopBoot = async (o) => { o.child.kill('SIGTERM'); await new Promise((r) =
   // ---- 6. unsafe update file ----
   const evil = tmpd('evil-'); fs.mkdirSync(path.join(evil, 'x')); fs.writeFileSync(path.join(evil, 'x', 'f'), 'x');
   const evilTar = path.join(evil, 'e.tar.gz'); execFileSync('tar', ['-czf', evilTar, '-C', evil, '--transform', 's,^x/f,../escaped.txt,', '--absolute-names', 'x/f']);
-  gh.publish('1.0.7', fs.readFileSync(evilTar)); data = tmpd('data-'); port = await freePort();
+  gh.publish(fs.readFileSync(evilTar)); data = tmpd('data-'); port = await freePort();
   b = startBoot(baked, { DASHBOARD_HUB_DATA: data, DASHBOARD_HUB_PORT: String(port), DASHBOARD_HUB_UPDATE_URL: url, DASHBOARD_HUB_UPDATE: 'auto' });
   await waitFor(async () => (await req(port, 'GET', '/api/health')).code === 200, 15000); await sleep(3500);
   check('an update file with an unsafe path is refused', !fs.existsSync(path.join(data, 'escaped.txt')) && !fs.existsSync(path.join(data, 'app', 'current.json')) && !/updated version/.test(b.log));
   await stopBoot(b);
   // ---- 7. restarting the container is what triggers the update ----
-  gh.publish('1.0.8', makeBundle('1.0.8'));
+  gh.publish(makeBundle('1.0.8'));
   data = tmpd('data-'); port = await freePort();
   b = startBoot(baked, { DASHBOARD_HUB_DATA: data, DASHBOARD_HUB_PORT: String(port), DASHBOARD_HUB_UPDATE_URL: url, DASHBOARD_HUB_UPDATE: 'auto', DASHBOARD_HUB_UPDATE_FIRST_MS: '99999999' });
   check('a start (restart) installs the newer version straight away', await waitFor(() => /Running the updated version 1\.0\.8/.test(b.log), 30000) && await waitFor(async () => { const cc = await login(port); return cc && (await req(port, 'GET', '/api/info', null, cc)).json.version === '1.0.8'; }, 20000), b.log);
   check('it did not serve the old version first', !/Dashboard Hub 1\.0\.0 \(Docker\) is running/.test(b.log), b.log);
   await stopBoot(b);
-  gh.published = null;
   // no internet / no update list: it starts anyway
   data = tmpd('data-'); port = await freePort();
   b = startBoot(baked, { DASHBOARD_HUB_DATA: data, DASHBOARD_HUB_PORT: String(port), DASHBOARD_HUB_UPDATE_URL: 'http://127.0.0.1:1', DASHBOARD_HUB_UPDATE: 'auto' });
   check('with no update server reachable it still starts the built-in version', await waitFor(async () => (await req(port, 'GET', '/api/health')).code === 200, 30000) && /No update installed/.test(b.log), b.log);
   await stopBoot(b);
-  gh.server.close();
+  // ---- 8. containers built from 1.29.1 (the old kind of update) can still update ----
+  // The real 1.29.1 program files are kept in test/fixtures; the bundle script must keep making the pair they understand.
+  const outDir = tmpd('mk-'); execFileSync(process.execPath, [path.join(ROOT, 'tools', 'make-docker-bundle.js'), outDir], { stdio: 'ignore' });
+  const legacyDir = path.join(outDir, 'for-old-containers'), curVer = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+  check('the bundle script makes the single file and the pair for old containers', fs.existsSync(path.join(outDir, 'dashboard-hub-docker.tar.gz')) && fs.existsSync(path.join(legacyDir, 'dashboard-hub-docker-' + curVer + '.tar.gz')) && fs.existsSync(path.join(legacyDir, 'dashboard-hub-docker-latest.json')));
+  const old = makeBaked('1.29.1');
+  ['server.js', 'updater.js', 'boot.js'].forEach((f) => fs.copyFileSync(path.join(ROOT, 'test', 'fixtures', 'docker-1.29.1', f), path.join(old, 'docker', f)));
+  gh.files = {}; fs.readdirSync(legacyDir).forEach((f) => { gh.files[f] = fs.readFileSync(path.join(legacyDir, f)); });
+  data = tmpd('data-'); port = await freePort();
+  b = startBoot(old, { DASHBOARD_HUB_DATA: data, DASHBOARD_HUB_PORT: String(port), DASHBOARD_HUB_UPDATE_URL: url, DASHBOARD_HUB_UPDATE: 'auto' });
+  check('the real 1.29.1 container installs the current version from that pair', await waitFor(() => new RegExp('Running the updated version ' + curVer.replace(/\./g, '\\.')).test(b.log), 40000), b.log);
+  check('and then it is running the current version', await waitFor(async () => { const cc = await login(port); return cc && (await req(port, 'GET', '/api/info', null, cc)).json.version === curVer; }, 20000), b.log);
+  await stopBoot(b);
   console.log('\n' + passed + ' passed, ' + failed + ' failed'); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

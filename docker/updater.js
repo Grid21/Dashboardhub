@@ -1,14 +1,13 @@
 'use strict';
 // Self-update for the Docker version.
-// It looks for  dashboard-hub-docker-latest.json  in your GitHub repository (next to the dashboard-hub-docker-<version>.tar.gz you upload there),
-// downloads the newer bundle, checks its fingerprint (sha256), unpacks it into the data folder (/data/app/<version>) and asks the program to restart.
+// It downloads  dashboard-hub-docker.tar.gz  from your GitHub repository (the same one file you install from), reads the version inside it,
+// and if that is newer, unpacks it into the data folder (/data/app/<version>) and asks the program to restart.
 // docker/boot.js (the small starter inside the image) then runs the newer copy. If the newer copy cannot start, the starter goes back to the built-in one.
 // Things that live in the image itself (Linux packages, the starter) cannot change this way: the update file says so ("base") and you rebuild once.
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const http = require('http');
-const crypto = require('crypto');
 const cp = require('child_process');
 
 const num = (v) => String(v).split('.').map((p) => parseInt(p, 10) || 0);
@@ -55,18 +54,27 @@ module.exports = function createUpdater(o) {
   const badFile = path.join(appDir, 'bad.json');
   const bad = () => { try { return JSON.parse(fs.readFileSync(badFile, 'utf8')).versions || []; } catch (e) { return []; } };
 
-  async function manifest() {
-    const buf = await fetchBuf(baseUrl() + '/dashboard-hub-docker-latest.json', 100000);
-    let m; try { m = JSON.parse(buf.toString('utf8')); } catch (e) { throw new Error('The update list is not readable.'); }
-    if (!m || !validVersion(m.version) || !/^dashboard-hub-docker-\d{1,3}\.\d{1,3}\.\d{1,3}\.tar\.gz$/.test(String(m.file || '')) || !/^[0-9a-f]{64}$/.test(String(m.sha256 || ''))) throw new Error('The update list is not valid.');
-    if (m.file !== 'dashboard-hub-docker-' + m.version + '.tar.gz') throw new Error('The update list does not match its file name.');
-    return { version: m.version, file: m.file, sha256: m.sha256, base: Number(m.base) || 1, notes: String(m.notes || '').slice(0, 300) };
+  const BUNDLE = 'dashboard-hub-docker.tar.gz';
+  // Downloads the one bundle file, checks that it is a safe tar.gz and reads its version from the package.json inside it.
+  async function fetchBundle() {
+    const buf = await fetchBuf(baseUrl() + '/' + BUNDLE, 30 * 1024 * 1024);
+    const tgz = path.join(appDir, 'download.tar.gz');
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(tgz, buf);
+    try {
+      let names;
+      try { names = cp.execFileSync('tar', ['-tzf', tgz], { encoding: 'utf8', maxBuffer: 4000000 }).split('\n').filter(Boolean); } catch (e) { throw new Error('The file on GitHub is not a proper dashboard-hub-docker.tar.gz (is it the GitHub web page and not the file?).'); }
+      if (!names.length || names.length > 200) throw new Error('The update file has an unexpected number of files.');
+      names.forEach((n) => { if (n.startsWith('/') || n.split('/').includes('..')) throw new Error('The update file has an unsafe file name.'); });
+      let pj; try { pj = JSON.parse(cp.execFileSync('tar', ['-xzOf', tgz, 'dashboard-hub-docker/package.json'], { encoding: 'utf8', maxBuffer: 1000000 })); } catch (e) { throw new Error('The update file has no readable package.json.'); }
+      if (!validVersion(pj.version)) throw new Error('The update file has no valid version.');
+      return { buf, version: pj.version, base: Number(pj.dockerBase) || 1, notes: String(pj.dockerNotes || '').slice(0, 300) };
+    } finally { try { fs.unlinkSync(tgz); } catch (e) { /* already gone */ } }
   }
-
   async function check() {
     st.checkedAt = Date.now();
     try {
-      const m = await manifest();
+      const m = await fetchBundle();
       st.latest = m.version; st.error = ''; st.needsRebuild = m.base > o.base; st.notes = m.notes;
       return m;
     } catch (e) { st.error = e.message || 'Update check failed.'; return null; }
@@ -74,13 +82,9 @@ module.exports = function createUpdater(o) {
 
   function extractAndPlace(buf, m) {
     const tmp = path.join(appDir, 'tmp-' + m.version), final = path.join(appDir, m.version), tgz = tmp + '.tar.gz';
-    fs.mkdirSync(appDir, { recursive: true });
     rmrf(tmp); rmrf(final);
     fs.writeFileSync(tgz, buf);
     try {
-      const names = cp.execFileSync('tar', ['-tzf', tgz], { encoding: 'utf8', maxBuffer: 4000000 }).split('\n').filter(Boolean);
-      if (!names.length || names.length > 200) throw new Error('The update file has an unexpected number of files.');
-      names.forEach((n) => { if (n.startsWith('/') || n.split('/').includes('..')) throw new Error('The update file has an unsafe file name.'); });
       fs.mkdirSync(tmp);
       cp.execFileSync('tar', ['-xzf', tgz, '-C', tmp, '--no-same-owner', '--no-same-permissions']);
     } finally { try { fs.unlinkSync(tgz); } catch (e) { /* already gone */ } }
@@ -89,8 +93,6 @@ module.exports = function createUpdater(o) {
     need.forEach((f) => { if (!fs.existsSync(path.join(top, f))) throw new Error('The update file is missing ' + f + '.'); });
     fs.mkdirSync(path.join(top, 'docker'));
     ['server.js', 'updater.js'].forEach((f) => fs.renameSync(path.join(top, f), path.join(top, 'docker', f)));
-    const pv = JSON.parse(fs.readFileSync(path.join(top, 'package.json'), 'utf8')).version;
-    if (pv !== m.version) throw new Error('The update file is version ' + pv + ', not ' + m.version + '.');
     // the new program must at least be readable by Node
     cp.execFileSync(process.execPath, ['--check', path.join(top, 'docker', 'server.js')], { stdio: 'ignore' });
     fs.renameSync(top, final); rmrf(tmp);
@@ -102,15 +104,14 @@ module.exports = function createUpdater(o) {
     if (!o.supervised) return { ok: false, error: 'This container was built before updates were possible. Rebuild it once from the newest bundle.' };
     st.busy = true;
     try {
+      log('Looking for a newer version...');
       const m = await check();
       if (!m) return { ok: false, error: st.error };
       if (!newer(m.version, o.version)) return { ok: true, updated: false, message: 'Already the newest version (' + o.version + ').' };
       if (m.base > o.base) return { ok: false, error: 'Version ' + m.version + ' needs the container to be rebuilt once (the Linux part changed). Download the bundle and run docker compose up -d --build.' };
       if (bad().includes(m.version)) return { ok: false, error: 'Version ' + m.version + ' did not start here before, so it was skipped. Upload a newer one.' };
-      log('Downloading version ' + m.version + '...');
-      const buf = await fetchBuf(baseUrl() + '/' + m.file, 30 * 1024 * 1024);
-      if (crypto.createHash('sha256').update(buf).digest('hex') !== m.sha256) throw new Error('The downloaded file does not match its fingerprint, so it was not installed.');
-      const dir = extractAndPlace(buf, m);
+      log('Installing version ' + m.version + '...');
+      const dir = extractAndPlace(m.buf, m);
       const cur = path.join(appDir, 'current.json');
       fs.writeFileSync(cur + '.tmp', JSON.stringify({ version: m.version, dir: dir }), { mode: 0o600 }); fs.renameSync(cur + '.tmp', cur);
       // keep only this version and the one running now
@@ -121,11 +122,7 @@ module.exports = function createUpdater(o) {
   }
 
   async function cycle() {
-    const m = await check();
-    if (mode() === 'auto' && m && newer(m.version, o.version) && m.base <= o.base && !bad().includes(m.version)) {
-      const r = await apply();
-      if (r.updated && o.restart) o.restart();
-    }
+    if (mode() === 'auto') { const r = await apply(); if (r.updated && o.restart) o.restart(); } else await check();
   }
   return {
     check, apply, newer,

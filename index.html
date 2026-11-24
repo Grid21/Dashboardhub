@@ -391,6 +391,17 @@
     <div class="dialog-buttons"><button type="button" id="aboutClose" class="primary">Close</button></div>
   </dialog>
 
+  <dialog id="hubDevDialog">
+    <h3 id="hdTitle">Devices</h3>
+    <p class="hint">Give machines a name and a group, or ignore the ones you do not want on the map and in the counts (they are kept on the server and can be brought back). Changes are kept on the server.</p>
+    <div id="hdList" class="hd-list"></div>
+    <datalist id="hdGroups"></datalist>
+    <h4>Add a machine by hand</h4>
+    <p class="hint">For something the scan cannot see, for example a machine on another network. The server pings it to see if it is online.</p>
+    <div class="pxe-row"><input type="text" id="hdAddIp" placeholder="192.168.0.50" maxlength="15"><input type="text" id="hdAddName" placeholder="Name" maxlength="60"><input type="text" id="hdAddGroup" placeholder="Group" maxlength="30" list="hdGroups"><button type="button" id="hdAdd">Add</button></div>
+    <p class="hint" id="hdMsg" role="status"></p>
+    <div class="dialog-buttons"><button type="button" id="hdSave">Save</button><span class="spacer"></span><button type="button" id="hdClose">Close</button></div>
+  </dialog>
   <dialog id="hubCfgDialog">
     <h3 id="hubCfgTitle">Server settings</h3>
     <p class="hint">These settings are kept on the server itself, so they stay after it restarts.</p>
@@ -402,6 +413,11 @@
     <div class="pxe-row"><label class="field-label" for="hcScan">Scan every</label><select id="hcScan"><option value="60">1 minute</option><option value="120">2 minutes</option><option value="300">5 minutes</option><option value="600">10 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option></select></div>
     <div class="pxe-row"><label class="field-label" for="hcUpdate">Updates</label><select id="hcUpdate"><option value="auto">Install new versions by itself</option><option value="check">Only tell me</option><option value="off">Off</option></select><button type="button" id="hcUpdNow">Check now</button></div>
     <p class="hint" id="hcUpdHint"></p>
+    <h4>Alerts</h4>
+    <p class="hint">A message to your phone when something changes. Use a free ntfy topic (ntfy.sh), a Discord or Slack web hook, or any web address that accepts a POST. Leave the address empty for no alerts.</p>
+    <div class="pxe-row"><input type="text" id="hcAlUrl" placeholder="https://ntfy.sh/your-secret-topic" maxlength="300"><select id="hcAlFmt"><option value="ntfy">ntfy (plain text)</option><option value="discord">Discord web hook</option><option value="slack">Slack web hook</option><option value="json">Other (JSON)</option></select></div>
+    <div class="pxe-row"><label><input type="checkbox" id="hcAlNew"> A new device appears</label><label><input type="checkbox" id="hcAlLeft"> A device goes offline</label><label><input type="checkbox" id="hcAlBack"> A device comes back</label><button type="button" id="hcAlTest">Send a test message</button></div>
+    <p class="hint" id="hcAlMsg" role="status"></p>
     <h4>Panels</h4>
     <p class="hint">Web pages you want as buttons on the server's page (for example your router, Portainer or Pi-hole). Each needs an address starting with http:// or https://.</p>
     <div id="hcPanels"></div>

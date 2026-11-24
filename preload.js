@@ -91,6 +91,8 @@ contextBridge.exposeInMainWorld('hubsApi', {
   open: (id) => ipcRenderer.invoke('hubs:open', String(id || '')),
   getConfig: (id) => ipcRenderer.invoke('hubs:getConfig', String(id || '')),
   setConfig: (id, cfg) => ipcRenderer.invoke('hubs:setConfig', String(id || ''), cfg),
+  devices: (id, args) => ipcRenderer.invoke('hubs:devices', String(id || ''), args),
+  alertTest: (id, a) => ipcRenderer.invoke('hubs:alertTest', String(id || ''), a),
   update: (id, apply) => ipcRenderer.invoke('hubs:update', String(id || ''), apply !== false)
 });
 

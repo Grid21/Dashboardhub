@@ -2,6 +2,39 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.35.0
+- **3D map on the browser page.** The Map tab has a **3D** button: the same map seen from a tilted camera, every device a little box standing on a grid floor (offline ones red). Drag empty space to turn the view, mouse wheel or two-finger pinch to zoom, tap a box for its details, drag a box to move it across the floor (saved on the Docker server like in the flat map). **Fit** resets the camera, **2D** goes back. Your choice is remembered in that browser. In a big network the names show when you zoom in. It also works on the page served by Dashboard Hub Desktop. It is drawn with plain canvas (no WebGL needed), so it works on any phone browser.
+- Tested: 31 checks on the Docker page including the 3D view (turning, zooming, dragging a box, saving, back to 2D). Looked at it in a phone-sized window.
+
+## 1.34.0
+- **Docker version: alerts to your phone.** The server can send a message when a **new device** appears, a device **goes offline** or **comes back online** (you choose which). It works with a free **ntfy** topic (ntfy.sh, or your own ntfy server), a **Discord** or **Slack** web hook, or any web address that accepts a POST (plain JSON). One message per scan, at most 15 lines ("...and 5 more"), ignored devices never alert, and the first scan after a fresh start does not flood you with "new device" messages. Set it up in the server's **Settings** (browser page or Dashboard Hub Desktop > Remote servers > Settings > Alerts), with a **Send a test message** button. Nothing is sent until you type an address.
+- The alert address is like a password for your topic: it is kept in the server's data folder and only shown to someone who has the access code.
+- Tested: 20 checks of the messages (all four types, choices, flood, unreachable or failing address, saving, test button), plus the browser page (23) and Desktop window (33). Not tested: the real ntfy, Discord or Slack.
+
+## 1.33.0
+- **Docker version: change its settings from the browser page.** A new **Settings** tab on the server's own page (phone or computer) lets you change the server's name, the network to scan, the router, how often it scans, the update choice (with "Check now / Install now") and its panels, with the same checks and messages as in Dashboard Hub Desktop. Now everything about the Docker version can be managed from either place.
+- Tested: 21 checks on the Docker page (including wrong panel address refused, save, update choice, check now).
+
+## 1.32.0
+- **Move the dots on the browser map.** On the server's web page, drag any device dot on the Map tab to where you want it; drag empty space to pan, pinch or wheel to zoom, tap a dot for details. On the Docker version the new place is saved on the server (everyone sees it, also after restarts and updates). On the page served by Dashboard Hub Desktop the move is kept only in that browser. **Reset** puts the dots back in the automatic layout.
+- Fixed: on a narrow phone screen the tab bar could slide under the page header when the page was scrolled.
+- Tested: 14 checks on the Docker page (including dragging, saving, reload, reset), 36 on the Desktop's page, 71 on the server.
+
+## 1.31.0
+- **Docker version: edit devices from the browser page.** On the server's own page (phone or computer browser), the Devices tab now lets you open a machine and change its name and group, tick Ignore, show the ignored machines and bring them back, and add a machine by hand. (Settings, network and panels are still edited from Dashboard Hub Desktop.)
+- **Old containers keep updating.** The Docker bundle script now also makes the old kind of update pair (`for-old-containers/`) for containers built from 1.29.0 or 1.29.1, and a test runs the real 1.29.1 program against it, so a future change cannot silently cut them off. New standing rule 7 in `DEVELOPMENT-RULES.md`.
+- The log no longer prints "Looking for a newer version..." twice.
+- Tested: 28 update checks (including the real 1.29.1 program updating itself), 8 checks of the browser page editing, plus all earlier tests. Simulated network, not a real container.
+
+## 1.30.0
+- **Docker version, stage 3: device names, groups, ignore and add by hand, from Dashboard Hub Desktop.** In Settings > Remote servers each server has a **Devices** button: give any machine a name and a group, tick **Ignore** to leave a machine off the map, the counts and the history (it stays on the server and can be brought back), **Forget** an offline machine, or **add a machine by hand** by its address (for something the scan cannot see, such as a machine on another network; the server pings it to see if it is online). Names and groups show on the server's page and map and stay after restarts and updates.
+- The router and the server itself cannot be ignored or forgotten.
+- Tested: 67 checks on the server (including the new device requests, cleaning of names, restart) and 30 on Desktop's window. Simulated network, not a real container. Editing from the browser page is not done yet.
+
+## 1.29.2
+- **One file to upload.** The Docker bundle is now always called `dashboard-hub-docker.tar.gz` and the server reads the version from inside it, so there is no separate update list and no fingerprint file. Upload that one file to GitHub; it is used both for the first install (curl) and for updates.
+- Tested: 25 checks with a pretend GitHub, including a web page instead of the file.
+
 ## 1.29.1
 - **Docker version: restarting it now updates it.** Every time the container starts (also when you press Restart in Portainer), it first looks for a newer version on your GitHub and, if there is one, installs it and starts that instead (with "Install new versions by itself" on). Nothing is served from the old version first. If GitHub cannot be reached it just starts normally.
 - Tested: 25 checks with a pretend GitHub, including a restart that updates and a start with no connection.

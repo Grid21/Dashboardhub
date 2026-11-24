@@ -1,6 +1,6 @@
 {
   "name": "dashboard-hub",
-  "version": "1.29.1",
+  "version": "1.35.0",
   "description": "All my local web panels in one window",
   "main": "main.js",
   "author": "Me",

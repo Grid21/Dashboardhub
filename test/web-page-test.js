@@ -42,6 +42,18 @@ function freePort() { return new Promise((res) => { const s = net.createServer()
     const tap = await page.evaluate(() => { const r = document.getElementById('map').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
     await page.mouse.click(tap.x + tap.w / 2, tap.y + tap.h / 2); await sleep(300);
     check(scheme + ': tapping the middle shows the router details', /Router/.test(await page.textContent('#mapDetail')) || await page.isHidden('#mapDetail'));
+    // moving a dot on the computer's page: only for this browser (that page is view-only for the network)
+    {
+      const dots = () => page.evaluate(() => document.getElementById('map').dhDots());
+      let ds = await dots(); const v = ds.find((d) => d.key === 'k2'), r0 = tap;
+      await page.mouse.move(r0.x + v.x, r0.y + v.y); await page.mouse.down(); await page.mouse.move(r0.x + v.x + 40, r0.y + v.y + 30, { steps: 6 }); await page.mouse.up(); await sleep(300);
+      ds = await dots(); const m = ds.find((d) => d.key === 'k2');
+      check(scheme + ': a dot can be dragged on the map', Math.abs(m.x - v.x - 40) < 5 && Math.abs(m.y - v.y - 30) < 5, JSON.stringify([v, m]));
+      check(scheme + ': the move is remembered in this browser only', await page.evaluate(() => Object.keys(localStorage).some((k) => /^dh-pos-/.test(k) && /k2/.test(localStorage.getItem(k)))));
+      await page.evaluate(() => window.scrollTo(0, 0));
+      page.once('dialog', (dl) => dl.accept()); await page.click('#resetPos'); await sleep(600);
+      check(scheme + ': Reset forgets the moves', await page.evaluate(() => !Object.keys(localStorage).some((k) => /^dh-pos-/.test(k) && /k2/.test(localStorage.getItem(k)))));
+    }
     await page.click('[data-tab=devices]'); await sleep(400);
     check(scheme + ': devices are listed, offline ones first', await page.evaluate(() => { const b = document.querySelectorAll('#devList .dev b'); return b.length === 9 && b[0].textContent === 'Printer'; }));
     await page.fill('#q', 'prox'); await sleep(300);

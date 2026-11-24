@@ -73,11 +73,16 @@ test/corrupt-data-test.js
 test/dialog-fit-test.js
 test/dialog-shot.png
 test/dns-test.js
+test/docker-alerts-test.js
+test/docker-page-test.js
 test/docker-server-test.js
 test/docker-update-test.js
 test/ensure-node-test.sh
 test/filter-test.js
 test/find-test.js
+test/fixtures/docker-1.29.1/boot.js
+test/fixtures/docker-1.29.1/server.js
+test/fixtures/docker-1.29.1/updater.js
 test/folder-harness.js
 test/folder-test.js
 test/fullscreen-test.js

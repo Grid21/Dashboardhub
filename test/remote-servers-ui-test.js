@@ -25,7 +25,7 @@ function freePort() { return new Promise((res) => { const s = net.createServer()
   await page.fill('#hubCode', 'wrong code!'); await page.click('#hubSave'); await sleep(1500);
   check('a server can be saved, and a wrong code is explained when checked', /not right/.test(await page.textContent('#hubsList')), await page.textContent('#hubsList'));
   const id = await page.evaluate(async () => (await window.hubsApi.list()).list[0].id);
-  await page.evaluate((id) => document.querySelector('.hub-row button:nth-child(5)').click(), id); await sleep(200);
+  await page.evaluate((id) => document.querySelector('.hub-row button:nth-child(6)').click(), id); await sleep(200);
   await page.fill('#hubCode', 'server code 1'); await page.click('#hubSave'); await sleep(300);
   await page.click('.hub-row button:nth-child(1)'); await sleep(2500);
   const txt = await page.textContent('#hubsList');
@@ -52,6 +52,14 @@ function freePort() { return new Promise((res) => { const s = net.createServer()
     check('the router hint says what the server found', /Found by the server/.test(await page.textContent('#hcRouterHint')));
     await page.fill('#hcName', 'Renamed from Desktop');
     await page.selectOption('#hcScan', '600');
+    const rxGot = [], rxs = require('http').createServer((q, s) => { rxGot.push(q.url); q.resume(); s.writeHead(200); s.end('ok'); });
+    await new Promise((r) => rxs.listen(0, '127.0.0.1', r)); const rxUrl = 'http://127.0.0.1:' + rxs.address().port + '/desktop';
+    await page.fill('#hcAlUrl', rxUrl); await page.check('#hcAlBack');
+    await page.click('#hcAlTest'); await sleep(1500);
+    check('the test message button sends a message and says so', rxGot.length === 1 && rxGot[0] === '/desktop' && /sent/i.test(await page.textContent('#hcAlMsg')), JSON.stringify([rxGot, await page.textContent('#hcAlMsg')]));
+    await page.fill('#hcAlUrl', 'ftp://bad'); await page.click('#hcAlTest'); await sleep(1000);
+    check('a wrong alert address is explained', /http/i.test(await page.textContent('#hcAlMsg')) || /address/i.test(await page.textContent('#hcAlMsg')), await page.textContent('#hcAlMsg'));
+    await page.fill('#hcAlUrl', rxUrl);
     await page.click('#hcAddPanel'); await sleep(200);
     const rows = await page.$$('#hcPanels .hc-panel');
     await rows[1].$eval('.hc-pn', (e) => { e.value = 'Pi-hole'; });
@@ -67,9 +75,28 @@ function freePort() { return new Promise((res) => { const s = net.createServer()
     const cfg = await page.evaluate(async () => { const l = (await window.hubsApi.list()).list; return window.hubsApi.getConfig(l[0].id); });
     check('the server really has the new name, scan time and panels', cfg.ok && cfg.config.config.name === 'Renamed from Desktop' && cfg.config.config.scanSeconds === 600 && cfg.config.config.panels.length === 2 && cfg.config.config.panels[1].name === 'Pi-hole', JSON.stringify(cfg).slice(0, 300));
     const st2 = await page.evaluate(async () => { const l = (await window.hubsApi.list()).list; return window.hubsApi.setConfig(l[0].id, { router: '192.168.0.1', network: 'auto' }); });
+    check('the alert address and choices were saved with the settings', cfg.config.config.alerts.url === rxUrl && cfg.config.config.alerts.onBack === true && cfg.config.config.alerts.onNew === true, JSON.stringify(cfg.config.config.alerts));
+    rxs.close();
     check('the router can be set from Desktop', st2.ok === true && st2.config.router === '192.168.0.1', JSON.stringify(st2));
     const st3 = await page.evaluate(async () => { const l = (await window.hubsApi.list()).list; return window.hubsApi.setConfig(l[0].id, { scanSeconds: 3 }); });
     check('and a bad value comes back as a plain message', st3.ok === false && /Scan every/.test(st3.error), JSON.stringify(st3));
+  }
+  // ----- the devices window -----
+  await page.click('.hub-row button:nth-child(5)'); await sleep(1500);
+  const devOpen = await page.isVisible('#hubDevDialog');
+  check('Devices opens a window with every device of the server', devOpen && await page.evaluate(() => document.querySelectorAll('#hdList .hd-row').length >= 2));
+  if (devOpen) {
+    if (process.env.RS_SHOT2) await page.screenshot({ path: process.env.RS_SHOT2 });
+    check('the router has no Ignore box to tick', await page.evaluate(() => { const r = Array.from(document.querySelectorAll('#hdList .hd-row')).find((x) => x.dataset.key === 'router'); return !!r && r.querySelector('.hd-i').disabled; }));
+    await page.evaluate(() => { const r = Array.from(document.querySelectorAll('#hdList .hd-row')).find((x) => x.dataset.key !== 'router'); r.querySelector('.hd-n').value = 'Desk PC'; r.querySelector('.hd-g').value = 'Office'; r.querySelector('.hd-i').checked = false; });
+    await page.click('#hdSave'); await sleep(1200);
+    check('Save says how many changes were kept', /Saved 1 change/.test(await page.textContent('#hdMsg')), await page.textContent('#hdMsg'));
+    check('and the name and group are really on the server', await page.evaluate(async () => { const l = (await window.hubsApi.list()).list; const r = await window.hubsApi.devices(l[0].id, { op: 'list' }); return r.devices.some((d) => d.name === 'Desk PC' && d.group === 'Office'); }));
+    await page.fill('#hdAddIp', 'hello'); await page.click('#hdAdd'); await sleep(900);
+    check('a bad address is explained', /home network address/.test(await page.textContent('#hdMsg')), await page.textContent('#hdMsg'));
+    await page.fill('#hdAddIp', '10.88.0.9'); await page.fill('#hdAddName', 'Garage Pi'); await page.click('#hdAdd'); await sleep(2500);
+    check('adding a machine by hand puts it in the list', /Added/.test(await page.textContent('#hdMsg')) && await page.evaluate(() => Array.from(document.querySelectorAll('#hdList .hd-row')).some((x) => x.dataset.key === 'ip:10.88.0.9')), await page.textContent('#hdMsg'));
+    await page.click('#hdClose'); await sleep(200);
   }
   // page not reachable
   await page.evaluate(() => window.hubsApi.save({ name: 'Gone', url: 'http://127.0.0.1:1', code: 'whatever1' }));

@@ -52,6 +52,25 @@ function req(port, method, p, body, cookie, headers) {
   check('an address that answers with an error does not break anything either', !threw && got.length === 1);
 
   // ---- the real server: settings and the test button ----
+  // ----- quiet hours -----
+  const at = (h, m) => { const d = new Date(2026, 5, 1, h, m, 0); return d; };
+  T.setConfig(base({ quietFrom: '22:00', quietTo: '07:00' }));
+  check('a night-time quiet period (22:00 to 07:00) covers 23:30 and 03:00 but not noon or 07:00', T.inQuiet(base({ quietFrom: '22:00', quietTo: '07:00' }).alerts, at(23, 30)) && T.inQuiet(base({ quietFrom: '22:00', quietTo: '07:00' }).alerts, at(3, 0)) && !T.inQuiet(base({ quietFrom: '22:00', quietTo: '07:00' }).alerts, at(12, 0)) && !T.inQuiet(base({ quietFrom: '22:00', quietTo: '07:00' }).alerts, at(7, 0)));
+  check('a daytime quiet period (09:00 to 17:00) works too', T.inQuiet({ quietFrom: '09:00', quietTo: '17:00' }, at(10, 0)) && !T.inQuiet({ quietFrom: '09:00', quietTo: '17:00' }, at(18, 0)));
+  check('with no times set it is never quiet', !T.inQuiet({ quietFrom: '', quietTo: '' }, at(3, 0)));
+  got.length = 0; await T.sendAlerts(evs, at(23, 0)); await sleep(400);
+  check('during quiet hours nothing is sent, the alerts are kept', got.length === 0 && T.heldCount() === 2, T.heldCount());
+  await T.releaseHeld(at(23, 30)); await sleep(300);
+  check('still quiet: still nothing sent', got.length === 0 && T.heldCount() === 2);
+  await T.releaseHeld(at(7, 5)); await sleep(500);
+  check('when the quiet time is over, one message with everything that was kept', got.length === 1 && /While it was quiet/.test(got[0].body) && /New device: Laptop/.test(got[0].body) && /Went offline: Printer/.test(got[0].body) && T.heldCount() === 0, JSON.stringify(got));
+  const lg = T.log();
+  check('the list of recent alerts shows what was held and then sent', lg.some((x) => x.status === 'held') && lg[lg.length - 1].status === 'sent' && lg[lg.length - 1].count === 2, JSON.stringify(lg));
+  check('and it is saved in the data folder', JSON.parse(fs.readFileSync(path.join(data, 'alert-log.json'), 'utf8')).length === lg.length);
+  got.length = 0; T.setConfig(base({ quietFrom: '22:00', quietTo: '07:00' })); await T.sendAlerts(evs, at(23, 0)); T.setConfig(base()); await T.releaseHeld(at(23, 10)); await sleep(500);
+  check('if quiet hours are switched off while alerts are kept, they go out right away', got.length === 1 && T.heldCount() === 0);
+  T.setConfig(base({ quietFrom: '22:00', quietTo: '22:00' })); check('the same start and end time means no quiet hours', !T.inQuiet(base({ quietFrom: '22:00', quietTo: '22:00' }).alerts, at(22, 0)));
+  T.setConfig(base({ quietFrom: '25:99', quietTo: '07:00' })); check('a wrong time is ignored', !T.inQuiet({ quietFrom: '', quietTo: '' }, at(23, 0)));
   const port = await freePort();
   const child = spawn(process.execPath, [path.join(ROOT, 'docker', 'server.js')], { env: Object.assign({}, process.env, { DASHBOARD_HUB_DATA: fs.mkdtempSync(path.join(os.tmpdir(), 'al2-')), DASHBOARD_HUB_PORT: String(port), DASHBOARD_HUB_CODE: 'alert test code', DASHBOARD_HUB_NETWORK: '127.0.0.0/24', DASHBOARD_HUB_UPDATE: 'off' }), stdio: 'ignore' });
   for (let i = 0; i < 60; i++) { try { if ((await req(port, 'GET', '/api/health')).code === 200) break; } catch (e) { /* not up yet */ } await sleep(300); }
@@ -71,6 +90,12 @@ function req(port, method, p, body, cookie, headers) {
   check('the test button says when the address answers with an error', r.json.ok === false && /500/.test(r.json.error), JSON.stringify(r.json));
   r = await req(port, 'POST', '/api/action/config', { alerts: { url: rxUrl + '/phone', format: 'slack', onBack: true } }, cookie, H);
   check('the settings are saved', r.code === 200 && r.json.config.alerts.url === rxUrl + '/phone' && r.json.config.alerts.format === 'slack' && r.json.config.alerts.onBack === true && r.json.config.alerts.onNew === true, JSON.stringify(r.json));
+  r = await req(port, 'POST', '/api/action/config', { alerts: { quietFrom: '23:00', quietTo: '6:30' } }, cookie, H);
+  check('quiet hours are saved (6:30 becomes 06:30) and the URL is kept', r.json.config.alerts.quietFrom === '23:00' && r.json.config.alerts.quietTo === '06:30' && r.json.config.alerts.url === rxUrl + '/phone', JSON.stringify(r.json.config && r.json.config.alerts));
+  r = await req(port, 'POST', '/api/action/config', { alerts: { quietFrom: '23:00', quietTo: '' } }, cookie, H);
+  check('only one time given: quiet hours stay off', r.json.config.alerts.quietFrom === '' && r.json.config.alerts.quietTo === '');
+  r = await req(port, 'GET', '/api/config', null, cookie);
+  check('the settings page data includes the recent alerts (the test messages) and the server clock', Array.isArray(r.json.alertLog) && r.json.alertLog.length >= 2 && r.json.alertLog[0].t >= r.json.alertLog[1].t && /^\d\d:\d\d$/.test(r.json.serverTime) && r.json.alertHeld === 0, JSON.stringify([r.json.alertLog, r.json.serverTime]));
   r = await req(port, 'POST', '/api/action/config', { name: 'Renamed' }, cookie, H);
   r = await req(port, 'GET', '/api/config', null, cookie);
   check('changing something else keeps the alert address', r.json.config.name === 'Renamed' && r.json.config.alerts.url === rxUrl + '/phone');

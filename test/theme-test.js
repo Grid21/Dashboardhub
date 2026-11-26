@@ -36,7 +36,7 @@ const CONTRAST = () => {
   const openSettings = async () => { if (!(await page.isVisible('#themeSelect'))) { await page.click('#settingsBtn'); await sleep(300); } };
   const closeSettings = async () => { if (await page.isVisible('#themeSelect')) { await page.click('#settingsBtn'); await sleep(300); } };
   await openSettings();
-  check('the Settings menu has a Colours choice, set to Automatic by default', await page.evaluate(() => { const s = document.getElementById('themeSelect'); return !!s && s.value === 'auto' && s.options.length === 3; }));
+  check('the Settings menu has a Colours choice, set to Automatic by default', await page.evaluate(() => { const s = document.getElementById('themeSelect'); return !!s && s.value === 'auto' && s.options.length === 4; }));
   const shot = async (p, name) => { if (SHOTS) await p.screenshot({ path: path.join(SHOTS, name + '.png') }); };
   const scanPage = async (p, label) => { const r = await p.evaluate(CONTRAST); check(label + ': text is readable (' + r.n + ' texts checked)', r.count === 0, JSON.stringify(r.bad)); };
   for (const t of ['dark', 'light']) {
@@ -65,12 +65,31 @@ const CONTRAST = () => {
     if (nc) { await sleep(600); check(t + ': the Notifications Center follows', (await mode(nc)) === t); await shot(nc, t + '-notif'); await scanPage(nc, t + ' Notifications list'); await nc.click('#ncTabUp'); await sleep(600); await shot(nc, t + '-uptime'); await scanPage(nc, t + ' Uptime tab'); await nc.close().catch(() => {}); await sleep(300); }
     await page.click('#tabPanels').catch(() => {}); await sleep(200);
   }
+  // ----- Tron Legacy -----
+  await openSettings();
+  await page.selectOption('#themeSelect', 'tron'); await sleep(600);
+  check('tron: the main window follows', (await mode(page)) === 'tron');
+  check('tron: the page is painted black with neon', await page.evaluate(() => getComputedStyle(document.body).backgroundColor) === 'rgb(2, 7, 13)' && await page.evaluate(() => getComputedStyle(document.querySelector('.brand')).color) === 'rgb(111, 243, 255)');
+  check('tron: it is saved', JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8')).theme === 'tron');
+  check('tron: the window background matches', await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBackgroundColor().toLowerCase() === '#02070d'));
+  check('tron: the system never switches it to the light set', await app.evaluate(({ nativeTheme }) => nativeTheme.shouldUseDarkColors));
+  await closeSettings();
+  await page.click('#tabPanels').catch(() => {}); await sleep(400);
+  await shot(page, 'tron-panels'); await scanPage(page, 'tron panels tab');
+  await page.click('#tabMap'); await sleep(1200);
+  await shot(page, 'tron-map'); await scanPage(page, 'tron map tab');
+  await openSettings(); await shot(page, 'tron-settings'); await scanPage(page, 'tron settings menu'); await closeSettings();
+  await page.evaluate(() => document.getElementById('remoteBtn').click());
+  { let rv = null; for (let j = 0; j < 20 && !rv; j++) { rv = app.windows().find((w) => /remote\.html/.test(w.url())); await sleep(250); }
+    check('tron: the Remote view window opens and follows', !!rv && (await mode(rv)) === 'tron');
+    if (rv) { await sleep(500); await shot(rv, 'tron-remote'); await scanPage(rv, 'tron Remote view'); await rv.close().catch(() => {}); await sleep(300); } }
+  await page.click('#tabPanels').catch(() => {}); await sleep(200);
   // survives a restart
   await app.close(); await sleep(800);
   app = await launch(); page = await app.firstWindow(); await page.waitForSelector('#tabMap'); await sleep(1200);
-  check('light mode is still on after a restart', (await mode(page)) === 'light');
+  check('Tron Legacy is still on after a restart', (await mode(page)) === 'tron');
   await openSettings();
-  check('and the Colours choice shows it', await page.evaluate(() => document.getElementById('themeSelect').value) === 'light');
+  check('and the Colours choice shows it', await page.evaluate(() => document.getElementById('themeSelect').value) === 'tron');
   await page.selectOption('#themeSelect', 'auto'); await sleep(400);
   check('Automatic saves too', JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8')).theme === 'auto');
   check('a bad value is refused', await page.evaluate(() => window.settingsApi.setTheme('purple')).then((r) => r.ok === false));

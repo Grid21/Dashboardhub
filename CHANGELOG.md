@@ -2,6 +2,71 @@
 
 All notable changes to Dashboard Hub. Newest first.
 
+## 1.42.0
+- **Docker server keeps your Desktop layout automatically.** In Remote servers > Devices > "Copy this computer's map to the server" there is a new tick box, **Keep this server up to date automatically** (off by default, set per server). When on, Desktop sends names, groups, places, details, cables and ignored machines to the server about 20 seconds after you change the map, when Dashboard Hub starts, and every few minutes if a send failed. The server keeps what it was sent, so when you take Desktop on the go the server still shows your layout. Safety: nothing is sent when this computer's map is for a different network than the server's (the machines must match), so a trip to another network cannot scramble the server's map. Turning the box on sends once right away, and the line under it says when the last send happened.
+- **Docker browser page: offline machines are no longer drawn on the map** (2D and 3D). Only online machines show. The Devices list and Uptime still list them, and they come back on the map as soon as they are online again.
+- Planned next: device-type colours in the server's map; placing machines the server finds new next to their group.
+
+## 1.41.1
+- **Fix: the "Help me identify this" panel closed by itself** a few seconds after opening it, because the side pane redraws on every refresh. It now stays open (with its online answer) until you close it or pick another machine.
+
+## 1.41.0
+- **New: "Help me identify this" for unknown devices (Desktop).** Click any machine on the map and press the button in its pane. It lists everything known (maker, made-up "private" address detection, name, ping TTL, open ports, web page titles), explains what it probably is (for example an Espressif chip means a smart plug or hobby gadget, port 9100 means a printer, port 62078 means an iPhone), and offers:
+  - **Search the web for this** - opens your browser with a ready-made search (maker + name + page title, or the first part of the MAC address).
+  - **Ask an online maker list** - asks the free api.macvendors.com service who owns the address. It asks you first, and sends only the address (nothing else about your network). It is skipped for made-up private addresses, which have no maker. A found name can be saved as the brand with one click.
+  - **Unplug test** - start it, unplug the device you suspect, and it tells you the moment this machine stops answering.
+  There is no free official "what is this device" service on the internet, so this gathers the clues and points you to where answers are; it can still be wrong, and a silent gadget with a made-up address may stay a mystery.
+- Planned next: automatic sending of the Desktop map to the Docker server when it changes; device-type colours in the server's map.
+
+## 1.40.0
+- **Docker server's map now looks like the Desktop map.** The coloured group circles (with their names) and the pink cable lines are drawn in both the 3D and 2D map of the browser page, and the server follows the Desktop's "group circles" setting when you send a map over. Placement already came across with the map data; the circles were what made it look different.
+- **Browser page, 3D map: names no longer appear and disappear** every few seconds. Names are chosen in a fixed order and a name that was showing stays showing unless something truly needs its place.
+- **Scan status line** on the browser page stays visible for a few seconds instead of being overwritten by the next refresh.
+- Not done yet (planned next): automatic sending of the Desktop map to the server when it changes, and a "Help me identify this" tool on Desktop.
+
+## 1.39.2
+- **Browser page, 3D map: names and IP addresses were missing once the map had more than 60 machines** (for example after importing a Desktop map that added machines). The old rule hid every name in a crowd unless you zoomed in a lot. Now every name is shown unless it would land on top of another name: the router, this machine and the selected one always show, the others nearest first, and zooming in or turning the view reveals more. Names are drawn on top of the boxes with a thin outline so they stay readable. (The 2D map always showed all names.)
+
+## 1.39.1
+- **Browser page: tick boxes in Settings were stretched across the page** (the box far from its words, as in the alert options and the new Map data box). They are now small and sit right next to their words. A new check measures this.
+
+## 1.39.0
+- **Copy your whole saved map between Dashboard Hub Desktop and the Docker server.**
+  - **Send from Desktop (live):** Settings > Remote servers > Devices > "Copy this computer's map to the server" now sends the full saved map of the active profile, not just names and places: **groups, places on the map, details (brand, model, notes, web address, VLAN), cables and links between machines, the group circle settings, and the machines you ignored** (they are hidden on the server too). Tick what you want. Older Desktop versions still work with a new server and the other way round.
+  - **By file (cross-platform):** the server's browser page has a new **Map data** box in its Settings tab. **Download map data** saves a file that Dashboard Hub Desktop imports with Backup > Import. **Import** loads a file saved by Dashboard Hub Desktop (Backup > Export) or by another server. If the file holds several networks you choose which one; you choose which parts to bring in (names, groups, places, details, cables, ignored machines, adding machines the server has not found yet, panels). Notes, passwords and server logins in a Desktop file are never sent to the server.
+  - **The browser map now shows what it receives:** details appear when you tap a machine (device, notes, web address, VLAN), cables are drawn as the links you set up (wireless links dashed) instead of everything hanging off the router, and ignored machines stay hidden. Machines the file does not mention still hang off the router.
+  - The browser page accepts bigger messages now (up to 8 MB), so a map of well over a thousand machines can be sent.
+  - **Desktop fix:** a Backup > Import (and Import into this computer) used to forget which machines you had chosen to ignore; the list is now kept.
+  - Tested: container receiving, exporting and importing (98 server checks), the exported file read by Desktop's own backup reader, a two-network Desktop file, junk files, a 1400-machine map, the browser page uploading and downloading files on a phone-sized screen, and Desktop's window sending a real saved map to a real server process. As always, real hardware and a real container were not tested.
+
+## 1.38.3
+- **Browser page, 2D map: the mouse wheel now zooms into the middle of the picture** instead of toward wherever the mouse pointer happens to be (which made the map slide away to one side). Use **Fit** to get everything back in view. Pinching on a phone still zooms between your fingers. The 3D wheel already zoomed on the middle; its first view was centred in 1.38.2 and is re-checked here in a wide desktop-size window as well as a phone-size one.
+
+## 1.38.2
+- **Browser page: the 3D map is now centred when it opens** (it sat lower than the middle). The view now measures where the dots really land on the screen, centres them and zooms so they fill most of the space; the **Fit** button does the same. Checked with a phone-sized simulated browser.
+
+## 1.38.1
+- **Browser page, Uptime tab: the "What happened" log moved to the bottom.** The bars for every device now come first. The log sits underneath in its own box that scrolls (it now holds up to 300 events instead of 40) and has a **Hide / Show** button; the choice is remembered on that browser. This is the page used by both the Docker server and Dashboard Hub Desktop's "Phone and browser access". The Desktop Notifications Center is unchanged.
+
+## 1.38.0
+- **Docker: quiet hours for alerts.** In the browser page's Settings tab (and in the saved settings) you can set a **From** and **to** time. Alerts that happen in between are not sent at that moment; when the quiet time ends they go out together as ONE message starting "While it was quiet:". Works across midnight (22:00 to 07:00). Leave both empty for no quiet hours; switching them off sends anything that was waiting right away. The times use the server's own clock; set `TZ` in the compose file (for example `Europe/London`) if it is not your time. The page shows what the server clock says.
+- **Docker: recent alerts list.** Settings shows the last 10 alerts: sent, kept for the quiet time, or NOT sent (with the reason, such as the address answering an error), including test messages. It is saved in the data folder (`alert-log.json`), so it survives restarts.
+- Tested: 14 new checks (night and day periods, kept and then released as one message, switched off while waiting, wrong or half-filled times, saved settings, list, phone-width page without sideways scrolling). The container's old update method is untouched (nothing new was added to the `docker` folder).
+
+## 1.37.0
+- **Tron Legacy colours for Dashboard Hub Desktop.** Settings > Colours has a new choice, **Tron Legacy (neon)**: black glass with a faint grid, glowing cyan lines and capital-letter headings, orange for the main buttons and the tab you are on. It applies to every window (main window, Remote view, Notifications Center) and to the 3D map (cyan floor grid and cyan outlines). It is remembered after a restart. Light, Dark and Automatic are unchanged. Tested for readable text on the main tabs, the Settings menu and the Remote view.
+- **Docker browser page: move around the 3D map.** Hold **Shift** and drag, or **right-drag**, to slide the view (the spot under the mouse follows it and no device is moved); on a phone use **two fingers** (they move and zoom at once). The mouse wheel / pinch still zooms and a plain drag still turns the view.
+- **Docker browser page: Scan button** on the Map tab (shown when changes are allowed). It starts a network scan on the container now, says so, and refreshes the map a few seconds later.
+- Tested with a phone-sized simulated browser: 5 new checks (Shift-drag, right-drag, device not moved, Scan button).
+
+## 1.36.0
+- **Sync: copy Dashboard Hub Desktop's map to the Docker server.** In Settings > Remote servers > **Devices**, a new box **"Copy this computer's map to the server"** sends the names, groups and places on the map (of the active profile) from Desktop to the container, and the container's web page (map, 3D map, device list) then shows them. You choose what to send: names, groups, places, machines the server has not found yet (added by hand), and panels (replaces the server's panels, asks first). Machines are matched by MAC address, or by address when there is none; an empty name or group on the computer never wipes the server's; the router and the server itself are left alone. After sending it says how many machines were matched, named, grouped and moved.
+- This is a one-way copy, Desktop to server, done when you press the button. Pulling the server's changes back into Desktop is not done yet.
+- Tested: 14 new checks on the server (only ticked things copied, matching by MAC or address, empty values, adding, public addresses refused, router untouched, panels, nonsense) and 3 on Desktop's window with a real container process (simulated network).
+
+## 1.35.1
+- **3D map on the browser page: left/right turning was the wrong way round.** Dragging to the right now turns the map so the near side follows your finger (like turning a globe). Up/down tilting is unchanged and matches Dashboard Hub Desktop's 3D map. A test now checks the direction.
+
 ## 1.35.0
 - **3D map on the browser page.** The Map tab has a **3D** button: the same map seen from a tilted camera, every device a little box standing on a grid floor (offline ones red). Drag empty space to turn the view, mouse wheel or two-finger pinch to zoom, tap a box for its details, drag a box to move it across the floor (saved on the Docker server like in the flat map). **Fit** resets the camera, **2D** goes back. Your choice is remembered in that browser. In a big network the names show when you zoom in. It also works on the page served by Dashboard Hub Desktop. It is drawn with plain canvas (no WebGL needed), so it works on any phone browser.
 - Tested: 31 checks on the Docker page including the 3D view (turning, zooming, dragging a box, saving, back to 2D). Looked at it in a phone-sized window.

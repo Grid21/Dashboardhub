@@ -6,9 +6,11 @@
   <title>Dashboard Hub - Remote view</title>
   <style>
 :root { color-scheme: light dark; --bg: #14171c; --panel: #1b2027; --line: #2b323c; --text: #e6e9ee; --dim: #9aa4b2; --accent: #4c8dff; --bad: #ff6b6b; --good: #4cd08c; --raise: #232a33; --act: #26324a; --kind: #323b48; --note: #1d2a40; }
-@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg: #eef1f6; --panel: #ffffff; --line: #d5dae3; --text: #1a202c; --dim: #4a5568; --accent: #1d5fd6; --bad: #c62828; --good: #0f7a46; --raise: #eef1f6; --act: #dbe6fb; --kind: #e1e6ee; --note: #e3edfd; } }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]):not([data-theme="tron"]) { --bg: #eef1f6; --panel: #ffffff; --line: #d5dae3; --text: #1a202c; --dim: #4a5568; --accent: #1d5fd6; --bad: #c62828; --good: #0f7a46; --raise: #eef1f6; --act: #dbe6fb; --kind: #e1e6ee; --note: #e3edfd; } }
 :root[data-theme="light"] { color-scheme: light; --bg: #eef1f6; --panel: #ffffff; --line: #d5dae3; --text: #1a202c; --dim: #4a5568; --accent: #1d5fd6; --bad: #c62828; --good: #0f7a46; --raise: #eef1f6; --act: #dbe6fb; --kind: #e1e6ee; --note: #e3edfd; }
 :root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="tron"] button.primary { background: #02070d; color: #ff9a1f; border-color: #ff9a1f; box-shadow: 0 0 10px rgba(255,154,31,0.5); }
+:root[data-theme="tron"] { color-scheme: dark; --bg: #02070d; --panel: #04141f; --line: #1fb6c9; --text: #d4fbff; --dim: #7fe9f7; --accent: #6ff3ff; --bad: #ff5a6e; --good: #22eeaa; --warn: #ff9a1f; --raise: #062030; --act: #0a3a4a; --kind: #0a2c3a; --note: #062a3a; --hover: #062030; --hover2: #08283a; --picked: #0a3a4a; --stripe-a: #0f5f70; --stripe-b: #062030; --strong: #fff; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, 'Segoe UI', Roboto, sans-serif; }
 .hidden { display: none !important; }

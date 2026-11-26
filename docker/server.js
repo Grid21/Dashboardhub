@@ -24,7 +24,7 @@ const log = (m) => console.log(new Date().toISOString().replace('T', ' ').slice(
 // config.json (in the data folder) holds the settings. The first time the server starts, the DASHBOARD_HUB_* environment settings
 // (from docker-compose.yml) are used to create it. From then on config.json wins, so changes made in Dashboard Hub Desktop stick.
 // The access code is the exception: DASHBOARD_HUB_CODE always applies when it is set.
-const DEFAULTS = { name: 'Dashboard Hub (Docker)', network: 'auto', router: 'auto', scanSeconds: 300, port: remote.WEB_DEFAULT_PORT, panels: [], update: 'auto', alerts: { url: '', format: 'ntfy', onNew: true, onLeft: true, onBack: false } };
+const DEFAULTS = { name: 'Dashboard Hub (Docker)', network: 'auto', router: 'auto', scanSeconds: 300, port: remote.WEB_DEFAULT_PORT, panels: [], update: 'auto', alerts: { url: '', format: 'ntfy', onNew: true, onLeft: true, onBack: false, quietFrom: '', quietTo: '' } };
 function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return fallback; } }
 function writeJson(file, obj, mode) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -48,10 +48,12 @@ function cleanAlertUrl(v) {
   try { const u = new URL(s); if ((u.protocol === 'http:' || u.protocol === 'https:') && s.length <= 300) return u.href; } catch (e) { /* not an address */ }
   return null;
 }
+function cleanClock(v) { const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(v == null ? '' : v).trim()); return m ? (m[1].length === 1 ? '0' : '') + m[1] + ':' + m[2] : ''; }
 function cleanAlerts(a) {
   a = a && typeof a === 'object' ? a : {};
   const u = cleanAlertUrl(a.url), d = DEFAULTS.alerts;
-  return { url: u || '', format: ALERT_FORMATS.includes(a.format) ? a.format : d.format, onNew: a.onNew === undefined ? d.onNew : a.onNew === true, onLeft: a.onLeft === undefined ? d.onLeft : a.onLeft === true, onBack: a.onBack === undefined ? d.onBack : a.onBack === true };
+  const qf = cleanClock(a.quietFrom), qt = cleanClock(a.quietTo), quiet = !!qf && !!qt && qf !== qt;       // quiet hours need both times (and not the same one)
+  return { url: u || '', format: ALERT_FORMATS.includes(a.format) ? a.format : d.format, onNew: a.onNew === undefined ? d.onNew : a.onNew === true, onLeft: a.onLeft === undefined ? d.onLeft : a.onLeft === true, onBack: a.onBack === undefined ? d.onBack : a.onBack === true, quietFrom: quiet ? qf : '', quietTo: quiet ? qt : '' };
 }
 function cleanConfig(c) {
   c = c && typeof c === 'object' ? c : {};
@@ -99,13 +101,30 @@ const text = (v, n) => String(v == null ? '' : v).slice(0, n);
 const spiralPos = (i) => { const a = i * 2.39996, r = 11 + 3.2 * Math.sqrt(i); return { x: Math.cos(a) * r, z: Math.sin(a) * r }; };
 const stateFile = () => path.join(DATA, 'state.json');
 const historyFile = () => path.join(DATA, 'history.json');
-let state = { devices: {}, router: '', cidr: '', scannedOnce: false, scans: 0 };
+let state = { devices: {}, router: '', cidr: '', scannedOnce: false, scans: 0, links: [], mapOpts: { groupCircles: true, groupCluster: true } };
 let store = notifLib.cleanStore(null);
+// Extra things Dashboard Hub Desktop can send or export: device details (brand, model, notes, web address, VLAN) and the links (cables) between machines.
+function cleanInfo(i) {
+  const o = i && typeof i === 'object' ? i : {};
+  const ports = Number.isInteger(o.ports) && o.ports >= 0 && o.ports <= 1024 ? o.ports : null;
+  return { brand: text(o.brand, 60).replace(/[\u0000-\u001f\u007f<>]/g, ''), model: text(o.model, 60).replace(/[\u0000-\u001f\u007f<>]/g, ''), ports: ports, notes: text(o.notes, 400).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f<>]/g, ''), webUrl: typeof o.webUrl === 'string' && /^https?:\/\/[^\s<>"']{1,200}$/.test(o.webUrl) ? o.webUrl : '' };
+}
+const hasInfo = (i) => !!i && !!(i.brand || i.model || i.notes || i.webUrl || i.ports);
+function cleanLinkList(list) {
+  const out = [], seen = new Set();
+  (Array.isArray(list) ? list : []).slice(0, 4000).forEach((l) => {
+    if (!l || typeof l.a !== 'string' || typeof l.b !== 'string' || l.a === l.b) return;
+    const id = l.a < l.b ? l.a + '~' + l.b : l.b + '~' + l.a; if (seen.has(id)) return; seen.add(id);
+    out.push({ a: text(l.a, 80), b: text(l.b, 80), cable: l.cable === true, wireless: l.wireless === true ? true : l.wireless === false ? false : null });
+  });
+  return out;
+}
 function loadState() {
   const s = readJson(stateFile(), null);
   if (s && typeof s === 'object' && s.devices && typeof s.devices === 'object') {
     Object.keys(s.devices).slice(0, 1500).forEach((k) => { const d = s.devices[k]; if (d && typeof d === 'object') state.devices[k] = d; });
     state.router = validIp(s.router) ? s.router : ''; state.cidr = text(s.cidr, 20); state.scannedOnce = s.scannedOnce === true; state.scans = Number(s.scans) || 0;
+    state.links = cleanLinkList(s.links); state.mapOpts = { groupCircles: !(s.mapOpts && s.mapOpts.groupCircles === false), groupCluster: !(s.mapOpts && s.mapOpts.groupCluster === false) };
   }
   store = notifLib.cleanStore(readJson(historyFile(), null));
 }
@@ -149,20 +168,54 @@ function postAlert(url, msg) {
   });
 }
 let lastAlertError = '';
-function sendAlerts(q) {
+// Quiet hours (the server's own clock, see TZ): alerts are kept and sent together, as one message, when the quiet time ends.
+const clockMin = (s) => parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3), 10);
+function inQuiet(al, now) {
+  if (!al || !al.quietFrom || !al.quietTo) return false;
+  const d = now || new Date(), m = d.getHours() * 60 + d.getMinutes(), a = clockMin(al.quietFrom), b = clockMin(al.quietTo);
+  if (a === b) return false;
+  return a < b ? (m >= a && m < b) : (m >= a || m < b);
+}
+let held = [];                                           // alerts waiting for the quiet time to end
+const alertLogFile = () => path.join(DATA, 'alert-log.json');
+let alertLog = [];                                       // the last alerts (sent, held or failed) for the Settings page
+function logAlert(status, count, text, error) {
+  alertLog.push({ t: Date.now(), status: status, count: count, text: String(text || '').slice(0, 160), error: error ? String(error).slice(0, 160) : '' });
+  if (alertLog.length > 40) alertLog = alertLog.slice(-40);
+  try { writeJson(alertLogFile(), alertLog); } catch (e) { /* the list is only a convenience */ }
+}
+function loadAlertLog() { const a = readJson(alertLogFile(), []); alertLog = Array.isArray(a) ? a.filter((x) => x && typeof x.t === 'number').slice(-40) : []; }
+function deliver(evs, heldNote) {
   const al = config.alerts;
-  if (!al || !al.url) return;
-  const evs = q.filter((e) => (e.kind === 'new' && al.onNew) || (e.kind === 'left' && al.onLeft) || (e.kind === 'back' && al.onBack));
-  if (!evs.length) return;
-  const lines = evs.slice(0, 15).map(alertLine); if (evs.length > 15) lines.push('...and ' + (evs.length - 15) + ' more');
-  postAlert(al.url, buildAlert(al.format, config.name, lines, evs.slice(0, 50).map((e) => ({ kind: e.kind, name: e.name, ip: e.ip, mac: e.mac, vendor: e.vendor, at: e.t })))).then((r) => {
-    if (!r.ok) { if (r.error !== lastAlertError) log('Alert not sent: ' + r.error); lastAlertError = r.error; } else lastAlertError = '';
+  const first = alertLine(evs[0]), lines = evs.slice(0, 15).map(alertLine); if (evs.length > 15) lines.push('...and ' + (evs.length - 15) + ' more');
+  if (heldNote) lines.unshift('While it was quiet:');
+  return postAlert(al.url, buildAlert(al.format, config.name, lines, evs.slice(0, 50).map((e) => ({ kind: e.kind, name: e.name, ip: e.ip, mac: e.mac, vendor: e.vendor, at: e.t })))).then((r) => {
+    if (!r.ok) { if (r.error !== lastAlertError) log('Alert not sent: ' + r.error); lastAlertError = r.error; logAlert('failed', evs.length, first, r.error); } else { lastAlertError = ''; logAlert('sent', evs.length, first); }
+    return r;
   });
+}
+function sendAlerts(q, now) {
+  const al = config.alerts;
+  if (!al || !al.url) return Promise.resolve();
+  const evs = q.filter((e) => (e.kind === 'new' && al.onNew) || (e.kind === 'left' && al.onLeft) || (e.kind === 'back' && al.onBack));
+  if (!evs.length) return Promise.resolve();
+  if (inQuiet(al, now)) { held = held.concat(evs).slice(-200); logAlert('held', evs.length, alertLine(evs[0])); return Promise.resolve(); }
+  const all = held.length ? held.concat(evs) : evs, was = held.length > 0; held = [];
+  return deliver(all, was);
+}
+function releaseHeld(now) {                              // called every half minute: quiet time over, so send what was kept
+  const al = config.alerts;
+  if (!held.length) return Promise.resolve();
+  if (!al || !al.url) { held = []; return Promise.resolve(); }
+  if (inQuiet(al, now)) return Promise.resolve();
+  const all = held; held = [];
+  return deliver(all, true);
 }
 async function alertTest(a) {
   const al = a && a.alerts ? cleanAlerts(a.alerts) : config.alerts, url = a && a.alerts ? cleanAlertUrl(a.alerts.url) : config.alerts.url;
   if (!url) return { ok: false, error: 'Type the alert address first.' };
   const r = await postAlert(url, buildAlert(al.format, config.name, ['This is a test message. Alerts are working.'], []));
+  logAlert(r.ok ? 'sent' : 'failed', 0, 'Test message', r.ok ? '' : r.error);
   return r.ok ? { ok: true, message: 'Test message sent.' } : r;
 }
 function flushHistory() {
@@ -176,6 +229,7 @@ function rekey(oldKey, newKey) {
   const d = state.devices[oldKey];
   if (state.devices[newKey]) { delete state.devices[oldKey]; return; }
   d.key = newKey; state.devices[newKey] = d; delete state.devices[oldKey];
+  state.links.forEach((l) => { if (l.a === oldKey) l.a = newKey; if (l.b === oldKey) l.b = newKey; });
 }
 function mergeHost(h) {
   if (!h) return null;
@@ -301,12 +355,20 @@ function scheduleNext() {
 }
 
 // ---------- what the web page and Dashboard Hub Desktop see ----------
+// The lines on the map: the links that came from Dashboard Hub Desktop, and every other shown machine hangs off the router like before.
+function effectiveLinks() {
+  const shown = new Set(shownList().map((d) => d.key)), out = [], used = new Set();
+  state.links.forEach((l) => { if (shown.has(l.a) && shown.has(l.b)) { out.push(l); used.add(l.a); used.add(l.b); } });
+  shownList().filter((d) => !d.isRouter && !used.has(d.key)).forEach((d) => out.push({ a: 'router', b: d.key, cable: false, wireless: null, auto: true }));
+  return out;
+}
 function snapshot() {
   return {
     at: ST.lastAt || Date.now(),
     profile: { id: PROFILE_ID, name: config.name }, panels: config.panels,
-    devices: shownList().map((d) => ({ key: d.key, name: d.isRouter && !d.label ? 'Router' : titleOf(d), ip: d.ip, mac: d.mac || '', vendor: d.vendor || '', os: d.os && d.os.id !== 'unknown' ? d.os.label : '', group: d.group || '', online: d.online !== false, isRouter: !!d.isRouter, self: !!d.self, x: d.x || 0, z: d.z || 0, lastSeen: d.lastSeen || null, onlineSince: d.onlineSince || null, ports: d.ports || [] })),
-    links: shownList().filter((d) => !d.isRouter).map((d) => ({ a: 'router', b: d.key }))
+    devices: shownList().map((d) => ({ key: d.key, name: d.isRouter && !d.label ? 'Router' : titleOf(d), ip: d.ip, mac: d.mac || '', vendor: d.vendor || '', os: d.os && d.os.id !== 'unknown' ? d.os.label : '', group: d.group || '', online: d.online !== false, isRouter: !!d.isRouter, self: !!d.self, x: d.x || 0, z: d.z || 0, lastSeen: d.lastSeen || null, onlineSince: d.onlineSince || null, ports: d.ports || [], info: hasInfo(d.info) ? d.info : null, vlan: d.vlan || '' })),
+    links: effectiveLinks().map((l) => ({ a: l.a, b: l.b, cable: !!l.cable, wireless: l.wireless === true })),
+    opts: { groupCircles: state.mapOpts.groupCircles, groupCluster: state.mapOpts.groupCluster }
   };
 }
 function uptimeFor(rangeMs, minDropMs) {
@@ -337,6 +399,89 @@ async function pingManual() {       // machines typed in by hand that are outsid
     if (up) { if (d.online === false) histEvent('back', d); d.online = true; d.misses = 0; d.lastSeen = Date.now(); if (!d.onlineSince) d.onlineSince = Date.now(); }
     else { d.misses = (d.misses || 0) + 1; if (d.misses >= 2 && d.online !== false) { histEvent('left', d); d.online = false; d.onlineSince = null; } }
   }
+}
+// Dashboard Hub Desktop copies its map to this server: names, groups and places (matched by MAC address, else by address), and optionally panels.
+function syncFromDesktop(a) {
+  const inc = Array.isArray(a.devices) ? a.devices.slice(0, 1500) : [];
+  const byMac = {}, byIp = {};
+  devList().forEach((d) => { if (d.mac) byMac[String(d.mac).toLowerCase()] = d; if (d.ip) byIp[d.ip] = d; });
+  const res = { matched: 0, names: 0, groups: 0, moved: 0, added: 0, skipped: 0, panels: null, info: 0, hidden: 0, links: null };
+  const kmap = { router: 'router' };
+  const pos = (v) => (Number.isFinite(Number(v)) ? Math.max(-1000, Math.min(1000, Number(v))) : null);
+  inc.forEach((e) => {
+    if (!e || typeof e !== 'object') return;
+    const mac = typeof e.mac === 'string' ? e.mac.toLowerCase() : '', ip = typeof e.ip === 'string' ? e.ip : '';
+    let d = (mac && byMac[mac]) || (ip && byIp[ip]) || null;
+    const label = cleanName(e.label, 60), group = cleanName(e.group, 30), x = pos(e.x), z = pos(e.z);
+    if (!d) {
+      if (a.add === true && validIp(ip) && scanner.parseCidr(ip + '/32').ok && devList().length < 1500) {
+        const p = spiralPos(devList().length);
+        d = { key: mac ? mac : 'ip:' + ip, ip: ip, mac: mac || null, vendor: '', hostname: '', label: '', group: '', os: { id: 'unknown', label: 'Unknown' }, ports: [], x: p.x, z: p.z, online: false, misses: 0, lastSeen: 0, firstSeen: Date.now(), onlineSince: null, isRouter: false, self: false, manual: true };
+        state.devices[d.key] = d; if (typeof e.key === 'string' && e.key.startsWith('manual:')) d.manual = true; if (mac) byMac[mac] = d; byIp[ip] = d; res.added++;
+      } else { res.skipped++; return; }
+    } else if (d.isRouter || d.self) { return; }
+    res.matched++; if (typeof e.key === 'string') kmap[e.key] = d.key;
+    if (a.names === true && label && d.label !== label) { d.label = label; res.names++; }
+    if (a.groups === true && group && d.group !== group) { d.group = group; res.groups++; }
+    if (a.positions === true && x !== null && z !== null) { d.x = x; d.z = z; res.moved++; }
+    if (a.info === true && (e.info || e.vlan !== undefined)) { const inf = cleanInfo(e.info), vl = cleanName(e.vlan, 30); if (JSON.stringify(inf) !== JSON.stringify(d.info || cleanInfo(null)) || vl !== (d.vlan || '')) { d.info = inf; d.vlan = vl; res.info++; } }
+    if (a.ignored === true && typeof e.ignored === 'boolean' && !!d.ignored !== e.ignored) { d.ignored = e.ignored; res.hidden++; }
+  });
+  if (a.links === true) {
+    const list = cleanLinkList(a.linkList).map((l) => ({ a: kmap[l.a], b: kmap[l.b], cable: l.cable, wireless: l.wireless })).filter((l) => l.a && l.b && l.a !== l.b && state.devices[l.a] && state.devices[l.b]);
+    state.links = cleanLinkList(list); res.links = state.links.length;
+    if (a.groupOptions && typeof a.groupOptions === 'object') state.mapOpts = { groupCircles: a.groupOptions.groupCircles !== false, groupCluster: a.groupOptions.groupCluster !== false };
+  }
+  if (a.panels === true) {
+    const list = cleanPanels(a.panelList);
+    config = cleanConfig(Object.assign({}, config, { panels: list })); saveConfig(); res.panels = list.length;
+  }
+  saveNow();
+  return Object.assign({ ok: true }, res);
+}
+// The same kind of file Dashboard Hub Desktop saves with Backup > Export, so Desktop can import it (and this page can import Desktop's).
+function exportMap() {
+  const devices = {}, ignored = [], links = effectiveLinks();
+  devList().forEach((d) => {
+    const o = { key: d.key, ip: d.ip || '', mac: d.mac || null, vendor: d.vendor || null, hostname: d.hostname || null, label: d.isRouter && d.label === 'Router' ? '' : (d.label || ''), group: d.group || '',
+      pos: { x: Math.round((d.x || 0) * 100) / 100, y: 0, z: Math.round((d.z || 0) * 100) / 100 },
+      os: d.os || { id: 'unknown', label: 'Unknown' }, ports: (d.ports || []).slice(0, 60).filter((p) => p && Number.isInteger(p.port)).map((p) => ({ port: p.port, service: p.service || null, banner: null, title: null })) };
+    if (d.osOverride) o.osOverride = d.osOverride;
+    if (hasInfo(d.info)) o.info = d.info;
+    if (d.vlan) o.vlan = d.vlan;
+    devices[d.key] = o;
+    if (d.ignored && !d.isRouter) ignored.push(d.key);
+  });
+  const network = { router: state.router || '192.168.0.1', routerUser: false, alerts: 'app', showServices: false, cidr: state.cidr || '', mode: 'quick', showOffline: true, groupCluster: state.mapOpts.groupCluster, groupCircles: state.mapOpts.groupCircles,
+    autoSeconds: 60, scannedOnce: true, presenceAt: 0, removedReturn: true, devices: devices, links: links.map((l) => ({ a: l.a, b: l.b, auto: l.auto === true, cable: l.cable === true, wireless: l.wireless })), ignored: ignored };
+  const panels = (config.panels || []).map((p) => ({ name: p.name, url: p.url }));
+  return { app: 'dashboard-hub', format: 1, exportedAt: new Date().toISOString(), source: 'docker', includesNotes: false, layout: { columns: 3, height: 480 }, panels: panels, servers: [], network: network,
+    profiles: [{ id: PROFILE_ID, name: config.name, locked: false, fp: null, network: network, panels: panels, servers: [] }], activeProfileName: config.name };
+}
+// Reads a Dashboard Hub export (from Desktop, or from another server like this one) and applies the parts that were ticked.
+function importMap(a) {
+  const d = a && a.data;
+  if (!d || typeof d !== 'object' || d.app !== 'dashboard-hub') return { ok: false, error: 'That file is not a Dashboard Hub export. In Dashboard Hub Desktop use Backup > Export (or this page\'s Download button).' };
+  let net = d.network, panels = d.panels, name = '';
+  const profs = Array.isArray(d.profiles) ? d.profiles.filter((p) => p && typeof p === 'object' && p.network) : [];
+  if (profs.length) {
+    let i = Number.isInteger(a.profile) ? a.profile : profs.findIndex((p) => p.name === d.activeProfileName);
+    if (i < 0 || i >= profs.length) i = 0;
+    net = profs[i].network; name = text(profs[i].name, 80); if (Array.isArray(profs[i].panels)) panels = profs[i].panels;
+  }
+  if (!net || typeof net !== 'object' || !net.devices || typeof net.devices !== 'object') return { ok: false, error: 'That file has no network map in it.' };
+  const ign = new Set(Array.isArray(net.ignored) ? net.ignored.filter((k) => typeof k === 'string') : []);
+  const macOf = (k, x) => (typeof x.mac === 'string' && /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(x.mac) ? x.mac : (/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(k) ? k : ''));
+  const entries = Object.keys(net.devices).filter((k) => k !== 'router').slice(0, 1500).map((k) => {
+    const x = net.devices[k] && typeof net.devices[k] === 'object' ? net.devices[k] : {};
+    return { key: k, mac: macOf(k, x), ip: typeof x.ip === 'string' ? x.ip : '', label: x.label, group: x.group, x: x.pos && x.pos.x, z: x.pos && x.pos.z, info: x.info, vlan: x.vlan, ignored: ign.has(k) };
+  });
+  ign.forEach((k) => { if (Object.prototype.hasOwnProperty.call(net.devices, k) || k === 'router') return; if (macOf(k, {})) entries.push({ key: k, mac: k, ip: '', ignored: true }); else if (/^ip:\d{1,3}(\.\d{1,3}){3}$/.test(k)) entries.push({ key: k, mac: '', ip: k.slice(3), ignored: true }); });      // an ignored machine that has no record of its own
+  const w = a.what && typeof a.what === 'object' ? a.what : {};
+  const r = syncFromDesktop({ devices: entries, names: w.names !== false, groups: w.groups !== false, positions: w.positions !== false, info: w.info !== false, ignored: w.ignored !== false, links: w.links !== false, add: w.add !== false, panels: w.panels === true,
+    linkList: net.links, groupOptions: { groupCircles: net.groupCircles, groupCluster: net.groupCluster }, panelList: panels });
+  r.total = entries.length; r.profile = name;
+  return r;
 }
 async function devicesAction(a) {
   const op = String(a.op || 'list');
@@ -396,7 +541,7 @@ async function devicesAction(a) {
 // ---------- settings that Dashboard Hub Desktop can read and change ----------
 function getConfigInfo() {
   let ifs = []; try { ifs = scanner.listInterfaces().map((i) => ({ name: i.name, address: i.address, cidr: i.cidr })); } catch (e) { ifs = []; }
-  return { config: { name: config.name, network: config.network, router: config.router, scanSeconds: config.scanSeconds, panels: config.panels, update: config.update, alerts: config.alerts }, update: updater ? updater.status() : null, detected: { network: ST.detectedCidr || '', router: ST.detectedRouter || '' }, interfaces: ifs, port: config.port };
+  return { config: { name: config.name, network: config.network, router: config.router, scanSeconds: config.scanSeconds, panels: config.panels, update: config.update, alerts: config.alerts }, alertLog: alertLog.slice(-20).reverse(), alertHeld: held.length, serverTime: (function () { const d = new Date(); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); })(), update: updater ? updater.status() : null, detected: { network: ST.detectedCidr || '', router: ST.detectedRouter || '' }, interfaces: ifs, port: config.port };
 }
 function changeConfig(a) {
   const errs = [], next = Object.assign({}, config);
@@ -446,6 +591,8 @@ function updateNow(a) {
 async function main() {
   fs.mkdirSync(DATA, { recursive: true });
   config = loadConfig();
+  loadAlertLog();
+  setInterval(() => { releaseHeld().catch(() => {}); }, 30000).unref();
   loadState();
   updater = createUpdater({
     dataDir: DATA, version: VERSION, base: Number(process.env.DASHBOARD_HUB_BASE) || 1, supervised: process.env.DASHBOARD_HUB_BOOT === '1',
@@ -461,7 +608,7 @@ async function main() {
   }
   web = remote.createWebAccess({
     file: path.join(DATA, 'web-access.json'), version: VERSION, getSnapshot: snapshot, getUptime: uptimeFor, getInfo: info, getConfig: getConfigInfo,
-    actions: { config: changeConfig, update: updateNow, alerttest: alertTest, devices: devicesAction, scan: () => { if (ST.running) return { started: false, message: 'A scan is already running.' }; runScan('requested').catch(() => {}); return { started: true }; } }
+    actions: { config: changeConfig, update: updateNow, alerttest: alertTest, sync: syncFromDesktop, devices: devicesAction, exportmap: exportMap, importmap: importMap, scan: () => { if (ST.running) return { started: false, message: 'A scan is already running.' }; runScan('requested').catch(() => {}); return { started: true }; } }
   });
   // the access code: from DASHBOARD_HUB_CODE, or one that was set before, or a new one shown once in the log
   const envCode = process.env.DASHBOARD_HUB_CODE;
@@ -497,4 +644,4 @@ process.on('SIGTERM', () => shutdown(0)); process.on('SIGINT', () => shutdown(0)
 process.on('uncaughtException', (e) => { log('Unexpected problem: ' + (e && e.stack || e)); });
 process.on('unhandledRejection', (e) => { log('Unexpected problem: ' + (e && e.stack || e)); });
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-else module.exports = { _test: { sendAlerts: sendAlerts, setConfig: (c) => { config = cleanConfig(c); } } };      // for the tests only
+else module.exports = { _test: { importMap: importMap, exportMap: exportMap, sendAlerts: sendAlerts, releaseHeld: releaseHeld, inQuiet: inQuiet, heldCount: () => held.length, log: () => alertLog, loadAlertLog: loadAlertLog, setConfig: (c) => { config = cleanConfig(c); } } };      // for the tests only

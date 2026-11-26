@@ -55,12 +55,25 @@ Your data (the device list, the history, the access code hash) is kept in the `d
 
 Otherwise, copy the newer source folder over the old one and run `docker compose up -d --build` again in the `docker` folder. Your data stays.
 
+## Copy Desktop's map to the server
+In Dashboard Hub Desktop: Settings > Remote servers > **Devices** > **Copy this computer's map to the server**. Choose what to send (names, groups, places on the map, panels) and press **Send to the server**. The server's web page then shows your Desktop map. It is a one-way copy made when you press the button; the server keeps scanning by itself, and machines are matched by MAC address (or by address).
+
+## Moving your map between Desktop and the server
+- **Live from Desktop:** Settings > Remote servers > Devices > "Copy this computer's map to the server". It sends names, groups, places on the map, details (brand, model, notes, web address, VLAN), cables and links, and the machines you ignored. Tick what you want.
+- **By file:** on the server's web page open **Settings** and find **Map data**. **Download map data** saves a file you can import into Dashboard Hub Desktop (Backup > Import). **Import** loads a file from Dashboard Hub Desktop (Backup > Export), or from another server. Choose what to bring in, then press Import. Notes and passwords in a Desktop file are not sent to the server.
+- Changes need the access code and "changes allowed" (the same as editing names).
+
+## Moving around the map
+On the Map tab, press **3D** for the 3D view. Drag empty space to turn it, **Shift + drag** (or right-drag) to slide the view, mouse wheel or pinch to zoom. On a phone, two fingers slide and zoom. Drag a box to move a device (when changes are allowed). The **Scan** button starts a network scan right away.
+
 ## Alerts to your phone
 In the server's **Settings** (browser page, or Dashboard Hub Desktop > Remote servers > Settings) there is an **Alerts** section.
 1. Install the free **ntfy** app on your phone and subscribe to a topic with a long, secret name (for example `home-hub-x7k29q`). Or make a Discord/Slack web hook.
 2. Type the address (for ntfy: `https://ntfy.sh/home-hub-x7k29q`), choose the type, tick what you want to hear about, press **Send a test message**, then **Save**.
 Anyone who knows an ntfy topic name can read it, so make it hard to guess. Nothing is sent until you type an address.
 
+
+**Quiet hours:** in Settings choose a From and to time (for example 22:00 to 07:00). Alerts in that time are kept and sent together as one message when it ends. The times use the server's clock: add `TZ: "Europe/London"` (your own region) under `environment:` in the compose file if it shows the wrong time. **Recent alerts** in Settings lists what was sent, kept or not sent.
 ## What it cannot do yet
 - HTTPS on the server's own page (use your VPN, or put a reverse proxy such as Nginx Proxy Manager in front of it).
 - Pop-up notifications like on the desktop program, SSH.

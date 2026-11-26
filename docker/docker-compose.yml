@@ -23,6 +23,8 @@ services:
       # Your access code for the web page and for Dashboard Hub Desktop (6 or more characters). CHANGE THIS!
       # (The access code is the one setting that always comes from here when it is set.)
       DASHBOARD_HUB_CODE: "${DASHBOARD_HUB_CODE:-change-me-please}"
+      # Your time zone, used for alert quiet hours (for example Europe/London or America/New_York). Optional.
+      TZ: "${TZ:-UTC}"
       # The name shown in Dashboard Hub Desktop and on the page
       DASHBOARD_HUB_NAME: "${DASHBOARD_HUB_NAME:-Home network (Docker)}"
       # "auto" finds your network by itself. Or write it like 192.168.1.0/24

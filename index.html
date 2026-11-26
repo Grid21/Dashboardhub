@@ -57,7 +57,7 @@
           <button type="button" id="securityMenuBtn" role="menuitem" title="Choose what panels may do, and limit scanning, router connections and SNMP">Security settings...</button>
           <button type="button" id="backupBtn" role="menuitem" title="Export or import your panels, servers, notes and network profiles">Backup...</button>
           <div class="profile-menu-sep"></div>
-          <label class="menu-check menu-select" title="Colours of every Dashboard Hub window. Automatic follows your computer's light or dark setting."><span>Colours</span> <select id="themeSelect"><option value="auto">Automatic (follow my computer)</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+          <label class="menu-check menu-select" title="Colours of every Dashboard Hub window. Automatic follows your computer's light or dark setting."><span>Colours</span> <select id="themeSelect"><option value="auto">Automatic (follow my computer)</option><option value="light">Light</option><option value="dark">Dark</option><option value="tron">Tron Legacy (neon)</option></select></label>
           <label class="menu-check" title="Closing the window (X) hides Dashboard Hub in the system tray instead of quitting"><input type="checkbox" id="trayCheck"> Keep running in the background when I close the window (X)</label>
           <div class="menu-note" id="trayHint"></div>
           <label class="menu-check" title="Use the graphics card (GPU) to draw the 3D map and panels. Switch off only if the app looks broken or flickers."><input type="checkbox" id="gpuCheck"> Use the graphics card (GPU) for smoother drawing</label>
@@ -394,6 +394,24 @@
   <dialog id="hubDevDialog">
     <h3 id="hdTitle">Devices</h3>
     <p class="hint">Give machines a name and a group, or ignore the ones you do not want on the map and in the counts (they are kept on the server and can be brought back). Changes are kept on the server.</p>
+    <details class="hd-sync" id="hdSyncBox">
+      <summary>Copy this computer's map to the server</summary>
+      <p class="hint">Sends what you set up in Dashboard Hub Desktop (the saved map of the active profile: names, groups, places, details, cables) to this server, so the server's web page shows it too. To move it by file instead, use Backup &gt; Export here and Import on the server's web page (Settings tab). Machines are matched by their MAC address, or by their address if there is none. The server keeps scanning by itself.</p>
+      <div class="hd-sync-opts">
+        <label><input type="checkbox" id="hsNames" checked> Names</label>
+        <label><input type="checkbox" id="hsGroups" checked> Groups</label>
+        <label><input type="checkbox" id="hsPos" checked> Places on the map</label>
+        <label><input type="checkbox" id="hsInfo" checked> Details (brand, model, notes, web address, VLAN)</label>
+        <label><input type="checkbox" id="hsLinks" checked> Cables and links between machines</label>
+        <label><input type="checkbox" id="hsIgnored" checked> Machines you ignored (they are hidden there too)</label>
+        <label><input type="checkbox" id="hsAdd"> Also add machines the server has not found</label>
+        <label><input type="checkbox" id="hsPanels"> Panels (replaces the server's panels)</label>
+      </div>
+      <label class="hd-auto"><input type="checkbox" id="hsAuto"> Keep this server up to date automatically (names, groups, places, details, cables and ignored machines are sent a little while after you change them, and when Dashboard Hub starts)</label>
+      <p class="hint" id="hsAutoMsg" role="status"></p>
+      <button type="button" id="hsSend">Send to the server</button>
+      <p class="hint" id="hsMsg" role="status"></p>
+    </details>
     <div id="hdList" class="hd-list"></div>
     <datalist id="hdGroups"></datalist>
     <h4>Add a machine by hand</h4>

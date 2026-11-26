@@ -8,7 +8,7 @@ const { spawn, spawnSync } = require('child_process');
 // quit. Any window opened from here (like the SSH window) would start inside
 // that folder and keep it locked, so it would be left behind. Move out of it.
 try { process.chdir(os.homedir()); } catch (e) { /* not important */ }
-const { cleanServer, parseBackup } = require('./validate');
+const { cleanServer, parseBackup, cleanNetwork } = require('./validate');
 
 // Home-lab services (TrueNAS, etc.) often use self-signed HTTPS certificates. They are accepted ONLY for addresses on your own
 // network (192.168.x.x, 10.x.x.x, .local names and so on) and for the exact websites you added as a panel. Any other website
@@ -604,12 +604,34 @@ function hubsMake() {
 }
 ipcMain.handle('hubs:list', (event) => { checkSender(event); return { ok: true, list: hubsMake().list(), encrypted: notesEncryptionOk() }; });
 ipcMain.handle('hubs:save', (event, x) => { checkSender(event); return hubsMake().save(x && typeof x === 'object' ? x : {}); });
+ipcMain.handle('hubs:auto', (event, id, on) => { checkSender(event); return hubsMake().setAuto(String(id || ''), on === true); });
 ipcMain.handle('hubs:remove', (event, id) => { checkSender(event); return hubsMake().remove(String(id || '')); });
 ipcMain.handle('hubs:status', (event, id) => { checkSender(event); return hubsMake().status(String(id || '')); });
 ipcMain.handle('hubs:scan', (event, id) => { checkSender(event); return hubsMake().scan(String(id || '')); });
 ipcMain.handle('hubs:getConfig', (event, id) => { checkSender(event); return hubsMake().getConfig(String(id || '')); });
 ipcMain.handle('hubs:setConfig', (event, id, cfg) => { checkSender(event); return hubsMake().setConfig(String(id || ''), cfg && typeof cfg === 'object' ? cfg : {}); });
 ipcMain.handle('hubs:devices', (event, id, args) => { checkSender(event); return hubsMake().devices(String(id || ''), args && typeof args === 'object' ? args : {}); });
+ipcMain.handle('hubs:sync', (event, id, what, network) => {
+  checkSender(event);
+  const w = what && typeof what === 'object' ? what : {};
+  // the whole saved map of the active network (names, groups, places, details, cables, ignored machines) when the window supplies it
+  const net = network && typeof network === 'object' ? cleanNetwork(network) : null;
+  let payload;
+  if (net && Object.keys(net.devices).length > 1) {
+    const ign = new Set(net.ignored || []);
+    payload = { names: w.names === true, groups: w.groups === true, positions: w.positions === true, add: w.add === true, panels: w.panels === true, info: w.info === true, links: w.links === true, ignored: w.ignored === true,
+      linkList: net.links.map((l) => ({ a: l.a, b: l.b, cable: l.cable === true, wireless: l.wireless })), groupOptions: { groupCircles: net.groupCircles, groupCluster: net.groupCluster },
+      devices: Object.keys(net.devices).filter((k) => k !== 'router').map((k) => { const d = net.devices[k]; return { key: k, mac: d.mac, ip: d.ip, label: d.label, group: d.group, x: d.pos && d.pos.x, z: d.pos && d.pos.z, info: d.info, vlan: d.vlan, ignored: ign.has(k) }; }) };
+    // Desktop keeps an ignored machine only as a name in its ignore list (no record), so those are sent as small entries of their own
+    ign.forEach((k) => { if (Object.prototype.hasOwnProperty.call(net.devices, k)) return; if (/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(k)) payload.devices.push({ key: k, mac: k, ip: '', ignored: true }); else if (/^ip:\d{1,3}(\.\d{1,3}){3}$/.test(k)) payload.devices.push({ key: k, mac: '', ip: k.slice(3), ignored: true }); });
+  } else {
+    if (!webSnap || !Array.isArray(webSnap.devices) || webSnap.devices.length === 0) return { ok: false, error: 'This computer has no map yet. Open the Network Map tab, scan, and try again.' };
+    payload = { names: w.names === true, groups: w.groups === true, positions: w.positions === true, add: w.add === true, panels: w.panels === true,
+      devices: webSnap.devices.filter((d) => !d.isRouter && !d.self).map((d) => ({ mac: d.mac, ip: d.ip, label: d.label, group: d.group, x: d.x, z: d.z })) };
+  }
+  if (payload.panels) payload.panelList = ((webSnap && webSnap.panels) || []).map((p) => ({ name: p.name, url: p.url }));
+  return hubsMake().sync(String(id || ''), payload);
+});
 ipcMain.handle('hubs:alertTest', (event, id, a) => { checkSender(event); return hubsMake().alertTest(String(id || ''), a && typeof a === 'object' ? a : {}); });
 ipcMain.handle('hubs:update', (event, id, apply) => { checkSender(event); return hubsMake().update(String(id || ''), apply !== false); });
 ipcMain.handle('hubs:open', async (event, id) => {
@@ -1123,6 +1145,51 @@ ipcMain.handle('net:dns', async (event, ips) => {
   } catch (e) { return { ok: false, error: 'DNS could not be checked.' }; }
 });
 
+// "Help me identify this": a quick is-it-there check, an online maker lookup and a web search (only when the person asks)
+ipcMain.handle('net:ping', async (event, ip) => {
+  checkSender(event);
+  try {
+    if (typeof ip !== 'string' || !/^\d{1,3}(\.\d{1,3}){3}$/.test(ip) || !connectors.isPrivateIp(ip)) return { ok: false, error: 'Not an address on your own network.' };
+    if ((await scanner.pingHost(ip)) !== null) return { ok: true, alive: true };
+    for (const port of [80, 443, 22, 445, 8080, 53]) { if ((await scanner.tcpProbe(ip, port, 800)) === 'open') return { ok: true, alive: true }; }
+    return { ok: true, alive: false };
+  } catch (e) { return { ok: false, error: 'Could not check.' }; }
+});
+
+ipcMain.handle('net:maker', (event, mac) => {
+  checkSender(event);
+  return new Promise((resolve) => {
+    const m = typeof mac === 'string' ? scanner.normalizeMac(mac) : null;
+    if (!m) { resolve({ ok: false, error: 'That is not a MAC address.' }); return; }
+    const first = parseInt(m.slice(0, 2), 16);
+    if (first & 2) { resolve({ ok: true, name: '', private: true }); return; }   // a made-up address: no maker to find
+    let done = false;
+    const fin = (r) => { if (!done) { done = true; resolve(r); } };
+    try {
+      const req = require('https').get({ host: 'api.macvendors.com', path: '/' + encodeURIComponent(m.toUpperCase()), headers: { 'User-Agent': 'DashboardHub' }, timeout: 8000 }, (res) => {
+        let buf = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => { if (buf.length < 400) buf += c; });
+        res.on('end', () => {
+          if (res.statusCode === 200 && buf.trim()) fin({ ok: true, name: buf.trim().replace(/[\u0000-\u001f<>]/g, '').slice(0, 100) });
+          else if (res.statusCode === 404) fin({ ok: true, name: '' });
+          else fin({ ok: false, error: 'The lookup service said no (' + res.statusCode + '). Try again in a minute.' });
+        });
+      });
+      req.on('timeout', () => { req.destroy(); fin({ ok: false, error: 'No answer from the lookup service. Check your internet connection.' }); });
+      req.on('error', () => fin({ ok: false, error: 'Could not reach the lookup service. Check your internet connection.' }));
+    } catch (e) { fin({ ok: false, error: 'Could not look it up.' }); }
+  });
+});
+
+ipcMain.handle('net:search', (event, query) => {
+  checkSender(event);
+  const q = typeof query === 'string' ? query.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200) : '';
+  if (!q) return { ok: false };
+  shell.openExternal('https://duckduckgo.com/?q=' + encodeURIComponent(q));
+  return { ok: true };
+});
+
 ipcMain.handle('net:cancel', (event) => {
   checkSender(event);
   if (activeScan) activeScan.cancel();
@@ -1321,15 +1388,15 @@ app.on('web-contents-created', (event, wc) => {
 // ---------- settings and the system tray ("close button keeps it running in the background") ----------
 const TRAY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAaklEQVR42u3XzQoAEBAE4H0vb+edUS6Uq7+INWXU3tR8B2lHZHCM9enEyMo5FbqFuR0+RGiFNxHa4RUCEuBCnM7O3QrQ02kACoIAAgiABaj9hrAAvgECCPgH8Hwl41YMUUwgqhlEOX1RzzOrN4Ba/Ln20gAAAABJRU5ErkJggg==';
 function settingsFile() { return path.join(app.getPath('userData'), 'settings.json'); }
-const THEMES = ['auto', 'light', 'dark'];
+const THEMES = ['auto', 'light', 'dark', 'tron'];
 function cleanTheme(t) { return THEMES.indexOf(t) >= 0 ? t : 'auto'; }
 // 'auto' follows the computer's light / dark choice; the pages see it as prefers-color-scheme, so every window follows.
-function applyTheme(t) { try { nativeTheme.themeSource = cleanTheme(t) === 'auto' ? 'system' : cleanTheme(t); } catch (e) { /* older system: stays as is */ } }
+function applyTheme(t) { try { nativeTheme.themeSource = cleanTheme(t) === 'auto' ? 'system' : (cleanTheme(t) === 'light' ? 'light' : 'dark'); } catch (e) { /* older system: stays as is */ } }
 // Windows are told the chosen colours by a tiny script (not only through the system setting, which some Linux desktops do not pass on).
 function themeScript() { const t = cleanTheme(settings && settings.theme); return "(function(){var d=document.documentElement;" + (t === 'auto' ? "d.removeAttribute('data-theme');" : "d.setAttribute('data-theme','" + t + "');") + "window.dispatchEvent(new Event('hub-theme'));})()"; }
 function pushTheme(wc) { try { if (wc && !wc.isDestroyed() && wc.getType() === 'window') wc.executeJavaScript(themeScript()).catch(() => {}); } catch (e) { /* page is closing */ } }
 app.on('web-contents-created', (e, wc) => { wc.on('dom-ready', () => pushTheme(wc)); });
-function winBg() { try { const t = cleanTheme(settings && settings.theme); if (t === 'light') return '#edf0f5'; if (t === 'dark') return '#14171c'; return nativeTheme.shouldUseDarkColors ? '#14171c' : '#edf0f5'; } catch (e) { return '#14171c'; } }
+function winBg() { try { const t = cleanTheme(settings && settings.theme); if (t === 'light') return '#edf0f5'; if (t === 'dark') return '#14171c'; if (t === 'tron') return '#02070d'; return nativeTheme.shouldUseDarkColors ? '#14171c' : '#edf0f5'; } catch (e) { return '#14171c'; } }
 function readSettings() {
   try { const j = JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); return { closeToTray: j && j.closeToTray === true, gpu: !(j && j.gpu === false), gpuAutoOff: !!(j && j.gpu === false && j.gpuAutoOff === true), theme: cleanTheme(j && j.theme) }; } catch (e) { return { closeToTray: false, gpu: true, gpuAutoOff: false, theme: 'auto' }; }
 }

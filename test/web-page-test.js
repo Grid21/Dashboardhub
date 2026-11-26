@@ -65,6 +65,13 @@ function freePort() { return new Promise((res) => { const s = net.createServer()
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, scheme + '-devices.png') });
     await page.click('[data-tab=uptime]'); await sleep(700);
     check(scheme + ': uptime shows the summary, the sentences and a bar for each device', /8 devices watched/.test(await page.textContent('#upSum')) && /Printer went offline/.test(await page.textContent('#upLines')) && await page.evaluate(() => document.querySelectorAll('#upDev .up-row').length) === 3);
+    check(scheme + ': the log is below the device bars, in its own scrolling box', await page.evaluate(() => { const d = document.getElementById('upDev').getBoundingClientRect(), l = document.getElementById('upLines').getBoundingClientRect(), b = document.getElementById('logBox'); return l.top >= d.bottom - 1 && getComputedStyle(b).overflowY === 'auto' && b.getBoundingClientRect().height <= 262; }));
+    await page.click('#logToggle'); await sleep(200);
+    check(scheme + ': the Hide button folds the log away and Show brings it back', await page.evaluate(() => document.getElementById('logBox').hidden && document.getElementById('logToggle').textContent === 'Show'));
+    await page.click('[data-tab=devices]'); await page.click('[data-tab=uptime]'); await sleep(700);
+    check(scheme + ': the folded state is remembered', await page.evaluate(() => document.getElementById('logBox').hidden));
+    await page.click('#logToggle'); await sleep(200);
+    check(scheme + ': Show opens it again', await page.evaluate(() => !document.getElementById('logBox').hidden && /Printer went offline/.test(document.getElementById('logBox').textContent)));
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, scheme + '-uptime.png') });
     check(scheme + ': no sideways scrolling on the phone', await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await page.click('#logout'); await sleep(400);

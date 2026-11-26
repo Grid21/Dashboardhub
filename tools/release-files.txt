@@ -94,6 +94,7 @@ test/groups-shot.js
 test/groups-shot2.js
 test/groups-test.js
 test/guard-test.js
+test/identify-ui-test.js
 test/layout-shift-test.js
 test/livetext-test.js
 test/manual-test.js

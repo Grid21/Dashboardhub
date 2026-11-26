@@ -6,9 +6,10 @@
   <title>Dashboard Hub - Notifications Center</title>
   <style>
 :root { color-scheme: light dark; --bg: #14171c; --panel: #1b2027; --line: #2b323c; --text: #e6e9ee; --dim: #9aa4b2; --accent: #3b82f6; --good: #34d399; --bad: #f87171; --warn: #f5c542; --raise: #232a33; --hover: #1c222b; --hover2: #20262e; --picked: #1f2a38; --stripe-a: #3a4250; --stripe-b: #2b323c; --strong: #fff; }
-@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg: #eef1f6; --panel: #ffffff; --line: #d5dae3; --text: #1a202c; --dim: #4a5568; --accent: #2563eb; --good: #059669; --bad: #dc2626; --warn: #a16207; --raise: #eef1f6; --hover: #f1f4f9; --hover2: #f1f4f9; --picked: #dce8fb; --stripe-a: #c3cad6; --stripe-b: #e3e7ee; --strong: #0b1220; } }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]):not([data-theme="tron"]) { --bg: #eef1f6; --panel: #ffffff; --line: #d5dae3; --text: #1a202c; --dim: #4a5568; --accent: #2563eb; --good: #059669; --bad: #dc2626; --warn: #a16207; --raise: #eef1f6; --hover: #f1f4f9; --hover2: #f1f4f9; --picked: #dce8fb; --stripe-a: #c3cad6; --stripe-b: #e3e7ee; --strong: #0b1220; } }
 :root[data-theme="light"] { color-scheme: light; --bg: #eef1f6; --panel: #ffffff; --line: #d5dae3; --text: #1a202c; --dim: #4a5568; --accent: #2563eb; --good: #059669; --bad: #dc2626; --warn: #a16207; --raise: #eef1f6; --hover: #f1f4f9; --hover2: #f1f4f9; --picked: #dce8fb; --stripe-a: #c3cad6; --stripe-b: #e3e7ee; --strong: #0b1220; }
 :root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="tron"] { color-scheme: dark; --bg: #02070d; --panel: #04141f; --line: #1fb6c9; --text: #d4fbff; --dim: #7fe9f7; --accent: #6ff3ff; --bad: #ff5a6e; --good: #22eeaa; --warn: #ff9a1f; --raise: #062030; --act: #0a3a4a; --kind: #0a2c3a; --note: #062a3a; --hover: #062030; --hover2: #08283a; --picked: #0a3a4a; --stripe-a: #0f5f70; --stripe-b: #062030; --strong: #fff; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, 'Segoe UI', Roboto, sans-serif; }
 body { display: flex; flex-direction: column; }

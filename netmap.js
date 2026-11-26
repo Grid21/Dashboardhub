@@ -273,7 +273,7 @@
     if (m >= 1) return m + ' min';
     return 'under a minute';
   }
-  function save() { try { trackPresence(); saveState(); if (window.hubProfilesCapture) window.hubProfilesCapture(); } catch (e) { /* ignore */ } }
+  function save() { try { trackPresence(); saveState(); if (window.hubProfilesCapture) window.hubProfilesCapture(); window.dispatchEvent(new Event('hub-map-changed')); } catch (e) { /* ignore */ } }
   const linkId = (a, b) => (a < b ? a + '~' + b : b + '~' + a);
   const devices = () => Object.values(net.devices);
   const effectiveOs = (d) => (d.isRouter ? 'router' : (d.osOverride || (d.os && d.os.id) || 'unknown'));
@@ -416,8 +416,9 @@
   let renderer = null, scene = null, camera = null, controls = null, raycaster = null, canvas = null;
   let webglFailed = false, softwareGl = false, glLost = false, glLostTimer = null;
   // light or dark: the chosen colours (Settings) first, otherwise whatever the computer uses
-  function hubIsLight() { const t = document.documentElement.getAttribute('data-theme'); if (t === 'light' || t === 'dark') return t === 'light'; return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches); }
-  const edgeColor = () => (hubIsLight() ? 0x1f2937 : 0xffffff);
+  function hubIsLight() { const t = document.documentElement.getAttribute('data-theme'); if (t === 'light' || t === 'dark' || t === 'tron') return t === 'light'; return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches); }
+  const isTron = () => document.documentElement.getAttribute('data-theme') === 'tron';
+  const edgeColor = () => (hubIsLight() ? 0x1f2937 : (isTron() ? 0x6ff3ff : 0xffffff));
   function refreshEdges() { nodes.forEach((n) => { if (n.edges && n.edges.material) n.edges.material.color.setHex(edgeColor()); }); }
   const nodes = new Map();      // device key -> { group, mesh, edges, sprite, sig }
   const linkObjs = new Map();   // link id -> { group, vis, pick, a, b }
@@ -484,7 +485,7 @@
     const isLightTheme = () => hubIsLight();
     const buildGrid = () => {            // the floor grid and selection outlines follow light / dark mode
       if (grid) { scene.remove(grid); grid.geometry.dispose(); grid.material.dispose(); }
-      grid = isLightTheme() ? new THREE.GridHelper(160, 32, 0x9aa5b8, 0xcdd3de) : new THREE.GridHelper(160, 32, 0x2c3340, 0x1c2330);
+      grid = isLightTheme() ? new THREE.GridHelper(160, 32, 0x9aa5b8, 0xcdd3de) : (isTron() ? new THREE.GridHelper(160, 32, 0x6ff3ff, 0x0f6d7c) : new THREE.GridHelper(160, 32, 0x2c3340, 0x1c2330));
       grid.position.y = FLOOR_Y;
       scene.add(grid);
     };
@@ -1824,6 +1825,144 @@
   }
   function webPortOf(d) { return (d.ports || []).find((p) => WEB_PORTS.has(p.port) || /HTTP/.test(p.service || '')); }
 
+  // ---------- "Help me identify this": what we know, what it probably is, and where to look it up ----------
+  const NAME_HINTS = [
+    [/^esp[-_ ]?[0-9a-f]{0,8}$|^espressif|^esp32|^esp8266/i, 'a smart-home gadget or hobby board built on an Espressif (ESP) chip: smart plug, bulb, sensor, or something home-made'],
+    [/iphone|ipad|ipod/i, 'an Apple iPhone or iPad'], [/macbook|imac|mac-?mini|mac-?pro/i, 'an Apple Mac'], [/android|galaxy|pixel|oneplus|xiaomi|redmi|sm-[a-z]\d/i, 'an Android phone or tablet'],
+    [/roku/i, 'a Roku streaming device'], [/chromecast|google-?home|nest/i, 'a Google Chromecast / Nest device'], [/echo|alexa|amazon|kindle|fire-?tv/i, 'an Amazon Echo / Fire device'],
+    [/printer|laserjet|officejet|deskjet|epson|brother|canon|pixma/i, 'a printer'], [/cam|ipcam|reolink|hikvision|dahua|wyze|ring/i, 'a camera or doorbell'],
+    [/tasmota|shelly|sonoff|tuya|smartlife|wiz|yeelight|tplink-?(plug|bulb)|kasa/i, 'a smart plug, switch or bulb'], [/xbox|playstation|ps[345]|nintendo|switch-/i, 'a game console'],
+    [/tv|bravia|samsung-?tv|lg-?webos|vizio/i, 'a smart TV'], [/sonos|denon|marantz|yamaha|bose|heos/i, 'a speaker or audio receiver'], [/pi$|raspberry|raspberrypi/i, 'a Raspberry Pi'],
+    [/^desktop-|^laptop-|^win-/i, 'a Windows PC (the name is the Windows default)']
+  ];
+  const VENDOR_HINTS = [
+    [/espressif/i, 'The maker is Espressif: they make the Wi-Fi chip inside many cheap smart plugs, bulbs, sensors and hobby boards. So this is probably a gadget with an ESP chip, not an Espressif product.'],
+    [/tuya|hangzhou|shenzhen|guangdong|zhejiang/i, 'Chips and modules from China (Tuya and similar) sit inside a huge number of unbranded smart-home gadgets. The name here is the chip maker, not the gadget’s brand.'],
+    [/realtek|mediatek|ralink|qualcomm|broadcom|azurewave|murata|liteon|lite-on|hon hai|foxconn|intel corporate/i, 'This is the maker of the network chip or card, not the product. Laptops, PCs, TVs and many gadgets use these.'],
+    [/raspberry/i, 'A Raspberry Pi computer.'], [/apple/i, 'An Apple product (iPhone, iPad, Mac, Apple TV, HomePod, AirPort...).'], [/samsung/i, 'Samsung: a phone, tablet, TV or appliance.'],
+    [/amazon/i, 'Amazon: an Echo speaker, Fire TV/tablet, Kindle or Ring device.'], [/google|nest/i, 'Google/Nest: a Chromecast, Nest speaker, thermostat or camera.'], [/sonos/i, 'A Sonos speaker.'],
+    [/sony|nintendo|microsoft|xbox/i, 'Probably a game console or a TV.'], [/hewlett|hp inc|epson|brother|canon|xerox|lexmark|ricoh|kyocera/i, 'A printer or scanner (or a PC from the same company).'],
+    [/hikvision|dahua|axis|reolink|ezviz|wyze/i, 'A security camera or recorder.'], [/vmware|qemu|virtualbox|xen|microsoft.*hyper|parallels/i, 'A virtual machine (not a real device).']
+  ];
+  const PORT_HINTS = [
+    [9100, 'answers on port 9100: this is how printers receive print jobs'], [631, 'answers on port 631 (IPP): a printer'], [515, 'answers on port 515 (LPD): a printer'], [554, 'answers on port 554 (RTSP): a camera or video recorder'],
+    [8554, 'answers on port 8554 (RTSP): a camera'], [1883, 'answers on port 1883 (MQTT): a smart-home hub or sensor gateway'], [8883, 'answers on port 8883 (secure MQTT): a smart-home hub'],
+    [8008, 'answers on port 8008: Chromecast / Google TV'], [8009, 'answers on port 8009: Chromecast / Google TV'], [62078, 'answers on port 62078: this is an iPhone or iPad'], [7000, 'answers on port 7000: Apple AirPlay (Apple TV, speaker or Mac)'],
+    [3389, 'answers on port 3389: Windows Remote Desktop, so a Windows PC or server'], [5900, 'answers on port 5900 (VNC): remote screen access'], [548, 'answers on port 548: Apple file sharing'], [445, 'answers on port 445: Windows/Samba file sharing (PC, NAS)'],
+    [5000, 'answers on port 5000/5001: very often a Synology NAS'], [8123, 'answers on port 8123: Home Assistant'], [32400, 'answers on port 32400: Plex media server'], [23, 'answers on port 23 (Telnet): an old or very simple device, often a switch or IoT gadget'],
+    [1900, 'answers on port 1900 (UPnP): routers, TVs, media players and many gadgets'], [161, 'answers on port 161 (SNMP): network gear, printers, UPS units'], [22, 'answers on port 22 (SSH): Linux/Unix, a NAS, or network gear']
+  ];
+  const idState = { key: '', look: null };   // which machine's identify help is open, and its online answer: kept when the pane is redrawn
+  const unplug = { timer: null, ip: '', msg: '' };   // the unplug test keeps running even if the side pane is redrawn
+  function isPrivateMac(mac) { const m = /^([0-9a-f]{2})[:-]/i.exec(String(mac || '')); return !!m && (parseInt(m[1], 16) & 2) === 2; }
+  function identifyClues(d) {
+    const out = { facts: [], guesses: [], queries: [], privateMac: false, haveMaker: false };
+    const ports = Array.isArray(d.ports) ? d.ports : [];
+    const mac = d.mac && /^[0-9a-f]{2}([:-][0-9a-f]{2}){5}$/i.test(d.mac) ? d.mac : '';
+    const maker = d.vendor && !/^Private/i.test(d.vendor) ? d.vendor : '';
+    const clean = (t) => String(t || '').replace(/[,.]?\s*(inc|ltd|llc|co|corp|corporation|gmbh|s\.?a|limited)\b\.?/ig, '').replace(/\s+/g, ' ').trim();
+    if (mac) { out.privateMac = isPrivateMac(mac); out.facts.push('Hardware (MAC) address: ' + mac); }
+    else out.facts.push('No hardware (MAC) address was seen (only machines on your own network segment show one).');
+    if (out.privateMac) out.facts.push('The address is a made-up "private" one (its second digit is 2, 6, A or E). Phones, tablets and newer Windows PCs do this on purpose, so no maker can be found from it. If it is a phone: in its Wi-Fi settings for your network, switch "Private Wi-Fi address" off and it will show its real one next time.');
+    if (maker) { out.haveMaker = true; out.facts.push('Maker of its network chip (from the address): ' + maker); }
+    else if (mac && !out.privateMac) out.facts.push('The built-in list of makers has no entry for this address. The online lookup below may know it.');
+    if (d.hostname) out.facts.push('Name it announces: ' + d.hostname);
+    if (d.ttl) out.facts.push('Replies like ' + (d.ttl <= 64 ? 'Linux / Unix / Apple / Android / most gadgets' : d.ttl <= 128 ? 'Windows' : 'a router or switch') + ' (ping TTL ' + d.ttl + ')');
+    ports.forEach((p) => {
+      let t = 'Open port ' + p.port + (p.service ? ' (' + p.service + ')' : '');
+      if (p.title) t += ', web page title "' + p.title + '"';
+      if (p.banner) t += ', says "' + p.banner + '"';
+      out.facts.push(t);
+    });
+    if (!ports.length && d.ip) out.facts.push('No open ports were found on the common ones. Many gadgets and phones are completely quiet; that is normal.');
+    const seen = new Set();
+    const add = (t) => { if (t && !seen.has(t)) { seen.add(t); out.guesses.push(t); } };
+    const name = d.hostname || '';
+    if (name) NAME_HINTS.forEach((h) => { if (h[0].test(name)) add('Its name suggests ' + h[1] + '.'); });
+    if (maker) VENDOR_HINTS.forEach((h) => { if (h[0].test(maker)) add(h[1]); });
+    ports.forEach((p) => PORT_HINTS.forEach((h) => { if (h[0] === p.port) add('It ' + h[1] + '.'); }));
+    const web = ports.find((p) => p.title);
+    if (web) add('Its web page is called "' + web.title + '". Opening that page in your browser usually shows the product name.');
+    if (!out.guesses.length) add('Nothing here points to one clear answer. Try the searches below, or the unplug test.');
+    const q = [];
+    const add2 = (t) => { if (t && q.indexOf(t) < 0) q.push(t); };
+    if (maker || name || web) {
+      add2([clean(maker), name, web ? web.title : '', ports.map((p) => p.banner).filter(Boolean)[0] || ''].filter(Boolean).join(' ') + ' what device is this');
+    }
+    if (mac && !out.privateMac) add2(mac.slice(0, 8).toUpperCase().replace(/-/g, ':') + ' MAC address vendor');
+    if (name) add2('"' + name + '" device hostname what is it');
+    out.queries = q.slice(0, 3);
+    return out;
+  }
+  function identifyBox(d, parent, onBrand) {
+    const wrap = el('div', 'identify');
+    const open = btn('Help me identify this', () => { body.hidden = !body.hidden; idState.key = body.hidden ? '' : d.key; open.textContent = body.hidden ? 'Help me identify this' : 'Hide the identify help'; }, 'secondary');
+    open.id = 'idHelpBtn';
+    const body = el('div', 'identify-body'); body.hidden = true; body.id = 'idHelp';
+    if (idState.key === d.key) { body.hidden = false; open.textContent = 'Hide the identify help'; }
+    const c = identifyClues(d);
+    body.appendChild(el('p', 'small-note', 'Here is everything Dashboard Hub knows about this machine, and some ways to find out more. Nothing is sent anywhere until you press one of the search buttons.'));
+    body.appendChild(el('h4', null, 'What we know'));
+    const ul = el('ul'); c.facts.forEach((t) => ul.appendChild(el('li', null, t))); body.appendChild(ul);
+    body.appendChild(el('h4', null, 'What it might be'));
+    const ul2 = el('ul', null); ul2.id = 'idGuesses'; c.guesses.forEach((t) => ul2.appendChild(el('li', null, t))); body.appendChild(ul2);
+    body.appendChild(el('h4', null, 'Look it up'));
+    const res = el('p', 'small-note'); res.id = 'idResult';
+    const r1 = el('div', 'btnrow');
+    c.queries.forEach((q, i) => r1.appendChild(btn(i === 0 ? 'Search the web for this' : 'Search: ' + (q.length > 34 ? q.slice(0, 34) + '…' : q), () => { if (window.netApi && window.netApi.search) window.netApi.search(q); }, 'secondary')));
+    const showLook = () => {
+      const L = idState.look; res.textContent = '';
+      if (!L || L.key !== d.key) return;
+      if (!L.ok) { res.textContent = L.error || 'The lookup did not work.'; return; }
+      if (!L.name) { res.textContent = 'The online list has no entry for this address either. That usually means a very small or new maker, or a made-up address.'; return; }
+      res.appendChild(document.createTextNode('The online list says: ' + L.name + '. '));
+      res.appendChild(btn('Use as brand', () => { onBrand(L.name); idState.look = null; }, 'secondary'));
+    };
+    showLook();
+    const canOnline = d.mac && !c.privateMac && window.netApi && window.netApi.maker;
+    if (canOnline) {
+      r1.appendChild(btn('Ask an online maker list', async () => {
+        if (!confirm('This sends the first part of the hardware address (it identifies the chip maker) to api.macvendors.com, a free public lookup service. Nothing else about your network is sent. Continue?')) return;
+        res.textContent = 'Asking…';
+        const r = await window.netApi.maker(d.mac);
+        idState.look = { key: d.key, ok: !!(r && r.ok), name: r && r.name || '', error: r && r.error || '' };
+        showLook();
+      }, 'secondary'));
+    }
+    body.appendChild(r1); body.appendChild(res);
+    if (d.ip) {
+      body.appendChild(el('h4', null, 'Unplug test'));
+      body.appendChild(el('p', 'small-note', 'Not sure which physical thing this is? Start the test, then unplug (or switch off) the device you suspect. This window tells you the moment this machine stops answering.'));
+      const st = el('p', 'small-note'); st.id = 'idUnplug';
+      const ur = el('div', 'btnrow');
+      const setMsg = (m) => { unplug.msg = m; const e = document.getElementById('idUnplug'); if (e) e.textContent = m; };
+      const stop = (msg) => { if (unplug.timer) { clearInterval(unplug.timer); unplug.timer = null; } const b = document.getElementById('idUnplugBtn'); if (b) b.disabled = false; if (msg !== undefined) setMsg(msg); };
+      const startBtn = btn('Start unplug test', async () => {
+        stop(); startBtn.disabled = true; unplug.ip = d.ip; setMsg('Checking that it answers now\u2026');
+        const r = await window.netApi.ping(d.ip);
+        if (!r || !r.ok || !r.alive) { stop('It is not answering right now, so the test cannot tell. Turn it on first, or try again.'); return; }
+        const t0 = Date.now(); let misses = 0, busy = false;
+        setMsg('Watching ' + d.ip + '. Now unplug the device you suspect\u2026');
+        unplug.timer = setInterval(async () => {
+          if (busy) return; busy = true;
+          const x = await window.netApi.ping(d.ip); busy = false;
+          if (!unplug.timer) return;
+          const secs = Math.round((Date.now() - t0) / 1000);
+          if (x && x.ok && !x.alive) misses++; else misses = 0;
+          if (misses >= 2) stop('It stopped answering after ' + secs + ' seconds (at ' + new Date().toLocaleTimeString() + '). The thing you just unplugged is this machine. Plug it back in, then give it a name in the Edit section.');
+          else if (secs > 180) stop('Nothing changed in 3 minutes, so the device you unplugged is not this one.');
+          else setMsg('Watching ' + d.ip + ' (' + secs + ' s). It is still answering\u2026');
+        }, 2500);
+      }, 'secondary');
+      startBtn.id = 'idUnplugBtn';
+      if (unplug.ip === d.ip) { st.textContent = unplug.msg; if (unplug.timer) startBtn.disabled = true; }
+      ur.appendChild(startBtn); ur.appendChild(btn('Stop', () => stop('Stopped.'), 'secondary'));
+      body.appendChild(ur); body.appendChild(st);
+    }
+    wrap.appendChild(open); wrap.appendChild(body); parent.appendChild(wrap);
+    return c;
+  }
+
   function infoSection(side, d) {
     const os = effectiveOs(d);
     const isNet = d.isRouter || os === 'switch' || os === 'network';
@@ -1853,6 +1992,7 @@
       box.appendChild(el('p', 'small-note', d.ip ? 'No web interface was found on the common ports. If it has one, type its address below.' : 'Type what you know about it below. Give it an IP address (in the Edit section) to let scans find more.'));
     }
     if (hint) box.appendChild(el('p', 'small-note', 'Looks like: ' + hint + (d.vendor ? ' (from the maker "' + d.vendor + '" and what it answers)' : '')));
+    identifyBox(d, box, (name) => { d.info.brand = String(name).slice(0, 60); save(); queueSync(); renderSide(); });
     const mk = (label, key, ph, max) => {
       const i = el('input'); i.type = 'text'; i.maxLength = max; i.placeholder = ph; i.value = d.info[key] || '';
       i.addEventListener('change', () => {
@@ -3260,8 +3400,9 @@
     // a plain copy for the phone and browser page (see Settings, Phone and browser access)
     webData: function () {
       return {
-        devices: Object.keys(net.devices).map((k) => { const d = net.devices[k]; return { key: d.key, name: d.isRouter && !d.label ? 'Router' : title(d), ip: d.ip, mac: d.mac || '', vendor: d.vendor || '', os: d.os && d.os.id !== 'unknown' ? d.os.label : '', group: d.group || '', online: d.online !== false, isRouter: !!d.isRouter, self: !!d.self, x: d.pos ? d.pos.x : 0, z: d.pos ? d.pos.z : 0, lastSeen: d.lastSeen, onlineSince: d.onlineSince, ports: d.ports }; }),
-        links: net.links.map((l) => ({ a: l.a, b: l.b }))
+        devices: Object.keys(net.devices).map((k) => { const d = net.devices[k]; return { key: d.key, name: d.isRouter && !d.label ? 'Router' : title(d), label: d.label || '', ip: d.ip, mac: d.mac || '', vendor: d.vendor || '', os: d.os && d.os.id !== 'unknown' ? d.os.label : '', group: d.group || '', online: d.online !== false, isRouter: !!d.isRouter, self: !!d.self, x: d.pos ? d.pos.x : 0, z: d.pos ? d.pos.z : 0, lastSeen: d.lastSeen, onlineSince: d.onlineSince, ports: d.ports }; }),
+        links: net.links.map((l) => ({ a: l.a, b: l.b, cable: l.cable === true, wireless: l.wireless === true })),
+        opts: { groupCircles: net.groupCircles !== false, groupCluster: net.groupCluster !== false }
       };
     },
     count: function () { return devices().filter((d) => !d.isRouter).length; },

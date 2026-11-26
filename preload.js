@@ -42,6 +42,9 @@ contextBridge.exposeInMainWorld('netApi', {
   wake: (macs) => ipcRenderer.invoke('net:wake', macs),
   bandwidth: () => ipcRenderer.invoke('bw:sample'),
   shares: (ip) => ipcRenderer.invoke('net:shares', ip),
+  ping: (ip) => ipcRenderer.invoke('net:ping', String(ip || '')),
+  maker: (mac) => ipcRenderer.invoke('net:maker', String(mac || '')),
+  search: (query) => ipcRenderer.invoke('net:search', String(query || '')),
   dns: (ips) => ipcRenderer.invoke('net:dns', Array.isArray(ips) ? ips.slice(0, 512).map(String) : []),
   onEvent: (callback) => {
     ipcRenderer.removeAllListeners('net:event');
@@ -86,12 +89,14 @@ contextBridge.exposeInMainWorld('hubsApi', {
   list: () => ipcRenderer.invoke('hubs:list'),
   save: (x) => ipcRenderer.invoke('hubs:save', x),
   remove: (id) => ipcRenderer.invoke('hubs:remove', String(id || '')),
+  auto: (id, on) => ipcRenderer.invoke('hubs:auto', String(id || ''), on === true),
   status: (id) => ipcRenderer.invoke('hubs:status', String(id || '')),
   scan: (id) => ipcRenderer.invoke('hubs:scan', String(id || '')),
   open: (id) => ipcRenderer.invoke('hubs:open', String(id || '')),
   getConfig: (id) => ipcRenderer.invoke('hubs:getConfig', String(id || '')),
   setConfig: (id, cfg) => ipcRenderer.invoke('hubs:setConfig', String(id || ''), cfg),
   devices: (id, args) => ipcRenderer.invoke('hubs:devices', String(id || ''), args),
+  sync: (id, what, network) => ipcRenderer.invoke('hubs:sync', String(id || ''), what, network),
   alertTest: (id, a) => ipcRenderer.invoke('hubs:alertTest', String(id || ''), a),
   update: (id, apply) => ipcRenderer.invoke('hubs:update', String(id || ''), apply !== false)
 });

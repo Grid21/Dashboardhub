@@ -230,7 +230,7 @@ function createWebAccess(o) {
       if (!authed(req)) return json(res, 401, { error: 'Sign in first', login: true });
       if (req.headers['x-dashboard-hub'] !== '1') return json(res, 403, { error: 'Not allowed' });      // a web page on another site cannot send this header
       let abody = '', aover = false;
-      req.on('data', (c) => { abody += c; if (abody.length > 65536) { aover = true; req.destroy(); } });
+      req.on('data', (c) => { abody += c; if (abody.length > 8 * 1024 * 1024) { aover = true; req.destroy(); } });
       req.on('end', () => {
         if (aover) return;
         let args = {}; try { args = abody ? JSON.parse(abody) : {}; } catch (e) { return json(res, 400, { ok: false, error: 'Bad request' }); }
@@ -313,7 +313,7 @@ function hubUrl(text) {
 function createRemoteHubs(o) {
   const cookies = new Map();          // id -> { value, at }
   let list = null;
-  const load = () => { if (!list) { let l = []; try { l = o.read(); } catch (e) { l = []; } list = (Array.isArray(l) ? l : []).slice(0, 50).filter((h) => h && h.id && hubUrl(h.url)).map((h) => ({ id: String(h.id).slice(0, 40), name: String(h.name || '').slice(0, 60), url: hubUrl(h.url), code: String(h.code || '').slice(0, 64) })); } return list; };
+  const load = () => { if (!list) { let l = []; try { l = o.read(); } catch (e) { l = []; } list = (Array.isArray(l) ? l : []).slice(0, 50).filter((h) => h && h.id && hubUrl(h.url)).map((h) => ({ id: String(h.id).slice(0, 40), name: String(h.name || '').slice(0, 60), url: hubUrl(h.url), code: String(h.code || '').slice(0, 64), auto: h.auto === true })); } return list; };
   const persist = () => { try { return o.write(load()); } catch (e) { return false; } };
   const find = (id) => load().find((h) => h.id === id) || null;
   function request(h, method, p, body, cookie, extra) {
@@ -354,7 +354,7 @@ function createRemoteHubs(o) {
     if (r.code === 200 && r.json) return { ok: true, json: r.json, cookie: s.cookie };
     return { ok: false, error: why(r) };
   }
-  const pub = (h) => ({ id: h.id, name: h.name, url: h.url, hasCode: !!h.code });
+  const pub = (h) => ({ id: h.id, name: h.name, url: h.url, hasCode: !!h.code, auto: h.auto === true });
   return {
     list: () => load().map(pub),
     save(x) {
@@ -368,6 +368,7 @@ function createRemoteHubs(o) {
       const kept = persist();
       return { ok: true, id: h.id, kept: kept !== false, list: load().map(pub) };
     },
+    setAuto(id, on) { const h = find(String(id || '')); if (!h) return { ok: false, error: 'That server is not in the list.' }; h.auto = on === true; const kept = persist(); return { ok: true, auto: h.auto, kept: kept !== false, list: load().map(pub) }; },
     remove(id) { list = load().filter((h) => h.id !== id); cookies.delete(id); persist(); return { ok: true, list: list.map(pub) }; },
     async status(id) {
       const h = find(id); if (!h) return { ok: false, error: 'Not found' };
@@ -407,6 +408,16 @@ function createRemoteHubs(o) {
       if (r.code === 401) { s = await session(h, true); if (!s.ok) return s; r = await doIt(s.cookie); }
       if (r.code === 200 && r.json) return r.json;
       if (r.code === 404 || r.code === 405) return { ok: false, error: 'That server cannot edit devices yet. Update it to the newest Docker version first.' };
+      return r.json && r.json.error ? { ok: false, error: r.json.error } : { ok: false, error: why(r) };
+    },
+    async sync(id, payload) {
+      const h = find(id); if (!h) return { ok: false, error: 'Not found' };
+      const doIt = async (cookie) => request(h, 'POST', '/api/action/sync', payload, cookie, { 'X-Dashboard-Hub': '1' });
+      let s = await session(h, false); if (!s.ok) return s;
+      let r = await doIt(s.cookie);
+      if (r.code === 401) { s = await session(h, true); if (!s.ok) return s; r = await doIt(s.cookie); }
+      if (r.code === 200 && r.json) return r.json;
+      if (r.code === 404 || r.code === 405) return { ok: false, error: 'That server cannot receive a sync yet. Update it to the newest Docker version first.' };
       return r.json && r.json.error ? { ok: false, error: r.json.error } : { ok: false, error: why(r) };
     },
     async alertTest(id, alerts) {
@@ -450,13 +461,15 @@ function webCleanSnapshot(s) {
   (Array.isArray(s.devices) ? s.devices : []).slice(0, 1500).forEach((d) => {
     if (!d || typeof d !== 'object' || !d.key) return;
     out.devices.push({
-      key: str(d.key, 80), name: str(d.name, 80), ip: str(d.ip, 45), mac: str(d.mac, 17), vendor: str(d.vendor, 60), os: str(d.os, 40), group: str(d.group, 30),
+      key: str(d.key, 80), name: str(d.name, 80), label: str(d.label, 60), ip: str(d.ip, 45), mac: str(d.mac, 17), vendor: str(d.vendor, 60), os: str(d.os, 40), group: str(d.group, 30),
       online: d.online !== false, isRouter: d.isRouter === true, self: d.self === true, x: num(d.x), z: num(d.z),
       lastSeen: Number.isFinite(d.lastSeen) ? d.lastSeen : null, onlineSince: Number.isFinite(d.onlineSince) ? d.onlineSince : null,
-      ports: (Array.isArray(d.ports) ? d.ports : []).slice(0, 16).filter((p) => p && Number.isInteger(p.port)).map((p) => ({ port: p.port, service: str(p.service, 30) }))
+      ports: (Array.isArray(d.ports) ? d.ports : []).slice(0, 16).filter((p) => p && Number.isInteger(p.port)).map((p) => ({ port: p.port, service: str(p.service, 30) })),
+      info: d.info && typeof d.info === 'object' ? { brand: str(d.info.brand, 60), model: str(d.info.model, 60), notes: str(d.info.notes, 400), webUrl: /^https?:\/\/[^\s<>"']{1,200}$/.test(String(d.info.webUrl || '')) ? String(d.info.webUrl) : '' } : null, vlan: str(d.vlan, 30)
     });
   });
-  (Array.isArray(s.links) ? s.links : []).slice(0, 4000).forEach((l) => { if (l && l.a && l.b) out.links.push({ a: str(l.a, 80), b: str(l.b, 80) }); });
+  (Array.isArray(s.links) ? s.links : []).slice(0, 4000).forEach((l) => { if (l && l.a && l.b) out.links.push({ a: str(l.a, 80), b: str(l.b, 80), cable: l.cable === true, wireless: l.wireless === true }); });
+  out.opts = { groupCircles: !(s.opts && s.opts.groupCircles === false), groupCluster: !(s.opts && s.opts.groupCluster === false) };
   return out;
 }
 
@@ -489,7 +502,7 @@ const WEB_HTML = String.raw`<!doctype html>
     <div id="note" class="note" hidden></div>
     <div id="t-panels"></div>
     <div id="t-map" hidden>
-      <div class="mapbar"><span id="mapStat" class="dim"></span><span><button id="mode3" title="Switch between the flat map and the 3D view">3D</button> <button id="resetPos" title="Put the dots back where they were placed automatically">Reset</button> <button id="fit">Fit</button></span></div>
+      <div class="mapbar" title="3D: drag to turn, Shift+drag or right-drag (or two fingers) to move the view, wheel or pinch to zoom"><span id="mapStat" class="dim"></span><span><button id="mode3" title="Switch between the flat map and the 3D view">3D</button>  <button id="scanNow" title="Look for devices on the network now" hidden>Scan</button> <button id="resetPos" title="Put the dots back where they were placed automatically">Reset</button> <button id="fit">Fit</button></span></div>
       <canvas id="map"></canvas>
       <div id="mapDetail" class="card" hidden></div>
     </div>
@@ -502,8 +515,8 @@ const WEB_HTML = String.raw`<!doctype html>
       <div class="bar"><select id="range"><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select>
       <label class="chk"><input id="brief" type="checkbox"> show very short drops</label></div>
       <p id="upSum" class="dim"></p>
-      <div id="upLines"></div>
       <div id="upDev"></div>
+      <div id="upLines"></div>
     </div>
   </main>
 </section>
@@ -543,8 +556,12 @@ canvas#map{width:100%;height:62vh;min-height:320px;background:var(--panel);borde
 .up-row .t{display:flex;justify-content:space-between;gap:8px}.up-row .t span{color:var(--dim);font-size:13px;white-space:nowrap}
 .bar2{position:relative;height:12px;border-radius:6px;background:var(--raise);overflow:hidden;margin-top:6px}
 .seg{position:absolute;top:0;bottom:0;min-width:1px}.seg.up{background:var(--good)}.seg.down{background:var(--bad)}.seg.unknown{background:repeating-linear-gradient(45deg,#8a93a5,#8a93a5 3px,transparent 3px,transparent 6px)}
+.logbox{max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--card,transparent)}
+.logbox .line:last-child{border-bottom:0}
+.loghead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:18px}
+.loghead h2{margin:0}
 .line{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
-.chk{font-size:14px;display:flex;gap:6px;align-items:center}.chk input{padding:0;width:auto}
+.chk{font-size:14px;display:flex;gap:8px;align-items:center;justify-content:flex-start;text-align:left}.chk input,#t-settings .chk input,#t-devices .chk input{padding:0;width:auto;flex:none;margin:0}
 h2{font-size:16px;margin:16px 0 8px}
 .sl{display:block;margin-top:10px}.sl span{display:block;font-size:13px;margin-bottom:4px}.sl select,#t-settings input{width:100%}
 .prow{display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--line)}
@@ -587,7 +604,7 @@ function load() {
   api('/api/state').then(function (r) {
     if (r._status === 401) { showLogin(''); return; }
     showApp();
-    if (S.edit === undefined) { S.edit = false; api('/api/info').then(function (i) { if (i && i.editable === true) { S.edit = true; $('setTab').hidden = false; if (S.tab === 'devices') drawDevices(); } }).catch(function () {}); }
+    if (S.edit === undefined) { S.edit = false; api('/api/info').then(function (i) { if (i && i.editable === true) { S.edit = true; $('setTab').hidden = false; $('scanNow').hidden = false; if (S.tab === 'devices') drawDevices(); } }).catch(function () {}); }
     if (S.dragging) return;
     S.now = r.now; S.snap = r.snapshot || null; S.fetched = Date.now();
     draw();
@@ -671,10 +688,17 @@ function drawSettings() {
     [['ntfy', 'ntfy (plain text)'], ['discord', 'Discord web hook'], ['slack', 'Slack web hook'], ['json', 'Other (JSON)']].forEach(function (x) { opt(alFmt, x[0], x[1]); }); alFmt.value = al.format || 'ntfy';
     function chk(text, on) { var l = el('label', 'chk'), i = el('input'); i.type = 'checkbox'; i.checked = !!on; l.style.marginTop = '8px'; l.appendChild(i); l.appendChild(document.createTextNode(text)); l.input = i; return l; }
     var cNew = chk('A new device appears', al.onNew), cLeft = chk('A device goes offline', al.onLeft), cBack = chk('A device comes back online', al.onBack);
+    var qFrom = el('input'), qTo = el('input'); qFrom.type = 'time'; qTo.type = 'time'; qFrom.value = al.quietFrom || ''; qTo.value = al.quietTo || ''; qFrom.id = 'quietFrom'; qTo.id = 'quietTo';
+    var qBox = el('div'); qBox.style.marginTop = '10px'; qBox.appendChild(el('div', 'dim', 'Quiet hours (optional): no messages between these times. What happens meanwhile is sent as one message when the quiet time ends. Leave both empty to be told at any hour. The server clock now says ' + (r.serverTime || '?') + '.'));
+    var qRow = el('div'); qRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;margin-top:6px'; qFrom.style.cssText = 'width:9.5em;max-width:44%'; qTo.style.cssText = 'width:9.5em;max-width:44%'; qRow.appendChild(document.createTextNode('From ')); qRow.appendChild(qFrom); qRow.appendChild(document.createTextNode(' to ')); qRow.appendChild(qTo);
+    var qClear = el('button', '', 'No quiet hours'); qClear.addEventListener('click', function () { qFrom.value = ''; qTo.value = ''; }); qClear.style.flexBasis = '100%'; qClear.style.maxWidth = '12em'; qRow.appendChild(qClear); qBox.appendChild(qRow);
+    var logBox = el('div'); logBox.id = 'alertLog'; logBox.style.marginTop = '12px'; logBox.appendChild(el('div', 'dim', 'Recent alerts' + (r.alertHeld ? ' (' + r.alertHeld + ' waiting for the quiet time to end)' : '')));
+    if (!r.alertLog || !r.alertLog.length) logBox.appendChild(el('div', 'dim', 'None yet.'));
+    (r.alertLog || []).slice(0, 10).forEach(function (x) { var row = el('div', x.status === 'failed' ? 'bad' : 'dim'); row.style.fontSize = '13px'; row.textContent = ago(Date.now() - x.t) + ' - ' + (x.status === 'held' ? 'kept (quiet hours)' : x.status === 'failed' ? 'NOT sent' : 'sent') + ': ' + x.text + (x.count > 1 ? ' (+' + (x.count - 1) + ' more)' : '') + (x.error ? ' - ' + x.error : ''); logBox.appendChild(row); });
     var alTest = el('button', '', 'Send a test message'); alTest.style.marginTop = '8px';
-    function alertsNow() { return { url: alUrl.value.trim(), format: alFmt.value, onNew: cNew.input.checked, onLeft: cLeft.input.checked, onBack: cBack.input.checked }; }
+    function alertsNow() { return { url: alUrl.value.trim(), format: alFmt.value, onNew: cNew.input.checked, onLeft: cLeft.input.checked, onBack: cBack.input.checked, quietFrom: qFrom.value, quietTo: qTo.value }; }
     alTest.addEventListener('click', function () { alRes.className = 'dim'; alRes.textContent = 'Sending...'; act('alerttest', { alerts: alertsNow() }).then(function (x) { alRes.textContent = x.ok ? (x.message || 'Sent.') : (x.error || 'Not sent.'); alRes.className = x.ok ? 'good' : 'bad'; }).catch(function () { alRes.textContent = 'Could not reach the server.'; alRes.className = 'bad'; }); });
-    [lab('Alert address (leave empty for no alerts)', alUrl), lab('Type', alFmt), cNew, cLeft, cBack, alTest, alRes].forEach(function (x) { card.appendChild(x); });
+    [lab('Alert address (leave empty for no alerts)', alUrl), lab('Type', alFmt), cNew, cLeft, cBack, qBox, alTest, alRes, logBox].forEach(function (x) { card.appendChild(x); });
     card.appendChild(el('h2', '', 'Panels'));
     var pbox = el('div');
     function panelRow(p) {
@@ -694,6 +718,7 @@ function drawSettings() {
       }).catch(function () { msg.textContent = 'Could not reach the server.'; msg.className = 'bad'; });
     });
     card.appendChild(save); card.appendChild(msg); box.appendChild(card);
+    box.appendChild(mapDataBox());
   }).catch(function () { box.textContent = ''; box.appendChild(el('p', 'bad', 'Could not read the settings.')); });
 }
 function drawPanels() {
@@ -718,6 +743,13 @@ function detailRows(d) {
   if (d.vendor) rows.push('Maker: ' + d.vendor);
   if (d.os) rows.push('System: ' + d.os);
   if (d.group) rows.push('Group: ' + d.group);
+  if (d.vlan) rows.push('VLAN: ' + d.vlan);
+  if (d.info) {
+    var bm = [d.info.brand, d.info.model].filter(Boolean).join(' ');
+    if (bm) rows.push('Device: ' + bm);
+    if (d.info.notes) rows.push('Notes: ' + d.info.notes);
+    if (d.info.webUrl) rows.push('Web address: ' + d.info.webUrl);
+  }
   if (d.ports && d.ports.length) rows.push('Open ports: ' + d.ports.map(function (p) { return p.port + (p.service ? ' (' + p.service + ')' : ''); }).join(', '));
   if (d.online && d.onlineSince) rows.push('Online since ' + new Date(d.onlineSince).toLocaleString());
   if (!d.online && d.lastSeen) rows.push('Last seen ' + new Date(d.lastSeen).toLocaleString());
@@ -743,6 +775,70 @@ function editBox(d) {
   });
   [n, g, lab, save, msg].forEach(function (x) { b.appendChild(x); });
   return b;
+}
+function mapDataBox() {
+  var box = el('div', 'card'); box.style.marginTop = '14px'; box.id = 'mapData';
+  box.appendChild(el('b', '', 'Map data: export and import'));
+  box.appendChild(el('div', 'dim', 'Download this server\'s map (names, groups, places, details, cables) as a file that Dashboard Hub Desktop can load with Backup > Import. Or pick a file saved by Dashboard Hub Desktop (Backup > Export) to bring its map here. Only the map and the panel addresses are read from the file; notes and passwords in it are never sent to the server.'));
+  var msg = el('div', 'dim'); msg.id = 'impMsg'; msg.style.marginTop = '8px';
+  var dl = el('button', '', 'Download map data'); dl.id = 'expBtn'; dl.style.marginTop = '8px';
+  dl.addEventListener('click', function () {
+    msg.className = 'dim'; msg.textContent = 'Preparing...';
+    act('exportmap').then(function (r) {
+      if (!r || r.ok === false || r.app !== 'dashboard-hub') { msg.className = 'bad'; msg.textContent = (r && r.error) || 'Could not prepare the file.'; return; }
+      delete r.ok; delete r._status;
+      var blob = new Blob([JSON.stringify(r, null, 2)], { type: 'application/json' }), a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = 'dashboard-hub-map-' + String((S.snap && S.snap.profile && S.snap.profile.name) || 'server').replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40) + '-' + new Date().toISOString().slice(0, 10) + '.json';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+      msg.className = 'good'; msg.textContent = 'Downloaded. In Dashboard Hub Desktop use Backup > Import to load it.';
+    }).catch(function () { msg.className = 'bad'; msg.textContent = 'Could not reach the server.'; });
+  });
+  box.appendChild(dl);
+  var file = el('input'); file.type = 'file'; file.accept = '.json,application/json'; file.id = 'mapFile'; file.style.cssText = 'display:block;margin-top:14px;max-width:100%';
+  var lab0 = el('div', 'dim', 'Import a file'); lab0.style.marginTop = '14px'; box.appendChild(lab0); box.appendChild(file);
+  var prof = el('select'); prof.id = 'impProfile'; prof.hidden = true; prof.style.cssText = 'display:block;margin-top:8px;max-width:100%'; box.appendChild(prof);
+  var picked = null, opts = {};
+  [['names', 'Names', true], ['groups', 'Groups', true], ['positions', 'Places on the map', true], ['info', 'Details (brand, model, notes, web address, VLAN)', true], ['links', 'Cables and links', true], ['ignored', 'Machines that were ignored (hide them here too)', true], ['add', 'Add machines this server has not found yet', true], ['panels', 'Panels (replaces the panels here)', false]].forEach(function (o) {
+    var l = el('label', 'chk'), i = el('input'); i.type = 'checkbox'; i.checked = o[2]; i.id = 'imp-' + o[0]; l.style.marginTop = '6px'; l.appendChild(i); l.appendChild(document.createTextNode(o[1])); opts[o[0]] = i; box.appendChild(l);
+  });
+  var go = el('button', '', 'Import'); go.id = 'impBtn'; go.style.cssText = 'display:block;margin-top:10px'; go.disabled = true; box.appendChild(go);
+  file.addEventListener('change', function () {
+    picked = null; go.disabled = true; prof.hidden = true; prof.textContent = '';
+    var f = file.files && file.files[0]; if (!f) return;
+    if (f.size > 7 * 1024 * 1024) { msg.className = 'bad'; msg.textContent = 'That file is too big.'; return; }
+    var rd = new FileReader();
+    rd.onload = function () {
+      var j = null; try { j = JSON.parse(String(rd.result).replace(/^\uFEFF/, '')); } catch (e) { j = null; }
+      if (!j || typeof j !== 'object' || j.app !== 'dashboard-hub') { msg.className = 'bad'; msg.textContent = 'That is not a Dashboard Hub export file.'; return; }
+      var pr = Array.isArray(j.profiles) ? j.profiles.filter(function (p) { return p && p.network; }) : [];
+      function slim(net) { return net && typeof net === 'object' ? { router: net.router, cidr: net.cidr, devices: net.devices, links: net.links, ignored: net.ignored, groupCircles: net.groupCircles, groupCluster: net.groupCluster } : null; }
+      function sp(list) { return (Array.isArray(list) ? list : []).slice(0, 200).map(function (p) { return { name: p && p.name, url: p && p.url }; }); }
+      picked = { app: 'dashboard-hub', format: 1, activeProfileName: j.activeProfileName, network: slim(j.network), panels: sp(j.panels), profiles: pr.map(function (p) { return { name: p.name, network: slim(p.network), panels: sp(p.panels) }; }) };
+      var n = pr.length ? Object.keys(pr[0].network.devices || {}).length : (j.network ? Object.keys(j.network.devices || {}).length : 0);
+      if (pr.length > 1) { pr.forEach(function (p, ix) { var o = el('option', '', 'Network: ' + (p.name || 'Network') + ' (' + Object.keys(p.network.devices || {}).length + ' machines)'); o.value = String(ix); prof.appendChild(o); }); var ai = pr.findIndex(function (p) { return p.name === j.activeProfileName; }); prof.value = String(ai < 0 ? 0 : ai); prof.hidden = false; }
+      msg.className = 'dim'; msg.textContent = 'File ready: ' + (j.source === 'docker' ? 'saved from a Dashboard Hub server' : 'saved from Dashboard Hub Desktop') + (pr.length === 1 ? ', network "' + pr[0].name + '"' : '') + ', about ' + n + ' machines. Choose what to bring in, then press Import.';
+      go.disabled = false;
+    };
+    rd.onerror = function () { msg.className = 'bad'; msg.textContent = 'Could not read that file.'; };
+    rd.readAsText(f);
+  });
+  go.addEventListener('click', function () {
+    if (!picked) return;
+    var what = {}; Object.keys(opts).forEach(function (k) { what[k] = opts[k].checked; });
+    if (what.panels && !confirm('This replaces the panels on this server with the panels in the file. Continue?')) return;
+    msg.className = 'dim'; msg.textContent = 'Importing...'; go.disabled = true;
+    act('importmap', { data: picked, what: what, profile: prof.hidden ? undefined : Number(prof.value) }).then(function (r) {
+      go.disabled = false;
+      if (!r || r.ok === false) { msg.className = 'bad'; msg.textContent = (r && r.error) || 'Could not import.'; return; }
+      var bits = [r.matched + ' of ' + r.total + ' machines matched'];
+      if (what.names) bits.push(r.names + ' named'); if (what.groups) bits.push(r.groups + ' grouped'); if (what.positions) bits.push(r.moved + ' placed');
+      if (what.info) bits.push(r.info + ' with details'); if (what.links && r.links !== null && r.links !== undefined) bits.push(r.links + ' links'); if (what.ignored && r.hidden) bits.push(r.hidden + ' hidden');
+      if (what.add) bits.push(r.added + ' added'); if (r.skipped) bits.push(r.skipped + ' not on this server');
+      msg.className = 'good'; msg.textContent = 'Done: ' + bits.join(', ') + '.'; S.refit = true; load();
+    }).catch(function () { go.disabled = false; msg.className = 'bad'; msg.textContent = 'Could not reach the server.'; });
+  });
+  box.appendChild(msg);
+  return box;
 }
 function manageBox() {
   var box = el('div', 'card'); box.style.marginTop = '14px';
@@ -812,7 +908,7 @@ function saveLocalPos(key, x, z) { try { var o = localPos(); o[key] = { x: x, z:
 function layout() {
   var s = S.snap; pts = [];
   if (!s) return;
-  var ds = s.devices, minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
+  var ds = s.devices.filter(function (d) { return d.online || d.isRouter || d.self; }), minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;   // only machines that are online are drawn on the map (the list and uptime still show the others)
   if (S.edit === false) { var ov = localPos(); ds.forEach(function (d) { if (ov[d.key]) { d.x = ov[d.key].x; d.z = ov[d.key].z; } }); }
   ds.forEach(function (d) { minX = Math.min(minX, d.x); maxX = Math.max(maxX, d.x); minZ = Math.min(minZ, d.z); maxZ = Math.max(maxZ, d.z); });
   var flat = !(maxX - minX > 0.5 || maxZ - minZ > 0.5);
@@ -856,11 +952,40 @@ function fit3() {
   layout(); var cx = 0, cz = 0, R = 8;
   if (pts.length) { pts.forEach(function (p) { cx += p.x; cz += p.z; }); cx /= pts.length; cz /= pts.length; pts.forEach(function (p) { R = Math.max(R, Math.hypot(p.x - cx, p.z - cz)); }); }
   C3.tx = cx; C3.tz = cz; C3.dist = R * 2.1 + 12;
+  // then look at what is really on the screen: slide the view until the dots sit in the middle and zoom so they fill about 85% of it
+  var z = size(); if (!pts.length || z.w < 50 || z.h < 50) return;
+  for (var i = 0; i < 4; i++) {
+    var x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+    pts.forEach(function (p) { var A = scr(p); x0 = Math.min(x0, A.x); x1 = Math.max(x1, A.x); y0 = Math.min(y0, A.y); y1 = Math.max(y1, A.y); });
+    var f0 = floorAt({ x: z.w / 2, y: z.h / 2 }), f1 = floorAt({ x: (x0 + x1) / 2, y: (y0 + y1) / 2 });
+    if (f0 && f1) { C3.tx += f1.x - f0.x; C3.tz += f1.z - f0.z; }
+    var k = Math.min(z.w * 0.85 / Math.max(40, x1 - x0), z.h * 0.85 / Math.max(40, y1 - y0));
+    C3.dist = Math.max(8, Math.min(1500, C3.dist / k));
+  }
 }
+function pan3(a, b) { var f0 = floorAt(a), f1 = floorAt(b); if (!f0 || !f1) return; C3.tx += f0.x - f1.x; C3.tz += f0.z - f1.z; paint(); }
 function zoom3(f) { C3.dist = Math.max(8, Math.min(1500, C3.dist / f)); paint(); }
 function shade(hex, f) {
   var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || ''); if (!m) return hex;
   return 'rgb(' + [1, 2, 3].map(function (i) { return Math.max(0, Math.min(255, Math.round(parseInt(m[i], 16) * f))); }).join(',') + ')';
+}
+// The coloured circles around groups (same rule and colours as Dashboard Hub Desktop): the middle of the members, the farthest one plus a margin.
+function groupList() {
+  var s = S.snap; if (!s || (s.opts && s.opts.groupCircles === false)) return [];
+  var by = {}; pts.forEach(function (p) { var d = p.d; if (d.isRouter || !d.group) return; (by[d.group] = by[d.group] || []).push(p); });
+  return Object.keys(by).sort().filter(function (n) { return by[n].length >= 2; }).map(function (n) {
+    var l = by[n], cx = 0, cz = 0, r = 0, h = 0, i;
+    l.forEach(function (p) { cx += p.x; cz += p.z; }); cx /= l.length; cz /= l.length;
+    l.forEach(function (p) { r = Math.max(r, Math.hypot(p.x - cx, p.z - cz)); });
+    for (i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) % 360;
+    return { name: n, cx: cx, cz: cz, r: Math.min(Math.max(r + 1.6, 2.2), 400), hue: h };
+  });
+}
+function pill(txt, x, y, font, fg) {
+  ctx.font = font; var w = ctx.measureText(txt).width + 14;
+  ctx.fillStyle = 'rgba(8,12,20,0.78)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x - w / 2, y - 12, w, 22, 8); else ctx.rect(x - w / 2, y - 12, w, 22); ctx.fill();
+  ctx.fillStyle = fg || '#fff'; ctx.textAlign = 'center'; ctx.fillText(txt, x, y + 4);
+  return { l: x - w / 2, r: x + w / 2, t: y - 12, b: y + 10 };
 }
 function paint3() {
   var z = size(); ctx.setTransform(z.dpr, 0, 0, z.dpr, 0, 0); ctx.clearRect(0, 0, z.w, z.h);
@@ -875,13 +1000,20 @@ function paint3() {
     for (i = g0z; i <= g1z; i += 10) { a = proj3(g0x, 0, i); b = proj3(g1x, 0, i); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
     ctx.globalAlpha = 1;
   }
+  var groups = groupList();
+  groups.forEach(function (g) {
+    var t, q; ctx.beginPath();
+    for (t = 0; t <= 72; t++) { q = proj3(g.cx + Math.cos(t / 72 * 6.2832) * g.r, 0, g.cz + Math.sin(t / 72 * 6.2832) * g.r); if (t) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); }
+    ctx.closePath(); ctx.fillStyle = 'hsla(' + g.hue + ',65%,60%,0.2)'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = 'hsl(' + g.hue + ',65%,60%)'; ctx.stroke();
+  });
   var byKey = {}; pts.forEach(function (p) { byKey[p.d.key] = p; });
-  ctx.lineWidth = 1.5; ctx.strokeStyle = css('--dim');
-  (s.links || []).forEach(function (l) { var A = byKey[l.a], B = byKey[l.b]; if (!A || !B) return; var a2 = proj3(A.x, 1, A.z), b2 = proj3(B.x, 1, B.z); ctx.beginPath(); ctx.moveTo(a2.x, a2.y); ctx.lineTo(b2.x, b2.y); ctx.stroke(); });
+  ctx.lineWidth = 1.5; ctx.strokeStyle = css('--dim'); var lineCol = ctx.strokeStyle;
+  (s.links || []).forEach(function (l) { var A = byKey[l.a], B = byKey[l.b]; if (!A || !B) return; var a2 = proj3(A.x, 1, A.z), b2 = proj3(B.x, 1, B.z); ctx.strokeStyle = l.cable ? '#ec4899' : lineCol; ctx.lineWidth = l.cable ? 2.5 : 1.5; ctx.setLineDash(l.wireless ? [6, 5] : []); ctx.beginPath(); ctx.moveTo(a2.x, a2.y); ctx.lineTo(b2.x, b2.y); ctx.stroke(); });
+  ctx.setLineDash([]);
   // camera position in the world, to know which sides of a box face us
   var cy = Math.cos(C3.yaw), sy = Math.sin(C3.yaw), cp = Math.cos(C3.pitch), sp = Math.sin(C3.pitch);
   var oy = cp * 0 - sp * -C3.dist, oz1 = sp * 0 + cp * -C3.dist, camX = cy * 0 - sy * oz1 + C3.tx, camY = oy, camZ = sy * 0 + cy * oz1 + C3.tz;
-  var order = pts.slice().sort(function (a, b) { return Math.hypot(b.x - camX, b.z - camZ) - Math.hypot(a.x - camX, a.z - camZ); });
+  var order = pts.slice().sort(function (a, b) { var d = Math.hypot(b.x - camX, b.z - camZ) - Math.hypot(a.x - camX, a.z - camZ); return Math.abs(d) > 1e-6 ? d : (a.d.key < b.d.key ? -1 : 1); });
   ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.lineJoin = 'round';
   order.forEach(function (p) {
     var d = p.d, sc = d.isRouter ? 1.5 : 1, hw = 1.6 * sc, hh = 2 * sc, hd = 1 * sc, base = d.online ? good : bad;
@@ -894,10 +1026,25 @@ function paint3() {
     if (camX < p.x - hw) face([v.a, v.d, v.h, v.e], shade(base, 0.62));     // left (-x)
     face([v.e, v.f, v.g, v.h], shade(base, 1.1));                           // top
     if (d.self || (S.sel && S.sel === d.key)) { ctx.lineWidth = 3; ctx.strokeStyle = acc; ctx.beginPath(); [v.e, v.f, v.g, v.h].forEach(function (q, i) { if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); }); ctx.closePath(); ctx.stroke(); }
-    var lp = proj3(p.x, 0, p.z), nm = devName(d); if (nm.length > 18) nm = nm.slice(0, 17) + '\u2026';
-    if (pts.length > 60 && lp.k < 16 && !d.isRouter && !d.self && S.sel !== d.key) return;      // a crowd: names appear when you zoom in
-    ctx.fillStyle = text; ctx.fillText(nm, lp.x, lp.y + 14);
   });
+  // Names go on top of all the boxes. The router, this machine and the selected one always get theirs; the rest (nearest first) get theirs unless it would land on another name, so zooming in shows more of them.
+  var placed = [], bgc = css('--bg') || '#111', zl = size(), prevL = S.lab3 || {}, nowL = {}, shown = [];
+  groups.forEach(function (g) { var q = proj3(g.cx, 0, g.cz + g.r); placed.push(pill(g.name, q.x, q.y + 4, 'bold 14px system-ui, sans-serif', '#fff')); });
+  ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'center';
+  var tier = function (p) { return (p.d.isRouter || p.d.self || S.sel === p.d.key) ? 2 : (prevL[p.d.key] ? 1 : 0); };
+  var dist = function (p) { return Math.hypot(p.x - camX, p.z - camZ); };
+  var cands = pts.slice().sort(function (a, b) { var t = tier(b) - tier(a); if (t) return t; var d = dist(a) - dist(b); if (Math.abs(d) > 1e-6) return d; return a.d.key < b.d.key ? -1 : 1; });
+  ctx.lineWidth = 3; ctx.strokeStyle = bgc; ctx.globalAlpha = 1;
+  cands.forEach(function (p) {
+    var d = p.d, lp = proj3(p.x, 0, p.z), nm = devName(d); if (nm.length > 18) nm = nm.slice(0, 17) + '\u2026';
+    var w = ctx.measureText(nm).width, box = { l: lp.x - w / 2 - 3, r: lp.x + w / 2 + 3, t: lp.y + 2, b: lp.y + 19 };
+    var must = d.isRouter || d.self || S.sel === d.key;
+    if (!must && (box.r < 0 || box.l > zl.w || box.b < 0 || box.t > zl.h)) return;
+    if (!must && placed.some(function (q) { return box.l < q.r && box.r > q.l && box.t < q.b && box.b > q.t; })) return;
+    placed.push(box); nowL[d.key] = 1; shown.push(nm);
+    ctx.strokeText(nm, lp.x, lp.y + 14); ctx.fillStyle = text; ctx.fillText(nm, lp.x, lp.y + 14);
+  });
+  S.lab3 = nowL; cv.dhLabelCount = shown.length; cv.dhLabels = shown;
 }
 $('mode3').addEventListener('click', function () {
   S.m3 = !S.m3; try { localStorage.setItem('dh-3d', S.m3 ? '1' : '0'); } catch (e) { /* only this visit */ }
@@ -911,9 +1058,16 @@ function paint() {
   var z = size(); if (!S.view) fitView();
   ctx.setTransform(z.dpr, 0, 0, z.dpr, 0, 0); ctx.clearRect(0, 0, z.w, z.h);
   var s = S.snap; if (!s) return;
+  groupList().forEach(function (g) {
+    var c = toScreen({ x: g.cx, z: g.cz }), rr = g.r * S.view.k;
+    ctx.beginPath(); ctx.arc(c.x, c.y, rr, 0, 6.2832); ctx.fillStyle = 'hsla(' + g.hue + ',65%,60%,0.2)'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = 'hsl(' + g.hue + ',65%,60%)'; ctx.stroke();
+    pill(g.name, c.x, c.y + rr + 2, 'bold 13px system-ui, sans-serif', '#fff');
+  });
+  ctx.textAlign = 'center';
   var byKey = {}; pts.forEach(function (p) { byKey[p.d.key] = p; });
-  ctx.lineWidth = 1.5; ctx.strokeStyle = css('--line');
-  (s.links || []).forEach(function (l) { var a = byKey[l.a], b = byKey[l.b]; if (!a || !b) return; var A = toScreen(a), B = toScreen(b); ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke(); });
+  ctx.lineWidth = 1.5; ctx.strokeStyle = css('--line'); var lineCol = ctx.strokeStyle;
+  (s.links || []).forEach(function (l) { var a = byKey[l.a], b = byKey[l.b]; if (!a || !b) return; var A = toScreen(a), B = toScreen(b); ctx.strokeStyle = l.cable ? '#ec4899' : lineCol; ctx.lineWidth = l.cable ? 2.5 : 1.5; ctx.setLineDash(l.wireless ? [6, 5] : []); ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke(); });
+  ctx.setLineDash([]);
   var good = css('--good'), bad = css('--bad'), text = css('--text'), acc = css('--accent');
   ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'center';
   pts.forEach(function (p) {
@@ -930,7 +1084,7 @@ function paint() {
 }
 function drawMap() {
   var s = S.snap; var on = s ? s.devices.filter(function (d) { return d.online; }).length : 0;
-  $('mapStat').textContent = s ? on + ' online of ' + s.devices.length : '';
+  if (!(S.statHold && Date.now() < S.statHold)) $('mapStat').textContent = s ? on + ' online of ' + s.devices.length : '';
   layout(); if (!S.view || S.refit) { fitView(); if (S.m3) fit3(); S.refit = false; }
   paint(); showDetail();
 }
@@ -942,22 +1096,27 @@ function showDetail() {
   h.appendChild(el('b', '', devName(d) + (d.online ? '' : ' (offline)'))); box.appendChild(h);
   var dd = el('div', 'd'); detailRows(d).forEach(function (t) { dd.appendChild(el('div', '', t)); }); box.appendChild(dd);
 }
+$('scanNow').addEventListener('click', function () {
+  $('mapStat').textContent = 'Scanning...'; S.statHold = Date.now() + 7000;
+  act('scan').then(function (r) { $('mapStat').textContent = r && r.started ? 'Scan started. New devices appear in a few seconds.' : ((r && (r.message || r.error)) || 'Could not start a scan.'); setTimeout(function () { load(); }, 6000); }).catch(function () { $('mapStat').textContent = 'Could not start a scan.'; });
+});
 $('fit').addEventListener('click', function () { if (S.m3) fit3(); else fitView(); paint(); });
 function zoomAt(x, y, f) {
   var v = S.view, nk = Math.max(0.3, Math.min(400, v.k * f)); f = nk / v.k;
   v.tx = x - (x - v.tx) * f; v.ty = y - (y - v.ty) * f; v.k = nk; paint();
 }
 function pos(e) { var r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
-cv.addEventListener('wheel', function (e) { e.preventDefault(); if (S.m3) { zoom3(e.deltaY < 0 ? 1.15 : 1 / 1.15); return; } var p = pos(e); zoomAt(p.x, p.y, e.deltaY < 0 ? 1.15 : 1 / 1.15); }, { passive: false });
+cv.addEventListener('wheel', function (e) { e.preventDefault(); if (S.m3) { zoom3(e.deltaY < 0 ? 1.15 : 1 / 1.15); return; } var z = size(); zoomAt(z.w / 2, z.h / 2, e.deltaY < 0 ? 1.15 : 1 / 1.15); }, { passive: false });   /* the wheel zooms into the middle of the picture, so the map never slides away from you */
 function hitDot(p, max) {
   var best = null, bd = max || 22;
   pts.forEach(function (q) { var A = scr(q), dd = Math.hypot(A.x - p.x, A.y - p.y); if (dd < bd) { bd = dd; best = q; } });
   return best;
 }
+cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 cv.addEventListener('pointerdown', function (e) {
   cv.setPointerCapture(e.pointerId); ptr[e.pointerId] = pos(e);
-  dragInfo = { moved: 0, start: pos(e), pinch: 0, dev: null };
-  if (Object.keys(ptr).length === 1) {
+  dragInfo = { moved: 0, start: pos(e), pinch: 0, dev: null, pan: e.button === 2 || e.shiftKey };
+  if (Object.keys(ptr).length === 1 && !dragInfo.pan) {
     var hit = hitDot(pos(e));
     if (hit) { dragInfo.dev = hit; S.dragging = true; }
   }
@@ -969,7 +1128,7 @@ cv.addEventListener('pointermove', function (e) {
     var o = ptr[ids[0] === String(e.pointerId) ? ids[1] : ids[0]];
     var d0 = Math.hypot(prev.x - o.x, prev.y - o.y), d1 = Math.hypot(cur.x - o.x, cur.y - o.y);
     ptr[e.pointerId] = cur; dragInfo.moved = 99;
-    if (S.m3) { if (d0 > 0) zoom3(d1 / d0); return; }
+    if (S.m3) { pan3({ x: (prev.x + o.x) / 2, y: (prev.y + o.y) / 2 }, { x: (cur.x + o.x) / 2, y: (cur.y + o.y) / 2 }); if (d0 > 0) zoom3(d1 / d0); return; }
     if (d0 > 0) zoomAt((cur.x + o.x) / 2, (cur.y + o.y) / 2, d1 / d0);
     return;
   }
@@ -981,7 +1140,8 @@ cv.addEventListener('pointermove', function (e) {
     if (S.m3) { var f = floorAt(cur); if (f) { q.x = f.x; q.z = f.z; } } else { q.x = (cur.x - S.view.tx) / S.view.k; q.z = (cur.y - S.view.ty) / S.view.k; }
     q.d.x = q.x; q.d.z = q.z; paint(); return;
   }
-  if (S.m3) { C3.yaw += (cur.x - prev.x) * 0.008; C3.pitch = Math.max(0.2, Math.min(1.5, C3.pitch + (cur.y - prev.y) * 0.006)); paint(); return; }
+  if (S.m3 && dragInfo.pan) { pan3(prev, cur); return; }
+  if (S.m3) { C3.yaw -= (cur.x - prev.x) * 0.008; C3.pitch = Math.max(0.2, Math.min(1.5, C3.pitch + (cur.y - prev.y) * 0.006)); paint(); return; }
   S.view.tx += cur.x - prev.x; S.view.ty += cur.y - prev.y; paint();
 });
 function finishDrag() {
@@ -1008,6 +1168,7 @@ $('resetPos').addEventListener('click', function () {
   if (S.edit) act('devices', { op: 'resetlayout' }).then(function () { S.refit = true; load(); });
   else { try { localStorage.removeItem(posKey()); } catch (e) { /* nothing saved */ } S.refit = true; load(); }
 });
+cv.dhGroups = function () { return groupList(); };
 cv.dhDots = function () { return pts.map(function (p) { var A = scr(p); return { key: p.d.key, x: A.x, y: A.y, name: devName(p.d) }; }); };   // lets the tests find the dots
 window.addEventListener('resize', function () { if (S.tab === 'map') { if (S.m3) fit3(); else fitView(); paint(); } });
 
@@ -1024,10 +1185,6 @@ function drawUptime() {
   var r = S.lastUp, lines = $('upLines'), dev = $('upDev'); lines.textContent = ''; dev.textContent = '';
   if (!r || r.empty) { $('upSum').textContent = 'No history yet. Dashboard Hub records it while it is open and scanning.'; return; }
   $('upSum').textContent = r.summary || '';
-  var L = r.lines || [];
-  if (L.length) lines.appendChild(el('h2', '', 'What happened'));
-  L.slice(0, 40).forEach(function (l) { lines.appendChild(el('div', 'line', l.text)); });
-  if (L.length > 40) lines.appendChild(el('p', 'dim', 'And ' + (L.length - 40) + ' more earlier events (see them on the computer).'));
   var span = Math.max(1, r.to - r.from);
   dev.appendChild(el('h2', '', 'Every device'));
   (r.devices || []).forEach(function (x) {
@@ -1041,6 +1198,17 @@ function drawUptime() {
     });
     row.appendChild(bar); dev.appendChild(row);
   });
+  // the log sits below the device bars, in its own scrolling box that can be folded away
+  var L = r.lines || [];
+  if (L.length) {
+    var collapsed = false; try { collapsed = localStorage.getItem('dh-uplog') === '0'; } catch (e) { /* not remembered */ }
+    var head = el('div', 'loghead'), tog = el('button', '', collapsed ? 'Show' : 'Hide'), box = el('div', 'logbox');
+    head.appendChild(el('h2', '', 'What happened (' + L.length + ')')); tog.id = 'logToggle'; head.appendChild(tog); box.id = 'logBox'; box.hidden = collapsed;
+    L.slice(0, 300).forEach(function (l) { box.appendChild(el('div', 'line', l.text)); });
+    if (L.length > 300) box.appendChild(el('p', 'dim', 'And ' + (L.length - 300) + ' more earlier events (see them on the computer).'));
+    tog.addEventListener('click', function () { box.hidden = !box.hidden; tog.textContent = box.hidden ? 'Show' : 'Hide'; try { localStorage.setItem('dh-uplog', box.hidden ? '0' : '1'); } catch (e) { /* not remembered */ } });
+    lines.appendChild(head); lines.appendChild(box);
+  }
 }
 load();
 })();

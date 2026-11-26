@@ -95,7 +95,7 @@
   --tint-warn-s: rgba(245,158,11,0.08);
 }
 @media (prefers-color-scheme: light) {
-:root:not([data-theme="dark"]) {
+:root:not([data-theme="dark"]):not([data-theme="tron"]) {
   --gauge-needle: #0e7490;
   --tick: #5b6578;
   --tick-text: #4b5565;
@@ -288,6 +288,136 @@
   --tint-warn-s: rgba(245,158,11,0.14);
 }
 :root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="tron"] {
+  color-scheme: dark;
+  --tron-cyan: #6ff3ff; --tron-cyan-dim: #1fb6c9; --tron-orange: #ff9a1f; --tron-black: #02070d; --tron-glow: rgba(111,243,255,0.55);
+  --gauge-needle: #ff9a1f;
+  --tick: #1fb6c9;
+  --tick-text: #7fe9f7;
+  --backdrop: rgba(0,6,12,0.78);
+  --bw-bg: rgba(2,10,18,0.96);
+  --code-bg: rgba(0,20,30,0.6);
+  --hov-1: rgba(111,243,255,0.14);
+  --hov-2: rgba(111,243,255,0.09);
+  --sh-mid: rgba(0,0,0,0.6);
+  --sh-strong: rgba(0,0,0,0.75);
+  --tint-ok: rgba(34,238,170,0.14);
+  --tint-sel: rgba(111,243,255,0.2);
+  --tint-warn: rgba(255,154,31,0.16);
+  --tint-warn-s: rgba(255,154,31,0.12);
+  --b-0d1015: #020d10;
+  --b-0e1420: #031216;
+  --b-12151b: #031116;
+  --b-14171c: #031217;
+  --b-14532d: #072732;
+  --b-161a21: #04151a;
+  --b-1a1e26: #04181f;
+  --b-1a2030: #051c24;
+  --b-1a2230: #051c24;
+  --b-1a2530: #051c24;
+  --b-1b1f27: #051920;
+  --b-1b2433: #051e26;
+  --b-1d2a3a: #06212a;
+  --b-1f2937: #062129;
+  --b-1f3b4a: #072833;
+  --b-20252e: #051e26;
+  --b-222834: #062129;
+  --b-232938: #06232c;
+  --b-252b35: #06222b;
+  --b-2a313d: #072732;
+  --b-2a3140: #072933;
+  --b-2a5266: #0a3745;
+  --b-2c3340: #072934;
+  --b-343d50: #093240;
+  --b-35445a: #0a3745;
+  --b-3b2a12: #051d25;
+  --b-4b5563: #0c4354;
+  --f-22c55e: #22c55e;
+  --f-4ade80: #4ade80;
+  --f-6b7587: #53e2f6;
+  --f-7f8aa0: #6de7f7;
+  --f-7fb0ff: #7fb0ff;
+  --f-8a97ad: #7be9f8;
+  --f-8db8ff: #8db8ff;
+  --f-8e99ad: #7ee9f8;
+  --f-8fd19e: #8fd19e;
+  --f-98a2b5: #88ebf9;
+  --f-9db8d9: #a0effa;
+  --f-a9b1c0: #99eefa;
+  --f-aab3c5: #9ceffa;
+  --f-b7c2d6: #aef2fb;
+  --f-c3c9d6: #b5f3fb;
+  --f-c3cbdb: #b8f3fb;
+  --f-c4ccda: #b8f3fb;
+  --f-cbd5e1: #c0f5fc;
+  --f-cfd6e4: #c4f5fc;
+  --f-d5dbe7: #caf6fc;
+  --f-d5f4fb: #d5f8fd;
+  --f-dcfce7: #daf9fd;
+  --f-e6e9ef: #d8f9fd;
+  --f-f0b27a: #ffb66b;
+  --f-f1f5fb: #e6fbfe;
+  --f-f2c36b: #ffb05e;
+  --f-f59e0b: #ff9b33;
+  --f-f87171: #f87171;
+  --f-fbbf24: #ff9b33;
+  --f-fde68a: #ffc588;
+  --l-22c55e: #22c55e;
+  --l-2a3140: #048799;
+  --l-2a3142: #04889a;
+  --l-2c3340: #04889a;
+  --l-2c3341: #04899b;
+  --l-2c3a52: #0496aa;
+  --l-2c6b45: #05aac0;
+  --l-2d6a80: #2d6a80;
+  --l-2f3846: #048fa2;
+  --l-2f4a6b: #05acc3;
+  --l-323a49: #0494a8;
+  --l-36404f: #059cb0;
+  --l-36405a: #05a4ba;
+  --l-38415a: #05a6bc;
+  --l-394150: #059fb4;
+  --l-414b5c: #05aec5;
+  --l-46505f: #05b5cc;
+  --l-475569: #05bdd6;
+  --l-5b6a80: #06dcf9;
+  --l-7a5a1c: #7a5a1c;
+  --l-a16207: #a16207;
+  --l-b45309: #b45309;
+}
+/* Tron Legacy: black glass, neon cyan lines that glow, orange for the one thing that matters. */
+:root[data-theme="tron"] body {
+  background-color: #02070d;
+  background-image:
+    linear-gradient(rgba(111,243,255,0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(111,243,255,0.055) 1px, transparent 1px),
+    radial-gradient(ellipse at 50% -10%, rgba(31,182,201,0.22), transparent 60%);
+  background-size: 40px 40px, 40px 40px, 100% 100%;
+  background-attachment: fixed;
+  color: #d4fbff;
+  font-family: "Orbitron", "Eurostile", "Bank Gothic", "Segoe UI", system-ui, sans-serif;
+  letter-spacing: 0.02em;
+}
+:root[data-theme="tron"] .toolbar { background: rgba(2,10,18,0.92); border-bottom: 1px solid var(--tron-cyan-dim); box-shadow: 0 0 18px rgba(111,243,255,0.35), 0 1px 0 rgba(111,243,255,0.6); }
+:root[data-theme="tron"] .brand { color: var(--tron-cyan); text-transform: uppercase; letter-spacing: 0.22em; text-shadow: 0 0 10px var(--tron-glow), 0 0 22px rgba(111,243,255,0.35); }
+:root[data-theme="tron"] .panel, :root[data-theme="tron"] dialog, :root[data-theme="tron"] .map-side, :root[data-theme="tron"] .server-row {
+  border-color: var(--tron-cyan-dim); box-shadow: 0 0 0 1px rgba(111,243,255,0.12), 0 0 14px rgba(111,243,255,0.22), inset 0 0 18px rgba(31,182,201,0.08); border-radius: 3px;
+}
+:root[data-theme="tron"] dialog { background: #031019; color: #d4fbff; box-shadow: 0 0 0 1px var(--tron-cyan-dim), 0 0 34px rgba(111,243,255,0.4); }
+:root[data-theme="tron"] .panel-head { background: linear-gradient(90deg, rgba(31,182,201,0.28), rgba(2,10,18,0.2)); border-bottom: 1px solid var(--tron-cyan-dim); }
+:root[data-theme="tron"] .panel-title, :root[data-theme="tron"] dialog h3, :root[data-theme="tron"] dialog h4 { color: var(--tron-cyan); text-transform: uppercase; letter-spacing: 0.14em; text-shadow: 0 0 8px rgba(111,243,255,0.5); }
+:root[data-theme="tron"] button { background: rgba(2,18,28,0.85); border: 1px solid var(--tron-cyan-dim); color: var(--tron-cyan); border-radius: 2px; text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px; }
+:root[data-theme="tron"] button:hover { background: rgba(31,182,201,0.3); box-shadow: 0 0 12px var(--tron-glow); color: #fff; }
+:root[data-theme="tron"] button.primary { background: rgba(255,154,31,0.14); border-color: var(--tron-orange); color: var(--tron-orange); box-shadow: 0 0 10px rgba(255,154,31,0.45); }
+:root[data-theme="tron"] button.primary:hover { background: rgba(255,154,31,0.35); box-shadow: 0 0 18px rgba(255,154,31,0.8); color: #fff; }
+:root[data-theme="tron"] .tab.active, :root[data-theme="tron"] .tab[aria-selected="true"], :root[data-theme="tron"] .tab.on { background: rgba(255,154,31,0.16); border-color: var(--tron-orange); color: var(--tron-orange); box-shadow: 0 0 10px rgba(255,154,31,0.5); }
+:root[data-theme="tron"] select, :root[data-theme="tron"] input[type="text"], :root[data-theme="tron"] input[type="password"], :root[data-theme="tron"] textarea { background: #020d15; border: 1px solid var(--tron-cyan-dim); color: #d4fbff; border-radius: 2px; }
+:root[data-theme="tron"] select:focus, :root[data-theme="tron"] input:focus, :root[data-theme="tron"] textarea:focus { outline: none; border-color: var(--tron-cyan); box-shadow: 0 0 10px var(--tron-glow); }
+:root[data-theme="tron"] .map-wrap { background: radial-gradient(ellipse at center, rgba(31,182,201,0.2) 0%, #02070d 78%); }
+:root[data-theme="tron"] ::selection { background: rgba(255,154,31,0.5); color: #fff; }
+:root[data-theme="tron"] ::-webkit-scrollbar { width: 10px; height: 10px; }
+:root[data-theme="tron"] ::-webkit-scrollbar-track { background: #02070d; }
+:root[data-theme="tron"] ::-webkit-scrollbar-thumb { background: var(--tron-cyan-dim); border-radius: 2px; box-shadow: 0 0 6px var(--tron-glow); }
 
 * { box-sizing: border-box; }
 
@@ -629,6 +759,11 @@ button.on { background: #3b82f6; border-color: #3b82f6; color: #fff; }
 .map-side textarea { width: 100%; min-height: 60px; margin-bottom: 6px; resize: vertical; background: var(--b-14171c); color: var(--f-e6e9ef); border: 1px solid var(--l-2c3340); border-radius: 6px; padding: 6px 8px; font: inherit; }
 .map-side .infobox { border: 1px solid var(--l-2c3340); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
 .map-side .infobox p { margin: 0 0 6px; }
+.map-side .identify { margin: 8px 0 4px; }
+.map-side .identify-body { border-top: 1px dashed var(--l-2c3340); margin-top: 8px; padding-top: 4px; }
+.map-side .identify-body h4 { margin: 10px 0 4px; font-size: 12px; }
+.map-side .identify-body ul { margin: 0 0 6px; padding-left: 18px; font-size: 12px; }
+.map-side .identify-body li { margin: 2px 0; }
 
 /* router & switch links */
 .conn-list { margin: 8px 0 12px; display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; }
@@ -928,3 +1063,8 @@ body.view-map .car-arrow, body.view-map .car-info { display: none !important; }
 .hd-row .hd-i{width:auto;margin:0}
 .hd-row .hd-n{flex:1 1 120px;min-width:0;width:auto}
 .hd-row .hd-g{flex:0 0 100px;min-width:0;width:100px}
+.hd-sync{margin:6px 0 10px;padding:8px 10px;border:1px solid var(--l-2a3140,#2a3140);border-radius:8px}
+.hd-sync summary{cursor:pointer;font-weight:600}
+.hd-auto{display:flex;gap:8px;align-items:flex-start;margin:8px 0 2px;font-size:12px}
+.hd-auto input{margin-top:2px;flex:none}
+.hd-sync-opts{display:flex;flex-direction:column;gap:4px;margin:8px 0}

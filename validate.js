@@ -219,6 +219,7 @@ function cleanNetwork(raw) {
     autoSeconds: [0, 15, 30, 60, 120, 300, 600, 1800].includes(live) ? live : 60,
     scannedOnce: raw.scannedOnce === true,
     presenceAt: Number.isFinite(raw.presenceAt) && raw.presenceAt > 0 ? raw.presenceAt : 0,
+    removedReturn: raw.removedReturn === true,       // without this a saved or exported list of ignored machines was dropped when a backup was imported
     devices: devices,
     links: links,
     ignored: ignored

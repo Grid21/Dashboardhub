@@ -96,6 +96,52 @@ function freePort() { return new Promise((res) => { const s = net.createServer()
     check('a bad address is explained', /home network address/.test(await page.textContent('#hdMsg')), await page.textContent('#hdMsg'));
     await page.fill('#hdAddIp', '10.88.0.9'); await page.fill('#hdAddName', 'Garage Pi'); await page.click('#hdAdd'); await sleep(2500);
     check('adding a machine by hand puts it in the list', /Added/.test(await page.textContent('#hdMsg')) && await page.evaluate(() => Array.from(document.querySelectorAll('#hdList .hd-row')).some((x) => x.dataset.key === 'ip:10.88.0.9')), await page.textContent('#hdMsg'));
+    // ----- copy this computer's map to the server -----
+    const srvDev = await page.evaluate(async () => { const l = (await window.hubsApi.list()).list; const r = await window.hubsApi.devices(l[0].id, { op: 'list' }); const d = r.devices.find((x) => !x.isRouter && !x.self && x.ip) || r.devices.find((x) => !x.isRouter && x.ip); return { ip: d.ip, mac: d.mac }; });
+    await page.evaluate((sd) => window.webApi.push({ profile: { id: 'p1', name: 'Test' }, panels: [{ name: 'Grafana', url: 'http://192.168.0.5:3000' }], links: [], devices: [{ key: 'x1', name: 'host', label: 'Copied from Desktop', ip: sd.ip, mac: '', vendor: '', os: '', group: 'Desk group', online: true, isRouter: false, self: false, x: 7, z: 9 }] }), srvDev);
+    await sleep(300);
+    await page.evaluate(() => { document.getElementById('hdSyncBox').open = true; });
+    await page.click('#hsSend'); await sleep(1500);
+    check('"Send to the server" says what was copied', /Done: 1 machine matched, 1 name set, 1 group set, 1 moved/.test(await page.textContent('#hsMsg')), await page.textContent('#hsMsg'));
+    check('and the server really has the name, group and place from this computer', await page.evaluate(async () => { const l = (await window.hubsApi.list()).list; const r = await window.hubsApi.devices(l[0].id, { op: 'list' }); return r.devices.some((d) => d.name === 'Copied from Desktop' && d.group === 'Desk group'); }));
+    await page.uncheck('#hsNames'); await page.uncheck('#hsGroups'); await page.uncheck('#hsPos'); await page.uncheck('#hsInfo'); await page.uncheck('#hsLinks'); await page.uncheck('#hsIgnored');
+    await page.click('#hsSend'); await sleep(500);
+    check('with nothing ticked it asks you to tick something', /at least one/i.test(await page.textContent('#hsMsg')));
+    // the whole saved map: details, cables, ignored machines
+    const net = require(path.join(ROOT, 'validate.js')).cleanNetwork({ router: '192.168.0.1', removedReturn: true, groupCircles: false, devices: {
+      router: { key: 'router', ip: '192.168.0.1' },
+      ['ip:' + srvDev.ip]: { key: 'ip:' + srvDev.ip, ip: srvDev.ip, label: 'Full map name', group: 'Full group', pos: { x: 4, y: 0, z: 5 }, info: { brand: 'Netgear', model: 'GS308', notes: 'rack 1', webUrl: 'http://192.168.0.2/' }, vlan: '9' },
+      },
+      links: [{ a: 'router', b: 'ip:' + srvDev.ip, cable: true }], ignored: ['ip:10.88.0.9'] });
+    await page.evaluate((n) => window.hubNetmap.importData(n, true), net); await sleep(500);
+    await page.check('#hsNames'); await page.check('#hsGroups'); await page.check('#hsPos'); await page.check('#hsInfo'); await page.check('#hsLinks'); await page.check('#hsIgnored');
+    await page.click('#hsSend'); await sleep(1800);
+    check('the message mentions details, links and hidden machines', /1 with details/.test(await page.textContent('#hsMsg')) && /1 link/.test(await page.textContent('#hsMsg')) && /1 hidden/.test(await page.textContent('#hsMsg')), await page.textContent('#hsMsg'));
+    { const lg = await fetch('http://127.0.0.1:' + dkPort + '/api/login', { method: 'POST', body: JSON.stringify({ code: 'server code 1' }) }); const ck = (lg.headers.get('set-cookie') || '').split(';')[0];
+      const st = (await (await fetch('http://127.0.0.1:' + dkPort + '/api/state', { headers: { Cookie: ck } })).json()).snapshot, dv = st.devices.find((d) => d.ip === srvDev.ip);
+      check('the server has the whole saved map: name, group, place, details, cable', dv && dv.name === 'Full map name' && dv.group === 'Full group' && dv.x === 4 && dv.z === 5 && dv.info && dv.info.model === 'GS308' && dv.vlan === '9' && st.links.some((l) => l.cable && l.b === dv.key), JSON.stringify(dv));
+      check('the machine Desktop ignores is hidden on the server', !st.devices.some((d) => d.ip === '10.88.0.9')); }
+    // ----- automatic sending -----
+    const srvName = async () => { const lg = await fetch('http://127.0.0.1:' + dkPort + '/api/login', { method: 'POST', body: JSON.stringify({ code: 'server code 1' }) }); const ck = (lg.headers.get('set-cookie') || '').split(';')[0]; const st = (await (await fetch('http://127.0.0.1:' + dkPort + '/api/state', { headers: { Cookie: ck } })).json()).snapshot; const dv = st.devices.find((d) => d.ip === srvDev.ip); return dv && dv.name; };
+    const rename = (nm) => page.evaluate(([ip, n]) => { const e = window.hubNetmap.exportData(); e.devices['ip:' + ip].label = n; window.hubNetmap.importData(e, true); }, [srvDev.ip, nm]);
+    check('automatic sending starts switched off', !(await page.isChecked('#hsAuto')));
+    await rename('Auto name one');
+    await page.check('#hsAuto'); await sleep(3500);
+    check('switching it on sends the map right away and says so', /Sent automatically/.test(await page.textContent('#hsAutoMsg')), await page.textContent('#hsAutoMsg'));
+    check('the server has the new name', (await srvName()) === 'Auto name one', await srvName());
+    check('the choice is remembered in the server list', await page.evaluate(async () => (await window.hubsApi.list()).list.some((h) => h.auto === true)));
+    await rename('Auto name two'); await page.evaluate(() => window.__hubAutoRun(false)); await sleep(2500);
+    check('a later change is sent too', (await srvName()) === 'Auto name two', await srvName());
+    await rename('Not sent');
+    await page.uncheck('#hsAuto'); await sleep(500); await page.evaluate(() => window.__hubAutoRun(false)); await sleep(1500);
+    check('when switched off nothing more is sent', (await srvName()) === 'Auto name two');
+    check('a map of a different network is not sent', await (async () => {
+      await rename('Auto name two');
+      await page.evaluate(() => { const e = window.hubNetmap.exportData(); Object.keys(e.devices).forEach((k) => { if (k !== 'router') { const d = e.devices[k]; d.ip = '10.200.0.' + (1 + Object.keys(e.devices).indexOf(k)); d.label = 'Elsewhere'; } }); window.hubNetmap.importData(e, true); });
+      await page.check('#hsAuto'); await sleep(3000);
+      return (await srvName()) === 'Auto name two' && /different network/.test(await page.textContent('#hsAutoMsg'));
+    })(), await page.textContent('#hsAutoMsg'));
+    await page.uncheck('#hsAuto'); await sleep(300);
     await page.click('#hdClose'); await sleep(200);
   }
   // page not reachable

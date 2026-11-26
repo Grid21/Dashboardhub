@@ -215,8 +215,30 @@
   }
   async function openDev(h) {
     devHub = h; $('hdTitle').textContent = 'Devices of ' + h.name; dmsg('Loading...');
+    $('hsAuto').checked = !!h.auto; $('hsAutoMsg').textContent = h.auto ? (autoMsgs[h.id] || 'On. The first automatic send happens shortly after Dashboard Hub starts or when the map changes.') : '';
     if (await loadDev()) { dmsg(''); if (!devDlg.open) devDlg.showModal(); } else { const st = document.querySelector('#hubsList .hint'); if (st) st.textContent = $('hdMsg').textContent; }
   }
+  $('hsSend').addEventListener('click', async () => {
+    if (!devHub) return;
+    const m = $('hsMsg'); const what = { names: $('hsNames').checked, groups: $('hsGroups').checked, positions: $('hsPos').checked, add: $('hsAdd').checked, panels: $('hsPanels').checked, info: $('hsInfo').checked, links: $('hsLinks').checked, ignored: $('hsIgnored').checked };
+    if (!what.names && !what.groups && !what.positions && !what.add && !what.panels && !what.info && !what.links && !what.ignored) { m.className = 'hint bad'; m.textContent = 'Tick at least one thing to send.'; return; }
+    if (what.panels && !confirm('This replaces the panels on the server with the panels of this computer. Continue?')) return;
+    m.className = 'hint'; m.textContent = 'Sending...';
+    let net = null; try { net = window.hubNetmap ? window.hubNetmap.exportData() : null; } catch (e) { net = null; }
+    const r = await api.sync(devHub.id, what, net);
+    if (!r || r.ok === false) { m.className = 'hint bad'; m.textContent = (r && r.error) || 'Could not send.'; return; }
+    const bits = [r.matched + ' machine' + (r.matched === 1 ? '' : 's') + ' matched'];
+    if (what.names) bits.push(r.names + ' name' + (r.names === 1 ? '' : 's') + ' set');
+    if (what.groups) bits.push(r.groups + ' group' + (r.groups === 1 ? '' : 's') + ' set');
+    if (what.positions) bits.push(r.moved + ' moved');
+    if (what.info) bits.push((r.info || 0) + ' with details');
+    if (what.links && r.links !== null && r.links !== undefined) bits.push(r.links + ' link' + (r.links === 1 ? '' : 's'));
+    if (what.ignored && r.hidden) bits.push(r.hidden + ' hidden');
+    if (what.add) bits.push(r.added + ' added');
+    if (r.panels !== null && r.panels !== undefined) bits.push(r.panels + ' panel' + (r.panels === 1 ? '' : 's'));
+    if (r.skipped) bits.push(r.skipped + ' not on the server');
+    m.className = 'hint ok'; m.textContent = 'Done: ' + bits.join(', ') + '.'; await loadDev();
+  });
   $('hdClose').addEventListener('click', () => devDlg.close());
   $('hdSave').addEventListener('click', async () => {
     if (!devHub) return;
@@ -331,4 +353,52 @@
     say(r.kept === false ? 'Saved until Dashboard Hub closes (this computer cannot encrypt codes).' : 'Saved.', true);
     resetForm(); list = r.list || []; draw();
   });
+  // ---------- keep a server's map up to date automatically ----------
+  // The server keeps what it was sent, so when this computer is away (on the go) the server still shows your layout.
+  const AUTO_WHAT = { names: true, groups: true, positions: true, add: false, panels: false, info: true, links: true, ignored: true };
+  const autoMsgs = {}; let autoBusy = false, autoTimer = null; const autoSig = {};
+  function autoSignature(net) {
+    const keys = Object.keys(net.devices).sort();
+    return JSON.stringify([keys.map((k) => { const d = net.devices[k]; return [k, d.label || '', d.group || '', d.pos ? [Math.round(d.pos.x * 100), Math.round(d.pos.z * 100)] : null, d.info || null, d.vlan || '']; }),
+      (net.links || []).map((l) => [l.a, l.b, l.cable === true, l.wireless === true]).sort(), (net.ignored || []).slice().sort(), net.groupCircles !== false, net.groupCluster !== false]);
+  }
+  function autoSay(id, text) { autoMsgs[id] = text; if (devHub && devHub.id === id && $('hsAutoMsg')) $('hsAutoMsg').textContent = text; }
+  async function autoRun(force) {
+    if (autoBusy) return; autoBusy = true;
+    try {
+      const r = await api.list(); const hubs = ((r && r.list) || []).filter((h) => h.auto);
+      if (!hubs.length) return;
+      let net = null; try { net = window.hubNetmap ? window.hubNetmap.exportData() : null; } catch (e) { net = null; }
+      if (!net || !net.devices || Object.keys(net.devices).length < 2) return;
+      const sig = autoSignature(net);
+      for (const h of hubs) {
+        if (!force && autoSig[h.id] === sig) continue;
+        const lst = await api.devices(h.id, { op: 'list' });
+        if (!lst || lst.ok === false) { autoSay(h.id, 'The server could not be reached. It will try again in a few minutes.'); continue; }
+        // only send when this computer is on the same network as the server (the machines must match), so a trip to another network does not scramble the server's map
+        const theirMac = new Set((lst.devices || []).map((d) => String(d.mac || '').toLowerCase()).filter(Boolean)), theirIp = new Set((lst.devices || []).filter((d) => !d.mac && d.ip).map((d) => d.ip));
+        const mine = Object.keys(net.devices).map((k) => net.devices[k]).filter((d) => d && !d.isRouter && (d.mac || d.ip));
+        const hit = mine.filter((d) => (d.mac && theirMac.has(String(d.mac).toLowerCase())) || (!d.mac && d.ip && theirIp.has(d.ip)) || (d.ip && theirIp.has(d.ip))).length;
+        const theirCount = theirMac.size + theirIp.size;
+        if (!(hit >= 1 && hit >= Math.min(2, mine.length) && hit * 5 >= Math.min(mine.length, theirCount))) { autoSig[h.id] = sig; autoSay(h.id, 'Not sent: this computer’s map is for a different network than the server’s. The server keeps its last map.'); continue; }
+        const x = await api.sync(h.id, AUTO_WHAT, net);
+        if (!x || x.ok === false) { autoSay(h.id, 'Could not send: ' + ((x && x.error) || 'unknown problem') + '. It will try again in a few minutes.'); continue; }
+        autoSig[h.id] = sig; autoSay(h.id, 'Sent automatically at ' + new Date().toLocaleTimeString() + ' (' + x.matched + ' machines matched).');
+      }
+    } catch (e) { /* try again later */ } finally { autoBusy = false; }
+  }
+  function autoSoon(ms) { if (autoTimer) clearTimeout(autoTimer); autoTimer = setTimeout(() => { autoTimer = null; autoRun(false); }, ms); }
+  window.addEventListener('hub-map-changed', () => autoSoon(20000));
+  setTimeout(() => autoRun(false), 25000);
+  setInterval(() => autoRun(false), 5 * 60000);
+  window.__hubAutoRun = autoRun;
+  $('hsAuto').addEventListener('change', async () => {
+    if (!devHub) return; const on = $('hsAuto').checked;
+    const r = await api.auto(devHub.id, on);
+    if (!r || !r.ok) { $('hsAuto').checked = !on; $('hsAutoMsg').textContent = (r && r.error) || 'Could not change that.'; return; }
+    devHub.auto = on; list = r.list || list;
+    if (on) { $('hsAutoMsg').textContent = 'Sending now...'; await autoRun(true); if (autoMsgs[devHub.id]) $('hsAutoMsg').textContent = autoMsgs[devHub.id]; }
+    else $('hsAutoMsg').textContent = 'Automatic sending is off.';
+  });
+
 })();
